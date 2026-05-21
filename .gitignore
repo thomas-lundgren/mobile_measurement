@@ -34,3 +34,6 @@ __pycache__/
 spikes/**/logs/
 spikes/**/logs_*/
 spikes/**/*.log
+
+# Built native libs (rebuilt via cargo-ndk)
+**/jniLibs/**/*.so
