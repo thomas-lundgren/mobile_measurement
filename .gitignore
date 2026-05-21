@@ -1,0 +1,36 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local env
+.env
+.env.local
+
+# Android / Gradle
+**/.gradle/
+**/build/
+**/local.properties
+**/*.jks
+**/*.keystore
+
+# Spike runtime artifacts
+spikes/**/logs/
+spikes/**/logs_*/
+spikes/**/*.log

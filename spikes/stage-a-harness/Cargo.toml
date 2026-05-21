@@ -1,0 +1,11 @@
+[package]
+name = "stage-a-harness"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "spike-peer"
+path = "peer.rs"
+
+[dependencies]
+fieldtest-core = { path = "../../core" }
