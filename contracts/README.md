@@ -49,9 +49,10 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
 
 | Contract | State |
 |---|---|
-| `versions/versions.yaml` | drafted (this commit) |
-| `enums/enums.yaml` | drafted (this commit) |
-| `packets/` | pending — `core/packet.rs` already implements the 20-byte probe codec; promote to a layout table + golden vectors |
+| `versions/versions.yaml` | drafted |
+| `enums/enums.yaml` | drafted |
+| `packets/` | drafted — Probe v1 (`0x01`) and Realtime v1 (`0x02`) with `(pkt_t, ver)` framing + TLV tail for forward compat. `core/src/packet.rs` (Stage-A spike code, unframed 20-byte probe) needs Phase-1 update to match. |
+| `testvectors/packets/` | drafted — `probe_v1.json`, `realtime_v1.json`; round-trip verified |
 | `schemas/`, `parquet/` | pending — formalise from `core/log_writer.rs` |
 | `openapi/` | pending — wire `utoipa` into `server/` in Phase 1; replaces `planning/auth_openapi_sketch.yaml` |
 | `testvectors/auth_signing/` | pending — cross-platform ECDSA round-trip vector |

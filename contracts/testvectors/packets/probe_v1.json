@@ -1,0 +1,24 @@
+{
+  "packet_type": "Probe",
+  "version": 1,
+  "cases": [
+    {
+      "name": "basic",
+      "decoded": {
+        "flow_id": 42,
+        "sequence_number": 1234567890,
+        "send_mono_ns": 98765432100
+      },
+      "hex": "01010000002a00000000499602d200000016fee0e524"
+    },
+    {
+      "name": "all-zeros",
+      "decoded": {
+        "flow_id": 0,
+        "sequence_number": 0,
+        "send_mono_ns": 0
+      },
+      "hex": "01010000000000000000000000000000000000000000"
+    }
+  ]
+}

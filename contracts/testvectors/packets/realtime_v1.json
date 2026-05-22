@@ -1,0 +1,29 @@
+{
+  "packet_type": "Realtime",
+  "version": 1,
+  "cases": [
+    {
+      "name": "basic",
+      "decoded": {
+        "flow_id": 7,
+        "sequence_number": 42,
+        "send_mono_ns": 1000000000,
+        "send_utc_ns": 1747900000000000000
+      },
+      "hex": "020100000007000000000000002a000000003b9aca001841c9ca0ae7c000",
+      "notes": "send_utc_ns ~= 2025-05-22T07:46:40Z; mono_ns = 1.0s"
+    },
+    {
+      "name": "padded-to-64-bytes",
+      "decoded": {
+        "flow_id": 1,
+        "sequence_number": 0,
+        "send_mono_ns": 0,
+        "send_utc_ns": 0
+      },
+      "trailing_pad_bytes": 34,
+      "hex": "02010000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "notes": "Realtime packet padded to a 64-byte target via 34 trailing zero bytes. Receivers ignore trailing bytes beyond core_size (28)."
+    }
+  ]
+}
