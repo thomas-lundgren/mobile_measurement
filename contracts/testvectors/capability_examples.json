@@ -1,0 +1,65 @@
+{
+  "schema": "../schemas/capability.schema.json",
+  "description": "Capability examples. Pixel 9 Pro baseline is the reference per CLAUDE.md; extended devices may set more flags true.",
+  "examples": [
+    {
+      "name": "pixel_9_pro_baseline",
+      "capability": {
+        "radio": {
+          "serving_cell": ["pci", "nci", "tac", "nrarfcn", "rsrp", "rsrq", "sinr"],
+          "neighbor_cells": true,
+          "lte_fallback": true,
+          "cqi": false,
+          "mcs": false,
+          "bler": false,
+          "harq": false,
+          "drx": false,
+          "bwp": false,
+          "mimo_layers": false,
+          "tx_power": false
+        },
+        "qos": {
+          "5qi": false,
+          "qfi": false,
+          "slice_info": false
+        },
+        "mobility": {
+          "explicit_ho_events": false,
+          "rrc_state": false,
+          "beam_switch": false
+        },
+        "timestamp_sources": ["mono", "utc", "gps"]
+      }
+    },
+    {
+      "name": "extended_oem_diag",
+      "notes": "Hypothetical rooted / OEM-diag device — turns on cqi/mcs/bler and explicit handover events. Used to verify the schema accepts the extended set, not as a real device profile.",
+      "capability": {
+        "radio": {
+          "serving_cell": ["pci", "nci", "tac", "nrarfcn", "rsrp", "rsrq", "sinr"],
+          "neighbor_cells": true,
+          "lte_fallback": true,
+          "cqi": true,
+          "mcs": true,
+          "bler": true,
+          "harq": false,
+          "drx": false,
+          "bwp": false,
+          "mimo_layers": false,
+          "tx_power": false
+        },
+        "qos": {
+          "5qi": false,
+          "qfi": false,
+          "slice_info": false
+        },
+        "mobility": {
+          "explicit_ho_events": true,
+          "rrc_state": true,
+          "beam_switch": false
+        },
+        "timestamp_sources": ["mono", "utc", "gps"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/capability.schema.json",
+  "title": "Capability",
+  "description": "What a device CAN do — reported on /devices/register each session. The server uses this to compute the effective logging_config: effective = intersection(plan_profile, capability) + per-device overrides (invariant 3). Per remediation 1.4, the legacy `supported_features` summary is removed; this schema is the sole source.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["radio", "qos", "mobility", "timestamp_sources"],
+  "properties": {
+    "radio":    { "$ref": "#/$defs/RadioCapability" },
+    "qos":      { "$ref": "#/$defs/QosCapability" },
+    "mobility": { "$ref": "#/$defs/MobilityCapability" },
+    "timestamp_sources": {
+      "type": "array",
+      "items": { "enum": ["mono", "utc", "gps"] },
+      "uniqueItems": true,
+      "minItems": 1,
+      "description": "Available clock sources on this device. mono and utc are universally present; gps presence depends on hardware/permissions."
+    }
+  },
+
+  "$defs": {
+
+    "RadioCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serving_cell"],
+      "properties": {
+        "serving_cell": {
+          "type": "array",
+          "items": { "enum": ["pci", "nci", "tac", "nrarfcn", "rsrp", "rsrq", "sinr"] },
+          "uniqueItems": true,
+          "description": "Per-sample fields the device can report for the serving cell."
+        },
+        "neighbor_cells": { "type": "boolean", "default": false },
+        "lte_fallback":   { "type": "boolean", "default": false },
+        "cqi":            { "type": "boolean", "default": false },
+        "mcs":            { "type": "boolean", "default": false },
+        "bler":           { "type": "boolean", "default": false },
+        "harq":           { "type": "boolean", "default": false },
+        "drx":            { "type": "boolean", "default": false },
+        "bwp":            { "type": "boolean", "default": false },
+        "mimo_layers":    { "type": "boolean", "default": false },
+        "tx_power":       { "type": "boolean", "default": false }
+      },
+      "description": "Out of MVP scope on the Pixel 9 Pro (per CLAUDE.md): cqi/mcs/bler/harq/drx/bwp/mimo_layers/tx_power — all default false. Extended-capability devices (rooted, OEM diag builds) may set them true."
+    },
+
+    "QosCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "5qi":        { "type": "boolean", "default": false },
+        "qfi":        { "type": "boolean", "default": false },
+        "slice_info": { "type": "boolean", "default": false }
+      },
+      "description": "All false on Pixel 9 Pro baseline; out of MVP scope."
+    },
+
+    "MobilityCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "explicit_ho_events": {
+          "type": "boolean", "default": false,
+          "description": "If false, handovers are derived retrospectively from PCI/NCI changes in radio.parquet."
+        },
+        "rrc_state":   { "type": "boolean", "default": false },
+        "beam_switch": { "type": "boolean", "default": false }
+      }
+    }
+  }
+}

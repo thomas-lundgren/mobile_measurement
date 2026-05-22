@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/logging_config.schema.json",
+  "title": "LoggingConfig",
+  "description": "What a device WILL log — the resolved profile the server pushes to one device for one session (or one test, when used as logging_config_override). The shape mirrors Capability's feature groups, but every value here MUST be implementable given the device's reported capability: the server enforces effective = intersection(plan_profile, capability) + per-device overrides (invariant 3). The UE only interprets this config; it does not negotiate. Carried with a monotonic `version` so the device can detect drift and the server can push SET_LOGGING_CONFIG when needed.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "radio", "qos", "mobility", "events", "gps", "clock_calibration_interval_sec"],
+  "properties": {
+    "version": {
+      "type": "integer", "minimum": 1,
+      "description": "Server-assigned monotonic version of this config. The UE reports its current `logging_config_version` on every status payload; the server pushes a SET_LOGGING_CONFIG command when the device's value lags."
+    },
+    "radio":    { "$ref": "#/$defs/RadioLogging" },
+    "qos":      { "$ref": "#/$defs/QosLogging" },
+    "mobility": { "$ref": "#/$defs/MobilityLogging" },
+    "events": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["TEST_START", "TEST_STOP", "SIGNAL_LOSS_START", "SIGNAL_LOSS_END"]
+      },
+      "description": "Event types to write live into events.parquet. Restricted to logged-live events (see enums.yaml event_type_provenance.logged_live); HANDOVER / COVERAGE_GAP / BAND_CHANGE are derived in post-processing and not configurable here."
+    },
+    "gps": {
+      "type": "boolean",
+      "description": "Whether to sample GPS into gps.parquet."
+    },
+    "clock_calibration_interval_sec": {
+      "type": "integer", "minimum": 1, "maximum": 3600,
+      "description": "Cadence of clock-calibration samples written to clock.parquet (mono / utc / optionally gps_utc tuples)."
+    }
+  },
+
+  "$defs": {
+
+    "RadioLogging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serving_cell"],
+      "properties": {
+        "serving_cell": {
+          "type": "array",
+          "items": { "enum": ["pci", "nci", "tac", "nrarfcn", "rsrp", "rsrq", "sinr"] },
+          "uniqueItems": true,
+          "description": "Server-selected subset of capability.radio.serving_cell. MUST be a subset of what the device reported."
+        },
+        "neighbor_cells": { "type": "boolean", "default": false },
+        "lte_fallback":   { "type": "boolean", "default": false },
+        "cqi":            { "type": "boolean", "default": false },
+        "mcs":            { "type": "boolean", "default": false },
+        "bler":           { "type": "boolean", "default": false },
+        "harq":           { "type": "boolean", "default": false },
+        "drx":            { "type": "boolean", "default": false },
+        "bwp":            { "type": "boolean", "default": false },
+        "mimo_layers":    { "type": "boolean", "default": false },
+        "tx_power":       { "type": "boolean", "default": false }
+      }
+    },
+
+    "QosLogging": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "5qi":        { "type": "boolean", "default": false },
+        "qfi":        { "type": "boolean", "default": false },
+        "slice_info": { "type": "boolean", "default": false }
+      }
+    },
+
+    "MobilityLogging": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "explicit_ho_events": { "type": "boolean", "default": false },
+        "rrc_state":          { "type": "boolean", "default": false },
+        "beam_switch":        { "type": "boolean", "default": false }
+      }
+    }
+  }
+}

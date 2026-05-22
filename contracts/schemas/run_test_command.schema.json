@@ -23,8 +23,8 @@
       "$ref": "https://measurement-platform/contracts/schemas/test_plan.schema.json"
     },
     "logging_config_override": {
-      "description": "Optional per-test override applied on top of the device's currently effective LoggingConfig. The override is the intersection-with-capability rule applied at resolve_effective_config() time (invariant 3). Schema definition pending — capability + LoggingConfig schemas are not yet authored.",
-      "type": "object"
+      "$ref": "https://measurement-platform/contracts/schemas/logging_config.schema.json",
+      "description": "Optional per-test logging config. Replaces (not merges with) the device's currently effective LoggingConfig for the duration of this test. The server still enforces effective ⊆ capability (invariant 3) before sending."
     }
   }
 }

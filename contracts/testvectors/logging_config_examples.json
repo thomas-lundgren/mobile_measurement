@@ -1,0 +1,50 @@
+{
+  "schema": "../schemas/logging_config.schema.json",
+  "description": "Resolved logging_config examples that the server would push for the matching capability profiles in capability_examples.json.",
+  "examples": [
+    {
+      "name": "pixel_9_pro_full",
+      "notes": "Server enables everything the Pixel 9 Pro baseline can do. effective = intersection(plan_profile, capability) with plan_profile asking for the full feature set.",
+      "config": {
+        "version": 1,
+        "radio": {
+          "serving_cell": ["pci", "nci", "tac", "nrarfcn", "rsrp", "rsrq", "sinr"],
+          "neighbor_cells": true,
+          "lte_fallback": true,
+          "cqi": false,
+          "mcs": false,
+          "bler": false,
+          "harq": false,
+          "drx": false,
+          "bwp": false,
+          "mimo_layers": false,
+          "tx_power": false
+        },
+        "qos": { "5qi": false, "qfi": false, "slice_info": false },
+        "mobility": { "explicit_ho_events": false, "rrc_state": false, "beam_switch": false },
+        "events": ["TEST_START", "TEST_STOP", "SIGNAL_LOSS_START", "SIGNAL_LOSS_END"],
+        "gps": true,
+        "clock_calibration_interval_sec": 30
+      }
+    },
+    {
+      "name": "pixel_9_pro_low_overhead",
+      "notes": "Operator-trimmed profile for battery-/storage-sensitive runs: drop neighbor cells, drop GPS, lengthen clock calibration. Still well within capability.",
+      "config": {
+        "version": 7,
+        "radio": {
+          "serving_cell": ["pci", "nci", "rsrp", "rsrq"],
+          "neighbor_cells": false,
+          "lte_fallback": true,
+          "cqi": false, "mcs": false, "bler": false, "harq": false,
+          "drx": false, "bwp": false, "mimo_layers": false, "tx_power": false
+        },
+        "qos": { "5qi": false, "qfi": false, "slice_info": false },
+        "mobility": { "explicit_ho_events": false, "rrc_state": false, "beam_switch": false },
+        "events": ["TEST_START", "TEST_STOP"],
+        "gps": false,
+        "clock_calibration_interval_sec": 120
+      }
+    }
+  ]
+}
