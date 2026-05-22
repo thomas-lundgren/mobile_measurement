@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/test_plan.schema.json",
+  "title": "TestPlan",
+  "description": "A test plan is the runtime recipe for one test: a named, versioned set of flows with a wall-clock duration. The plan is embedded verbatim into header.json on both nodes so analysis can reconstruct what was run. Server-side, the same structure is the payload core of RUN_TEST (see run_test_command.schema.json).",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "version", "duration_sec", "flows"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9_]+$",
+      "description": "Human-readable plan identifier, e.g. \"commute_v1\". Recorded in header.json. Lowercase + underscores so it round-trips through file paths."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Plan version. Bump when the plan's flow set or per-flow parameters change. Lets analysis distinguish results from different revisions of the same named plan."
+    },
+    "duration_sec": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400,
+      "description": "Total test duration. All flows share this duration; per-flow shorter durations are not modeled in v1."
+    },
+    "flows": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "description": "Ordered list of flows. flow_id values MUST be unique within the plan.",
+      "items": { "$ref": "#/$defs/Flow" }
+    }
+  },
+
+  "$defs": {
+
+    "Flow": {
+      "description": "Discriminated by `type`. server_port is the port the UE connects to / sends to (invariant 5: UE always initiates). Allocated by test-control before RUN_TEST is sent (remediation 2.8).",
+      "oneOf": [
+        { "$ref": "#/$defs/ProbeFlow" },
+        { "$ref": "#/$defs/RealtimeUdpFlow" },
+        { "$ref": "#/$defs/BulkTcpFlow" }
+      ]
+    },
+
+    "ProbeFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow_id", "type", "server_port", "rate_pps"],
+      "properties": {
+        "flow_id":  { "$ref": "#/$defs/FlowId" },
+        "type":     { "const": "probe" },
+        "server_port": { "$ref": "#/$defs/Port" },
+        "rate_pps": {
+          "type": "integer", "minimum": 1, "maximum": 10000,
+          "description": "Probe send rate. The mobile sends; the server echoes."
+        },
+        "packet_size_bytes": {
+          "type": "integer", "minimum": 22, "maximum": 1472,
+          "default": 22,
+          "description": "On-wire UDP payload size. Minimum 22 = ProbePacket v1 header+core (see contracts/packets/probe.md). Padding to a larger size uses trailing zero bytes."
+        }
+      },
+      "description": "UDP echo probe. Server-hosted echoer in v1 (UE-hosted echoer would invert invariant 5's initiation flow and is out of scope)."
+    },
+
+    "RealtimeUdpFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow_id", "type", "direction", "server_port", "rate_pps", "packet_size_bytes"],
+      "properties": {
+        "flow_id":  { "$ref": "#/$defs/FlowId" },
+        "type":     { "const": "realtime_udp" },
+        "direction": { "$ref": "#/$defs/UnidirectionalDirection" },
+        "server_port": { "$ref": "#/$defs/Port" },
+        "rate_pps": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "packet_size_bytes": {
+          "type": "integer", "minimum": 30, "maximum": 1472,
+          "description": "On-wire UDP payload size. Minimum 30 = RealtimePacket v1 header+core; remaining bytes are trailing-zero padding."
+        }
+      },
+      "description": "Fixed-rate unidirectional UDP. For Bidirectional traffic, define two flows (one FromServer, one ToServer) with distinct flow_id."
+    },
+
+    "BulkTcpFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow_id", "type", "direction", "server_port"],
+      "properties": {
+        "flow_id":  { "$ref": "#/$defs/FlowId" },
+        "type":     { "const": "bulk_tcp" },
+        "direction": { "$ref": "#/$defs/UnidirectionalDirection" },
+        "server_port": { "$ref": "#/$defs/Port" },
+        "target_bytes": {
+          "type": "integer", "minimum": 1,
+          "description": "Optional byte cap. If omitted, the flow runs until the plan duration elapses."
+        }
+      },
+      "description": "Bulk-throughput TCP. Bidirectional is modeled as two flows on separate connections (remediation 2.2)."
+    },
+
+    "FlowId": {
+      "type": "integer", "minimum": 1, "maximum": 65535,
+      "description": "Plan-scoped flow identifier. Unique within a TestPlan. Carried verbatim in the wire packet header (u32 on the wire — narrower here for schema sanity)."
+    },
+
+    "Port": {
+      "type": "integer", "minimum": 1024, "maximum": 65535,
+      "description": "Server-side TCP/UDP port the UE connects to / sends to. Allocated by test-control."
+    },
+
+    "UnidirectionalDirection": {
+      "type": "string",
+      "enum": ["FromServer", "ToServer"],
+      "description": "Bidirectional intentionally absent: model bidirectional traffic as two flows."
+    }
+  },
+
+  "examples": [
+    {
+      "name": "probe_only_v1",
+      "version": 1,
+      "duration_sec": 60,
+      "flows": [
+        { "flow_id": 1, "type": "probe", "server_port": 41000, "rate_pps": 10, "packet_size_bytes": 22 }
+      ]
+    }
+  ]
+}

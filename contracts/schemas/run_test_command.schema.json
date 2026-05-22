@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/run_test_command.schema.json",
+  "title": "RunTestPayload",
+  "description": "Payload for the RUN_TEST command (see contracts/enums/enums.yaml). Delivered to the device via GET /api/v1/devices/{device_id}/command and inflated by test-control immediately before the device's logger state transitions PREPARING -> RUNNING_TEST.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["test_id", "server_host", "test_plan"],
+  "properties": {
+    "test_id": {
+      "type": "string",
+      "pattern": "^tst_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "ULID-prefixed test identifier. Server-assigned. Recorded in header.json and joined onto every Parquet row."
+    },
+    "server_host": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "description": "Hostname or IP literal the UE connects to / sends to for every flow in this test. A single host per test; per-flow distinction is by port (see TestPlan.flows[].server_port)."
+    },
+    "test_plan": {
+      "$ref": "https://measurement-platform/contracts/schemas/test_plan.schema.json"
+    },
+    "logging_config_override": {
+      "description": "Optional per-test override applied on top of the device's currently effective LoggingConfig. The override is the intersection-with-capability rule applied at resolve_effective_config() time (invariant 3). Schema definition pending — capability + LoggingConfig schemas are not yet authored.",
+      "type": "object"
+    }
+  }
+}

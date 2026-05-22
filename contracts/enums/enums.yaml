@@ -74,11 +74,15 @@ flow_types:
 # ---------------------------------------------------------------------------
 # Flow direction — who sends payload. PascalCase on the wire (spec sec 8.3).
 # Loopback flows (probe) ignore direction.
+#
+# Bidirectional is intentionally absent: per remediation 2.2 (Bulk TCP) and
+# 2.3 (Realtime UDP), bidirectional traffic is modeled as two unidirectional
+# flows with distinct flow_id. This keeps the wire contract simple and
+# removes ACK-cross-traffic / asymmetric-keepalive ambiguity.
 # ---------------------------------------------------------------------------
 directions:
   - FromServer    # server sends, mobile receives
   - ToServer      # mobile sends, server receives
-  - Bidirectional # both send
 
 # ---------------------------------------------------------------------------
 # Node role within a flow.

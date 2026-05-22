@@ -53,6 +53,7 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
 | `enums/enums.yaml` | drafted |
 | `packets/` | drafted — Probe v1 (`0x01`) and Realtime v1 (`0x02`) with `(pkt_t, ver)` framing; growth by `ver` bump, no runtime extensibility. `core/src/packet.rs` (Stage-A spike code, unframed 20-byte probe) needs Phase-1 update to match. |
 | `testvectors/packets/` | drafted — `probe_v1.json`, `realtime_v1.json`; round-trip verified |
-| `schemas/`, `parquet/` | pending — formalise from `core/log_writer.rs` |
+| `schemas/test_plan.schema.json` + `schemas/run_test_command.schema.json` | drafted — TestPlan, Flow ($defs: ProbeFlow / RealtimeUdpFlow / BulkTcpFlow), RunTestPayload. Examples validated. |
+| `schemas/capability.schema.json`, `schemas/logging_config.schema.json`, `schemas/header.schema.json`, `schemas/summary.schema.json`, `parquet/` | pending — formalise from `core/log_writer.rs` + remediation 1.4 (drop `supported_features`) |
 | `openapi/` | pending — wire `utoipa` into `server/` in Phase 1; replaces `planning/auth_openapi_sketch.yaml` |
 | `testvectors/auth_signing/` | pending — cross-platform ECDSA round-trip vector |
