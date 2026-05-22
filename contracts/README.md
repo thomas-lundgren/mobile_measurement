@@ -51,7 +51,7 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
 |---|---|
 | `versions/versions.yaml` | drafted |
 | `enums/enums.yaml` | drafted |
-| `packets/` | drafted — Probe v1 (`0x01`) and Realtime v1 (`0x02`) with `(pkt_t, ver)` framing + TLV tail for forward compat. `core/src/packet.rs` (Stage-A spike code, unframed 20-byte probe) needs Phase-1 update to match. |
+| `packets/` | drafted — Probe v1 (`0x01`) and Realtime v1 (`0x02`) with `(pkt_t, ver)` framing; growth by `ver` bump, no runtime extensibility. `core/src/packet.rs` (Stage-A spike code, unframed 20-byte probe) needs Phase-1 update to match. |
 | `testvectors/packets/` | drafted — `probe_v1.json`, `realtime_v1.json`; round-trip verified |
 | `schemas/`, `parquet/` | pending — formalise from `core/log_writer.rs` |
 | `openapi/` | pending — wire `utoipa` into `server/` in Phase 1; replaces `planning/auth_openapi_sketch.yaml` |
