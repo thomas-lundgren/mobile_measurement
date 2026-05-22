@@ -1,10 +1,12 @@
 # 5G Field Test Platform — Current Status
 
-> As of 2026-05-20
+> As of 2026-05-22
 
 ## Summary
 
-The project has moved from **planning-only** to **active implementation**. Stage A (desktop JVM) and Stage B (Pixel 9 Pro physical device) are both complete — all checks pass. No production server or Android logger code exists yet — only the spike artifacts and a skeletal workspace.
+The project has moved from **planning-only** to **active implementation**. Stage A (desktop JVM) and Stage B (Pixel 9 Pro physical device) are both complete — all checks pass. The **Phase-0 contracts are now substantially authored** (versions, enums, packets, test plan / RUN_TEST, capability + logging config, upload protocol, log schemas), each with validated golden vectors / examples. No production server or Android logger code exists yet — only the spike artifacts, the contracts, and a skeletal workspace.
+
+The working tree is now a **git repository** (initialized 2026-05-22; `.gitignore` covers Rust `target/`, Python `venv/`, Gradle/Android caches, throwaway keystores, spike runtime artifacts, and built `jniLibs` `.so`).
 
 **Long-term direction:** The platform is designed to grow from a "test instrument" into a continuous network-quality probe that logs real app traffic and monitors latency to arbitrary destinations. See `planning/long_term_traffic_monitoring.md` for the growth roadmap. The MVP architecture (shared Rust core, segmented Parquet, dual clocks, server-configured logging) is intentionally built to support this without rewrite.
 
@@ -66,6 +68,25 @@ The project has moved from **planning-only** to **active implementation**. Stage
 | FG service OS-kill survival | ✅ Closed segments readable after force-stop |
 | Real APK size on device | ✅ 13 MB installed |
 | FG longevity (≥5 min, real) | ✅ Completed without OS kill |
+
+#### Contracts (`contracts/`) — DRAFTED 2026-05-22
+
+Authored the single-source-of-truth boundary definitions. Every schema ships with golden vectors / examples that are validated (JSON Schema validation or hex round-trip).
+
+| Contract | Files | Notes |
+|----------|-------|-------|
+| Versions + auth constants | `versions/versions.yaml` | protocol/schema/auth_scheme versions; AUTH_* constants; bump policy |
+| Enums | `enums/enums.yaml` | commands, 3 state machines, flow types, direction (FromServer/ToServer — Bidirectional dropped), roles, platforms, event types (+ provenance), test results |
+| Wire packets | `packets/{README,probe,realtime}.md` + `testvectors/packets/*.json` | `(pkt_t, ver)` framing, no runtime extensibility — grow by version bump; Probe v1 + Realtime v1; vectors round-trip |
+| Test plan / RUN_TEST | `schemas/{test_plan,run_test_command}.schema.json` + `testvectors/commands/` | per-flow server_port; bidirectional = two flows |
+| Capability + logging config | `schemas/{capability,logging_config}.schema.json` + testvectors | `supported_features` dropped; effective ⊆ capability |
+| Upload protocol | `upload/README.md` + `schemas/upload_{manifest,init_response}.schema.json` + testvectors | 3-phase resumable per-file; test_result + PARTIAL rule (loss ≠ PARTIAL) |
+| Log schemas | `parquet/*.yaml` (packets/radio/gps/clock/events) + `schemas/{header,summary}.schema.json` + `testvectors/log/` | dual clock, join columns, nullable capability fields, one JSON `event_metadata` column |
+| Auth endpoints (design sketch) | `planning/auth_openapi_sketch.yaml` | enrollment + challenge/response (P-256 Keystore/Secure Enclave, cross-platform); to be replaced by utoipa codegen |
+
+**Auth model decided:** device auth is enrollment + per-session challenge/response over a non-exportable P-256 keypair (Android Keystore / iOS Secure Enclave), `ECDSA_P256_SHA256` / SPKI / ASN.1 DER pinned for cross-platform interop. Operator auth is username/password → JWT. Spec §5.3, dev-plan §7, dev-guide §8, AGENTS.md all updated.
+
+**Known contract→code drift** (Phase-1 reconciliation): `core/src/packet.rs` (unframed 20-byte probe) and `core/src/log_writer.rs` (6-column packets schema) predate the contracts and must be brought up to the framed packet layout and full packets schema.
 
 ---
 
@@ -147,18 +168,18 @@ The project has moved from **planning-only** to **active implementation**. Stage
 
 ## Pending Work (by Phase)
 
-### Phase 0 — Contracts (not started)
+### Phase 0 — Contracts (mostly drafted; see Completed Work)
 
-Blocked: the P0 contracts (`test_plan` schema, `RUN_TEST` payload, upload protocol) are still undefined. The spike uses ad-hoc JSON. Before `test-control` or the mobile test runner can be built, these must be authored in `contracts/`.
+**Resolved this session:** 1.1, 1.2 (test plan + RUN_TEST), 1.3 (upload protocol), 1.4 (`supported_features` dropped), 2.1 (header metadata + parquet join columns), 2.2/2.3 (bidirectional = two flows), 2.8 (per-flow port), 4.2/4.3/4.4 (interval/direction/event_metadata), M3 (version bump policy), M4b (test_result + PARTIAL rule).
 
-**Items from `review_remediation_plan.md`:**
-- 1.1 Test plan / flow configuration format
-- 1.2 `RUN_TEST` command payload
-- 1.3 Upload protocol (body, compression, resume)
-- 1.4 `supported_features` vs `capabilities` cleanup
-- 2.8 Port allocation connected to flow config
-- M3 Versioning/compatibility policy
-- M4b Test-result reporting endpoint
+**Still open in Phase 0:**
+- 3.6 Device `status` payload (`POST /status` body)
+- 3.7 Controller-facing REST endpoints (P1 — blocks Controller MVP)
+- 3.4 Internal test-control ↔ data-generator API
+- 3.3 DB schema (sqlx migrations)
+- `testvectors/auth_signing/` cross-platform ECDSA golden vector
+- OpenAPI assembly via `utoipa` (lands with the Phase-1 server; replaces `planning/auth_openapi_sketch.yaml`)
+- Reconcile spec §12 timestamp naming (`t_mono_ns` → `mono_ns`)
 
 ### Phase 1 — Server Skeleton (not started)
 
@@ -196,10 +217,11 @@ Real Android logger app (not the throwaway spike). Depends on:
 
 ## Next Recommended Steps
 
-1. **Run Stage B on physical Pixel 9 Pro** — use `spikes/stage-b-android/build_release.sh` and follow `spikes/stage-b-android/FINDINGS.md`
-2. **If Stage B passes** → begin Phase 0 contracts authoring (`contracts/` directory, OpenAPI, packet layout, log schemas)
-3. **If Stage B fails** → execute fallback from `development_plan.md` §Step 0
-4. **Parallel:** Server placeholder can begin skeleton work using ad-hoc fixtures (not blocked by contracts for basic UDP echo)
+Spike gates are green and the core contracts are drafted. Remaining options, roughly in priority order:
+
+1. **Finish Phase-0 control-plane contracts** — device `status` payload (3.6), controller REST endpoints (3.7, blocks Controller MVP), internal test-control ↔ data-generator API (3.4).
+2. **Begin Phase 1 server skeleton** — wire `axum` + `utoipa` into `server/`, which produces the authoritative `contracts/openapi/openapi.yaml` and lets the auth/test-plan/upload schemas become live Rust DTOs. Reconcile `core/packet.rs` + `core/log_writer.rs` to the drafted packet/log contracts as part of this.
+3. **Add the `auth_signing` golden vector** so the Rust verifier and (later) the Android signer are pinned against the DER-vs-P1363 interop bug.
 
 ---
 
