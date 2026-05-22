@@ -1,0 +1,23 @@
+table: clock
+scope: per-node
+spec: "§12.6"
+description: >
+  Clock-calibration snapshots written at clock_calibration_interval_sec
+  (logging_config). These pin the relationship between the monotonic clock
+  and UTC (and optionally GPS time) over the test, and carry the uncertainty
+  bounds that OWD estimates propagate (invariant 2; spec §11). Recorded by
+  BOTH nodes — server clock uncertainty (chrony/Netnod) matters as much as
+  the mobile's.
+
+join_columns:
+  - { name: device_id,  type: utf8, nullable: false }
+  - { name: session_id, type: utf8, nullable: false }
+  - { name: test_id,    type: utf8, nullable: false }
+  - { name: node,       type: utf8, nullable: false, doc: "mobile | server." }
+
+columns:
+  - { name: mono_ns, type: uint64, nullable: false }
+  - { name: utc_ns,  type: uint64, nullable: false }
+  - { name: source,  type: utf8,   nullable: true, doc: "Reference used: gps | ntp | chrony | system." }
+  - { name: uncertainty_ns,      type: uint64, nullable: true, doc: "Estimated bound on this UTC sample. Feeds OWD uncertainty." }
+  - { name: estimated_offset_ns, type: int64,  nullable: true, doc: "Estimated offset of the local clock from the reference (signed)." }

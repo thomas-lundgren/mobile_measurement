@@ -1,0 +1,30 @@
+table: events
+scope: per-node
+spec: "§12.7"
+description: >
+  System and derived events. Operational/measurement events are logged live;
+  HANDOVER / NEIGHBOR_COUNT_CHANGE / COVERAGE_GAP / BAND_CHANGE are appended
+  in post-processing from radio.parquet (see enums.yaml event_type_provenance).
+  Event names come from enums.yaml event_types.
+
+join_columns:
+  - { name: device_id,  type: utf8, nullable: false }
+  - { name: session_id, type: utf8, nullable: false }
+  - { name: test_id,    type: utf8, nullable: false }
+  - { name: node,       type: utf8, nullable: false, doc: "mobile | server." }
+
+columns:
+  - { name: mono_ns,    type: uint64, nullable: false }
+  - { name: utc_ns,     type: uint64, nullable: false }
+  - { name: event_type, type: utf8,   nullable: false, doc: "From enums.yaml event_types." }
+  - { name: flow_id,    type: uint32, nullable: true,  doc: "Set for flow-scoped events (e.g. CLIENT_CONNECTED on a flow); null for test-scoped events." }
+  - name: event_metadata
+    type: utf8
+    nullable: true
+    doc: >
+      Optional JSON object string carrying per-event detail (remediation 4.4):
+      HANDOVER {old_pci,new_pci,old_nci,new_nci}; SIGNAL_LOSS_END
+      {duration_ms}; COVERAGE_GAP {min_rsrp}; ERROR {message}; etc. JSON
+      because the shape is intentionally heterogeneous per event_type and
+      logs are forward-compatible by design (invariant 4). This is the one
+      sanctioned dynamic column — control-plane payloads stay typed.

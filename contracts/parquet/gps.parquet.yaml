@@ -1,0 +1,22 @@
+table: gps
+scope: mobile only, exactly one per test
+spec: "§12.5"
+description: >
+  GPS location snapshots, recorded once per test regardless of flow count.
+  Used to place every measurement on a route and to correlate radio/latency
+  with mobility.
+
+join_columns:
+  - { name: device_id,  type: utf8, nullable: false }
+  - { name: session_id, type: utf8, nullable: false }
+  - { name: test_id,    type: utf8, nullable: false }
+
+columns:
+  - { name: mono_ns, type: uint64, nullable: false }
+  - { name: utc_ns,  type: uint64, nullable: false }
+  - { name: latitude,    type: float64, nullable: false, doc: "Degrees." }
+  - { name: longitude,   type: float64, nullable: false, doc: "Degrees." }
+  - { name: altitude_m,  type: float64, nullable: true }
+  - { name: speed_mps,   type: float32, nullable: true,  doc: "Ground speed, m/s." }
+  - { name: heading_deg, type: float32, nullable: true,  doc: "Bearing, degrees from true north." }
+  - { name: accuracy_m,  type: float32, nullable: true,  doc: "Horizontal accuracy (1 sigma), m." }

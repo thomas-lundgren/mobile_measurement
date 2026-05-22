@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/summary.schema.json",
+  "title": "Summary",
+  "description": "summary.json — one per node per test (mobile/summary.json, server/summary.json). A compact, human-readable digest of the test (spec §12.8). Computed from the Parquet rows; analysis may recompute richer stats from Parquet, so every statistic here is OPTIONAL — present only when applicable to the node's flows and capability. Radio/GPS stats appear only on the mobile node.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["node", "test_id", "test_result", "flows"],
+  "properties": {
+    "node":        { "type": "string", "enum": ["mobile", "server"] },
+    "test_id":     { "type": "string", "pattern": "^tst_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "test_result": { "type": "string", "enum": ["COMPLETED", "PARTIAL", "FAILED", "CANCELLED"] },
+
+    "flows": {
+      "type": "array",
+      "description": "Per-flow stats from this node's vantage point.",
+      "items": { "$ref": "#/$defs/FlowSummary" }
+    },
+
+    "radio":  { "$ref": "#/$defs/RadioSummary", "description": "Mobile only." },
+    "gps":    { "$ref": "#/$defs/GpsSummary",   "description": "Mobile only." },
+
+    "upload_state": {
+      "type": "string",
+      "enum": ["PENDING", "IN_PROGRESS", "COMPLETE", "FAILED"],
+      "description": "Snapshot of this node's upload progress at the time summary.json was written."
+    }
+  },
+
+  "$defs": {
+
+    "Percentiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "p50": { "type": "number" },
+        "p90": { "type": "number" },
+        "p99": { "type": "number" }
+      },
+      "description": "Milliseconds unless noted."
+    },
+
+    "FlowSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow_id", "type"],
+      "properties": {
+        "flow_id":   { "type": "integer", "minimum": 1 },
+        "type":      { "type": "string", "enum": ["probe", "realtime_udp", "bulk_tcp"] },
+        "direction": { "type": "string", "enum": ["FromServer", "ToServer"], "description": "Absent for probe." },
+
+        "packets_sent":     { "type": "integer", "minimum": 0 },
+        "packets_received": { "type": "integer", "minimum": 0 },
+        "loss_pct":         { "type": "number", "minimum": 0, "maximum": 100 },
+
+        "rtt_ms":           { "$ref": "#/$defs/Percentiles", "description": "Probe RTT percentiles." },
+        "owd_uplink_ms":    { "$ref": "#/$defs/Percentiles", "description": "Realtime ToServer one-way delay (carries clock uncertainty in analysis, not here)." },
+        "owd_downlink_ms":  { "$ref": "#/$defs/Percentiles", "description": "Realtime FromServer one-way delay." },
+        "jitter_ms":        { "type": "number", "minimum": 0 },
+        "mean_gap_deviation_ms": { "type": "number", "description": "Mean |actual_interval - expected_interval|." },
+        "burst_count":      { "type": "integer", "minimum": 0 },
+
+        "throughput_mbps":  { "type": "number", "minimum": 0, "description": "Bulk TCP only." }
+      }
+    },
+
+    "RadioSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rsrp_dbm":         { "$ref": "#/$defs/MinMeanMax" },
+        "sinr_db":          { "$ref": "#/$defs/MinMeanMax" },
+        "handover_count":   { "type": "integer", "minimum": 0, "description": "Derived from PCI/NCI changes." },
+        "pci_changes":      { "type": "integer", "minimum": 0 },
+        "unique_neighbor_cells":  { "type": "integer", "minimum": 0 },
+        "max_concurrent_neighbors": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "MinMeanMax": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min":  { "type": "number" },
+        "mean": { "type": "number" },
+        "max":  { "type": "number" }
+      }
+    },
+
+    "GpsSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start": { "$ref": "#/$defs/LatLon" },
+        "end":   { "$ref": "#/$defs/LatLon" },
+        "distance_m": { "type": "number", "minimum": 0 }
+      }
+    },
+
+    "LatLon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lat", "lon"],
+      "properties": {
+        "lat": { "type": "number" },
+        "lon": { "type": "number" }
+      }
+    }
+  }
+}

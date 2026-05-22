@@ -1,0 +1,34 @@
+table: packets
+scope: per-node, all flows
+spec: "§12.3"
+description: >
+  One row per packet event observed by this node: a SENT or RECEIVED packet
+  for any flow in the test. Probe RTT is reconstructed by matching a node's
+  SENT row to its RECEIVED echo row on (flow_id, sequence_number). Realtime
+  OWD is reconstructed at the receiver from sender_* vs mono_ns/utc_ns.
+
+join_columns:
+  - { name: device_id,  type: utf8, nullable: false, doc: "Owning device (dictionary-encoded constant)." }
+  - { name: session_id, type: utf8, nullable: false }
+  - { name: test_id,    type: utf8, nullable: false }
+  - { name: node,       type: utf8, nullable: false, doc: "mobile | server." }
+
+columns:
+  - { name: flow_id,         type: uint32, nullable: false }
+  - { name: sequence_number, type: uint64, nullable: false }
+  - { name: direction,       type: utf8,   nullable: false, doc: "SENT | RECEIVED (remediation 4.3). Without it bidirectional data is uninterpretable." }
+  - { name: mono_ns,         type: uint64, nullable: false, doc: "Local monotonic time of this send/receive event." }
+  - { name: utc_ns,          type: uint64, nullable: false, doc: "Local UTC time of this event." }
+  - { name: payload_size,    type: uint32, nullable: false, doc: "On-wire UDP payload / TCP chunk size in bytes." }
+  - { name: protocol,        type: utf8,   nullable: false, doc: "UDP | TCP." }
+  - { name: local_port,      type: uint32, nullable: true }
+  - { name: remote_port,     type: uint32, nullable: true }
+
+  # Embedded sender timestamps — present on RECEIVED realtime packets (the
+  # sender writes them into the packet body). Null for probe and for SENT rows.
+  - { name: sender_mono_ns,  type: uint64, nullable: true, doc: "Sender's mono at transmit, from the packet body. OWD input." }
+  - { name: sender_utc_ns,   type: uint64, nullable: true, doc: "Sender's UTC at transmit, from the packet body. OWD input." }
+
+  # Interval analysis (realtime flows).
+  - { name: expected_interval_ns, type: uint64, nullable: true, doc: "Nominal flow spacing = 1e9 / rate_pps." }
+  - { name: actual_interval_ns,   type: uint64, nullable: true, doc: "recv_mono_ns[i] - recv_mono_ns[i-1] over CONSECUTIVE RECEIVED packets of this flow, gaps preserved (remediation 4.2). Null for the first received packet and for SENT rows." }

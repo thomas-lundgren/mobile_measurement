@@ -1,0 +1,52 @@
+table: radio
+scope: mobile only, exactly one per test
+spec: "§12.4"
+description: >
+  Serving-cell and neighbor radio metrics sampled from standard Android
+  Telephony APIs (Pixel 9 Pro reference). Recorded once per test regardless
+  of flow count. All metric columns are nullable: which are populated depends
+  on the resolved logging_config (itself bounded by device capability). Out-
+  of-scope-on-Pixel fields (CQI/MCS/BLER/HARQ/DRX/BWP/MIMO/TX power, 5QI/QFI,
+  RRC state) are not columns here — they are added by extended-capability
+  devices without bumping schema_version (invariant 4).
+
+join_columns:
+  - { name: device_id,  type: utf8, nullable: false }
+  - { name: session_id, type: utf8, nullable: false }
+  - { name: test_id,    type: utf8, nullable: false }
+
+columns:
+  - { name: mono_ns, type: uint64, nullable: false }
+  - { name: utc_ns,  type: uint64, nullable: false }
+
+  # NR serving cell.
+  - { name: pci,     type: uint32, nullable: true, doc: "Physical Cell ID." }
+  - { name: nci,     type: uint64, nullable: true, doc: "NR Cell Identity (36-bit)." }
+  - { name: tac,     type: uint32, nullable: true, doc: "Tracking Area Code." }
+  - { name: nrarfcn, type: uint32, nullable: true, doc: "NR ARFCN (carrier frequency channel)." }
+  - { name: rsrp,    type: int32,  nullable: true, doc: "Reference Signal Received Power (dBm)." }
+  - { name: rsrq,    type: int32,  nullable: true, doc: "Reference Signal Received Quality (dB)." }
+  - { name: sinr,    type: int32,  nullable: true, doc: "Signal to Interference + Noise Ratio (dB)." }
+
+  # LTE anchor (NSA).
+  - { name: earfcn,   type: uint32, nullable: true, doc: "LTE EARFCN if NSA." }
+  - { name: lte_pci,  type: uint32, nullable: true }
+  - { name: lte_rsrp, type: int32,  nullable: true }
+
+  - { name: bandwidth_mhz,          type: uint32, nullable: true }
+  - { name: cell_connection_status, type: utf8,   nullable: true, doc: "PRIMARY | SECONDARY | UNKNOWN." }
+
+  # Neighbor cells from getAllCellInfo(), logged at the serving-cell rate.
+  - name: neighbor_cells
+    type: list
+    nullable: true
+    doc: "Visible neighbor cells at this sample."
+    item:
+      type: struct
+      fields:
+        - { name: pci,  type: uint32, nullable: false }
+        - { name: rsrp, type: int32,  nullable: true }
+
+# handover_event / band_change are NOT written live; they are derived in
+# post-processing from PCI/NCI/NRARFCN changes between consecutive rows
+# (see events.parquet and enums.yaml event_type_provenance).

@@ -1,0 +1,51 @@
+{
+  "schema": "../../schemas/header.schema.json",
+  "examples": [
+    {
+      "name": "probe_only_header",
+      "header": {
+        "schema_version": 1,
+        "protocol_version": 1,
+        "app_version": "0.1.0",
+        "session_id": "ses_2026_05_22_001",
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+        "test_start_utc_ns": 1747900000000000000,
+        "test_start_mono_ns": 123456789000,
+        "device": {
+          "device_id": "dev_01HZ8PQRS0000000000000001",
+          "node_id": "node_mobile_01",
+          "platform": "android",
+          "model": "Pixel 9 Pro",
+          "manufacturer": "Google",
+          "os_version": "15"
+        },
+        "server": {
+          "node_id": "node_server_01",
+          "host": "10.0.0.1"
+        },
+        "test_plan": {
+          "name": "probe_only_v1",
+          "version": 1,
+          "duration_sec": 60,
+          "flows": [
+            { "flow_id": 1, "type": "probe", "server_port": 41000, "rate_pps": 10 }
+          ]
+        },
+        "logging_config": {
+          "version": 1,
+          "radio": {
+            "serving_cell": ["pci", "nci", "tac", "nrarfcn", "rsrp", "rsrq", "sinr"],
+            "neighbor_cells": true, "lte_fallback": true,
+            "cqi": false, "mcs": false, "bler": false, "harq": false,
+            "drx": false, "bwp": false, "mimo_layers": false, "tx_power": false
+          },
+          "qos": { "5qi": false, "qfi": false, "slice_info": false },
+          "mobility": { "explicit_ho_events": false, "rrc_state": false, "beam_switch": false },
+          "events": ["TEST_START", "TEST_STOP", "SIGNAL_LOSS_START", "SIGNAL_LOSS_END"],
+          "gps": true,
+          "clock_calibration_interval_sec": 30
+        }
+      }
+    }
+  ]
+}

@@ -112,24 +112,39 @@ platforms:
 # radio.parquet (PCI/NCI/NRARFCN changes).
 # ---------------------------------------------------------------------------
 event_types:
-  # logged live
+  # logged live — measurement events (gateable via logging_config.events)
   - TEST_START
   - TEST_STOP
   - SIGNAL_LOSS_START   # no serving cell for > N seconds
   - SIGNAL_LOSS_END
-  # derived in post-processing
-  - HANDOVER            # PCI or NCI change between consecutive samples
-  - COVERAGE_GAP        # RSRP dropped below threshold
-  - BAND_CHANGE         # NRARFCN changed
+  # logged live — operational events (ALWAYS logged, not config-gated)
+  - CLIENT_CONNECTED
+  - SERVER_DISCONNECTED
+  - UPLOAD_STARTED
+  - ERROR
+  # derived in post-processing from radio.parquet
+  - HANDOVER              # PCI or NCI change between consecutive samples
+  - NEIGHBOR_COUNT_CHANGE # significant change in neighbor cell list
+  - COVERAGE_GAP          # RSRP dropped below threshold
+  - BAND_CHANGE           # NRARFCN changed
 
 event_type_provenance:
-  logged_live:
+  # logged_live splits into measurement events (subset that
+  # logging_config.events can enable/disable) and operational events
+  # (always written regardless of config).
+  logged_live_gateable:
     - TEST_START
     - TEST_STOP
     - SIGNAL_LOSS_START
     - SIGNAL_LOSS_END
+  logged_live_always:
+    - CLIENT_CONNECTED
+    - SERVER_DISCONNECTED
+    - UPLOAD_STARTED
+    - ERROR
   derived_post_processing:
     - HANDOVER
+    - NEIGHBOR_COUNT_CHANGE
     - COVERAGE_GAP
     - BAND_CHANGE
 

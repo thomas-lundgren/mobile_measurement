@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/header.schema.json",
+  "title": "Header",
+  "description": "header.json — written once per test at the test root (spec §12.2; remediation 3.2). The single home for test metadata: version fields, identities, the test_plan that was run, and the effective logging_config. Parquet rows do NOT repeat this; they carry only join keys. Lets analysis reconstruct exactly what was run without parsing any Parquet.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "protocol_version", "app_version",
+    "session_id", "test_id", "test_start_utc_ns", "test_start_mono_ns",
+    "device", "server", "test_plan", "logging_config"
+  ],
+  "properties": {
+    "schema_version":   { "type": "integer", "minimum": 1, "description": "Log schema version (versions.yaml)." },
+    "protocol_version": { "type": "integer", "minimum": 1 },
+    "app_version":      { "type": "string", "description": "Per-build semver string of the logger app." },
+
+    "session_id": { "type": "string", "description": "Groups tests recorded in one logging session." },
+    "test_id":    { "type": "string", "pattern": "^tst_[0-9A-HJKMNP-TV-Z]{26}$" },
+
+    "test_start_utc_ns":  { "type": "integer", "minimum": 0, "description": "Test start, UTC ns. For human/cross-system reference only." },
+    "test_start_mono_ns": { "type": "integer", "minimum": 0, "description": "Test start, mobile monotonic ns. Authoritative origin for relative timing." },
+
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "node_id", "platform", "model"],
+      "properties": {
+        "device_id":       { "type": "string", "description": "Server-assigned at enrollment." },
+        "node_id":         { "type": "string" },
+        "platform":        { "type": "string", "enum": ["android", "ios"] },
+        "model":           { "type": "string" },
+        "manufacturer":    { "type": "string" },
+        "os_version":      { "type": "string" }
+      },
+      "description": "The device under test (mobile node)."
+    },
+
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "host"],
+      "properties": {
+        "node_id": { "type": "string" },
+        "host":    { "type": "string", "description": "server_host the device connected to for this test." }
+      }
+    },
+
+    "test_plan": {
+      "$ref": "https://measurement-platform/contracts/schemas/test_plan.schema.json",
+      "description": "The exact plan that was run (embedded verbatim from RUN_TEST)."
+    },
+
+    "logging_config": {
+      "$ref": "https://measurement-platform/contracts/schemas/logging_config.schema.json",
+      "description": "The effective config in force for this test (after intersection with capability + overrides)."
+    }
+  }
+}
