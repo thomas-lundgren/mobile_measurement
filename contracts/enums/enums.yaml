@@ -1,0 +1,140 @@
+# Single source of truth for enum string names that appear on the wire and
+# in logs. Codegen target: Rust enums, Java enums, Python Literals/Enums.
+# Every component imports from this file — never hand-write these strings.
+#
+# Wire-format rules:
+#   - Command names, state names, event types  → SCREAMING_SNAKE_CASE
+#   - Role, platform, flow_type, test_result   → snake_case / lowercase
+#   - Direction                                 → PascalCase (per spec sec 8.3)
+#
+# Round-trip test (development_plan.md sec 2): every codegen target must
+# serialize→deserialize each enum string and match the value here byte-for-
+# byte.
+
+# ---------------------------------------------------------------------------
+# Control-plane commands (server → device, via /devices/{id}/command).
+# Payload schemas live alongside the OpenAPI generated from `utoipa`.
+# ---------------------------------------------------------------------------
+commands:
+  - RUN_TEST            # start a test; payload includes test_id, test_plan, flows[]
+  - STOP_TEST           # cancel current test
+  - SET_LOGGING_CONFIG  # push new effective logging profile (carries logging_config_version)
+  - REQUEST_STATUS      # force an immediate device status report
+  - REQUEST_UPLOAD      # trigger upload of pending sessions
+  - REBOOT_LOGGER       # restart the foreground service (recovery)
+
+# ---------------------------------------------------------------------------
+# Test-control: per-device state machine (spec sec 6.2).
+# ---------------------------------------------------------------------------
+test_control_states:
+  - IDLE
+  - PREPARE
+  - WAITING_FOR_GENERATOR
+  - WAITING_FOR_CLIENT
+  - RUNNING
+  - STOPPING
+  - DONE
+  - FAILED
+
+# ---------------------------------------------------------------------------
+# Data-generator state machine (spec sec 7.3).
+# ---------------------------------------------------------------------------
+generator_states:
+  - INITIALIZING
+  - READY
+  - WAITING_FOR_CLIENT
+  - RUNNING
+  - STOPPING
+  - STOPPED
+  - FAILED
+
+# ---------------------------------------------------------------------------
+# Logger app state machine (spec sec 8.5).
+# ---------------------------------------------------------------------------
+logger_states:
+  - INITIALIZING
+  - REGISTERING        # post-enrollment session: challenge → verify → register
+  - IDLE
+  - WAITING_FOR_TEST
+  - PREPARING
+  - RUNNING_TEST
+  - COOLDOWN
+  - UPLOAD_PENDING
+  - UPLOADING
+  - ERROR
+
+# ---------------------------------------------------------------------------
+# Flow types — what kind of traffic the generators produce (spec sec 10).
+# ---------------------------------------------------------------------------
+flow_types:
+  - probe         # UDP echo, RTT (loopback; either side may host)
+  - realtime_udp  # fixed-rate UDP, one-way delay + jitter
+  - bulk_tcp      # bulk throughput, separate UL/DL connections for Bidirectional
+
+# ---------------------------------------------------------------------------
+# Flow direction — who sends payload. PascalCase on the wire (spec sec 8.3).
+# Loopback flows (probe) ignore direction.
+# ---------------------------------------------------------------------------
+directions:
+  - FromServer    # server sends, mobile receives
+  - ToServer      # mobile sends, server receives
+  - Bidirectional # both send
+
+# ---------------------------------------------------------------------------
+# Node role within a flow.
+# ---------------------------------------------------------------------------
+roles:
+  - mobile
+  - server
+
+# ---------------------------------------------------------------------------
+# Operator role claim in JWT (auth model: development_plan.md sec 7).
+# ---------------------------------------------------------------------------
+operator_roles:
+  - viewer
+  - operator    # MVP default
+  - admin
+
+# ---------------------------------------------------------------------------
+# Device platform — recorded at enrollment.
+# ---------------------------------------------------------------------------
+platforms:
+  - android
+  - ios         # contract-only for now; iOS implementation out of MVP scope
+
+# ---------------------------------------------------------------------------
+# Event types written to events.parquet (spec sec 12.7). Some are logged
+# live by the logger; others are derived in post-processing from
+# radio.parquet (PCI/NCI/NRARFCN changes).
+# ---------------------------------------------------------------------------
+event_types:
+  # logged live
+  - TEST_START
+  - TEST_STOP
+  - SIGNAL_LOSS_START   # no serving cell for > N seconds
+  - SIGNAL_LOSS_END
+  # derived in post-processing
+  - HANDOVER            # PCI or NCI change between consecutive samples
+  - COVERAGE_GAP        # RSRP dropped below threshold
+  - BAND_CHANGE         # NRARFCN changed
+
+event_type_provenance:
+  logged_live:
+    - TEST_START
+    - TEST_STOP
+    - SIGNAL_LOSS_START
+    - SIGNAL_LOSS_END
+  derived_post_processing:
+    - HANDOVER
+    - COVERAGE_GAP
+    - BAND_CHANGE
+
+# ---------------------------------------------------------------------------
+# Test result terminal states (remediation M4b). Reported on the
+# test-summary endpoint and recorded in summary.json.
+# ---------------------------------------------------------------------------
+test_results:
+  - COMPLETED     # ran to scheduled end
+  - PARTIAL       # ran some duration, ended early (network loss, OS kill)
+  - FAILED        # could not start or aborted with no useful data
+  - CANCELLED     # operator stop

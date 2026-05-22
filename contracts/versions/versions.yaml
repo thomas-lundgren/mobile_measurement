@@ -1,0 +1,47 @@
+# Single source of truth for the four version-bearing values and the pinned
+# auth-scheme constants. Every component imports these (codegen target —
+# Rust constants, Java constants, Python module). Do not hand-edit them in
+# any downstream language.
+#
+# Bump policy (development_plan.md sec 4; remediation item M3):
+#   protocol_version        — bump on any non-additive change to the
+#                             control-plane wire (REST DTOs, command shape,
+#                             state-machine event names).
+#   schema_version          — bump on any non-additive change to the log
+#                             schemas (header.json, summary.json, parquet
+#                             columns). Additive changes (new optional
+#                             column, new enum variant) do NOT bump.
+#   logging_config_version  — server-managed monotonic counter, bumped each
+#                             time the active logging profile changes (per
+#                             test plan or operator override). Carried on
+#                             every device status report so the server can
+#                             detect drift and push SET_LOGGING_CONFIG.
+#   auth_scheme_version     — bump only if the signing algorithm, blob
+#                             layout, or domain separator changes. Today's
+#                             value ("mp-auth-v1") is encoded as AUTH_DOMAIN
+#                             below and lives independently of
+#                             protocol_version.
+#
+# Compatibility window: clients and server must agree on protocol_version at
+# enrollment; mismatch is rejected at /devices/enroll and /auth/verify. Log
+# schemas read forward (unknown columns ignored, missing columns null) per
+# invariant 4.
+
+versions:
+  protocol_version:       1
+  schema_version:         1
+  auth_scheme_version:    1
+  # logging_config_version is runtime-only (server-assigned per profile);
+  # the initial server-issued value is 1.
+  logging_config_version_initial: 1
+
+auth_constants:
+  AUTH_SIGNING_ALG:   ECDSA_P256_SHA256
+  AUTH_PUBKEY_FORMAT: SPKI_DER          # base64 on the wire
+  AUTH_SIG_FORMAT:    ASN1_DER          # base64 on the wire
+  AUTH_DOMAIN:        mp-auth-v1        # domain separator string
+
+# Header-field provenance: header.json on disk carries protocol_version,
+# schema_version, app_version, logging_config_version. app_version is a
+# per-build identifier (semver string) sourced from the build system, not
+# from this file.
