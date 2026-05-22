@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/upload_manifest.schema.json",
+  "title": "UploadManifest",
+  "description": "Body of POST /api/v1/tests/{test_id}/summary (upload phase 1). Reports the terminal test result and lists every file the device intends to upload for this test. See contracts/upload/README.md.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["test_result", "node", "files"],
+  "properties": {
+    "test_result": {
+      "type": "string",
+      "enum": ["COMPLETED", "PARTIAL", "FAILED", "CANCELLED"],
+      "description": "Terminal state from enums.yaml test_results. PARTIAL is about recording completeness, not packet loss (see upload/README.md)."
+    },
+    "result_reason": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "Optional free-text diagnostic, e.g. \"foreground service killed at t+412s\"."
+    },
+    "node": {
+      "type": "string",
+      "enum": ["mobile"],
+      "description": "Which node's recordings this manifest covers. Only the mobile uploads; the server is the destination and never sends a manifest."
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 256,
+      "description": "Every file to upload for this test. May be empty for a FAILED test that produced nothing.",
+      "items": { "$ref": "#/$defs/ManifestFile" }
+    }
+  },
+
+  "$defs": {
+    "ManifestFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256", "encoding"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(header\\.json|gps\\.parquet|radio\\.parquet|mobile/(packets|events|clock)\\.parquet|mobile/summary\\.json)$",
+          "description": "Test-relative path. Enumerated to the known mobile-side log layout (CLAUDE.md); the server rejects unlisted paths."
+        },
+        "size_bytes": {
+          "type": "integer", "minimum": 0,
+          "description": "Length of the stored (post-encoding) bytes that will be PUT."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lowercase hex SHA-256 over the stored (post-encoding) bytes — i.e. what travels on the wire."
+        },
+        "encoding": {
+          "type": "string",
+          "enum": ["identity", "zstd"],
+          "description": "Transport encoding. Default identity for *.parquet (already zstd internally); zstd allowed for *.json."
+        }
+      }
+    }
+  }
+}

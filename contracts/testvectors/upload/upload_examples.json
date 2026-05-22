@@ -1,0 +1,67 @@
+{
+  "description": "Upload phase-1 examples. manifest validates against upload_manifest.schema.json; init_response against upload_init_response.schema.json. SHA-256 values are illustrative (64-hex), not computed from real files.",
+  "examples": [
+    {
+      "name": "probe_only_completed_fresh",
+      "notes": "A COMPLETED probe-only test, first upload attempt. Server needs every file.",
+      "manifest": {
+        "test_result": "COMPLETED",
+        "node": "mobile",
+        "files": [
+          { "path": "header.json", "size_bytes": 412, "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "encoding": "zstd" },
+          { "path": "gps.parquet", "size_bytes": 18342, "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "encoding": "identity" },
+          { "path": "radio.parquet", "size_bytes": 40231, "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "encoding": "identity" },
+          { "path": "mobile/packets.parquet", "size_bytes": 220190, "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "encoding": "identity" },
+          { "path": "mobile/events.parquet", "size_bytes": 1204, "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "encoding": "identity" },
+          { "path": "mobile/clock.parquet", "size_bytes": 3320, "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "encoding": "identity" },
+          { "path": "mobile/summary.json", "size_bytes": 988, "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "encoding": "zstd" }
+        ]
+      },
+      "init_response": {
+        "upload_id": "upl_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+        "needed_paths": [
+          "header.json", "gps.parquet", "radio.parquet",
+          "mobile/packets.parquet", "mobile/events.parquet",
+          "mobile/clock.parquet", "mobile/summary.json"
+        ]
+      }
+    },
+    {
+      "name": "resumed_after_partial_upload",
+      "notes": "Same manifest re-posted after a dropped connection. Server already holds 4 files (hash match); only 3 remain.",
+      "manifest": {
+        "test_result": "COMPLETED",
+        "node": "mobile",
+        "files": [
+          { "path": "header.json", "size_bytes": 412, "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "encoding": "zstd" },
+          { "path": "gps.parquet", "size_bytes": 18342, "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "encoding": "identity" },
+          { "path": "radio.parquet", "size_bytes": 40231, "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "encoding": "identity" },
+          { "path": "mobile/packets.parquet", "size_bytes": 220190, "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "encoding": "identity" },
+          { "path": "mobile/events.parquet", "size_bytes": 1204, "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "encoding": "identity" },
+          { "path": "mobile/clock.parquet", "size_bytes": 3320, "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "encoding": "identity" },
+          { "path": "mobile/summary.json", "size_bytes": 988, "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "encoding": "zstd" }
+        ]
+      },
+      "init_response": {
+        "upload_id": "upl_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+        "needed_paths": [
+          "mobile/packets.parquet", "mobile/clock.parquet", "mobile/summary.json"
+        ]
+      }
+    },
+    {
+      "name": "failed_no_files",
+      "notes": "Test failed before any usable data; result reported with an empty manifest. Nothing to upload.",
+      "manifest": {
+        "test_result": "FAILED",
+        "result_reason": "all flows failed to bind server ports within prepare timeout",
+        "node": "mobile",
+        "files": []
+      },
+      "init_response": {
+        "upload_id": "upl_01HZ8R9F0J2YK3P5Q7S9V1W3X9",
+        "needed_paths": []
+      }
+    }
+  ]
+}

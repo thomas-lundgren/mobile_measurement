@@ -13,7 +13,8 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
 | `enums/enums.yaml` | Command names, state-machine names, flow types, direction, role, platform, event types, test results | YAML (hand-authored) | Rust enums, Java enums, Python Literals |
 | `openapi/` | REST API (device-facing + controller-facing) | **Code-first via `utoipa`** on the Rust server — emitted as `openapi/openapi.yaml` | Rust types (native), Kotlin client (Android Controller) |
 | `packets/` | Wire-format layout tables for `ProbePacket`, `RealtimePacket` | Markdown layout table + golden hex vectors | Encode/decode conformance tests in every language |
-| `schemas/` | `header.json`, `summary.json`, capability, logging-config | JSON Schema | DTO derivation; tolerant readers in analysis |
+| `schemas/` | `header.json`, `summary.json`, capability, logging-config, test_plan, RUN_TEST, upload manifest/init | JSON Schema | DTO derivation; tolerant readers in analysis |
+| `upload/` | Upload protocol (phases, resume, compression, test-result reporting) | Markdown spec | Upload manager (mobile) + upload handler (server) |
 | `parquet/` | Arrow schema per log file | Arrow schema (`.fbs` or YAML) | Rust writer (`core/log_writer.rs`), Python loader |
 | `auth/` | (reserved) | — | AUTH_* constants currently colocated in `versions/versions.yaml` |
 | `testvectors/` | Cross-language golden inputs/outputs | Hex / JSON / DER bytes + expected outputs | Conformance tests in every language |
@@ -55,6 +56,7 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
 | `testvectors/packets/` | drafted — `probe_v1.json`, `realtime_v1.json`; round-trip verified |
 | `schemas/test_plan.schema.json` + `schemas/run_test_command.schema.json` | drafted — TestPlan, Flow ($defs: ProbeFlow / RealtimeUdpFlow / BulkTcpFlow), RunTestPayload. Examples validated. |
 | `schemas/capability.schema.json` + `schemas/logging_config.schema.json` | drafted — radio / qos / mobility feature groups + timestamp_sources (capability) and + events / gps / clock_calibration_interval_sec (config). `supported_features` dropped (remediation 1.4). Examples validated. |
+| `upload/README.md` + `schemas/upload_manifest.schema.json` + `schemas/upload_init_response.schema.json` | drafted — 3-phase resumable per-file upload; test_result + PARTIAL definition (remediation 1.3 + M4b). Examples validated. |
 | `schemas/header.schema.json`, `schemas/summary.schema.json`, `parquet/` | pending — formalise from `core/log_writer.rs` |
 | `openapi/` | pending — wire `utoipa` into `server/` in Phase 1; replaces `planning/auth_openapi_sketch.yaml` |
 | `testvectors/auth_signing/` | pending — cross-platform ECDSA round-trip vector |

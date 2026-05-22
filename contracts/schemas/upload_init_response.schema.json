@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/upload_init_response.schema.json",
+  "title": "UploadInitResponse",
+  "description": "Response to POST /api/v1/tests/{test_id}/summary (upload phase 1). Returns the upload session id and the subset of manifest files the server still needs — the file-granularity resume mechanism. See contracts/upload/README.md.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["upload_id", "needed_paths"],
+  "properties": {
+    "upload_id": {
+      "type": "string",
+      "pattern": "^upl_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "ULID-prefixed upload-session id. Stable across re-POSTs of the same manifest for the same test_id (idempotent initiate)."
+    },
+    "needed_paths": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(header\\.json|gps\\.parquet|radio\\.parquet|mobile/(packets|events|clock)\\.parquet|mobile/summary\\.json)$"
+      },
+      "description": "Manifest paths the server does NOT already hold with a matching hash. Empty array means every file is already present and the client may go straight to POST .../complete."
+    }
+  }
+}
