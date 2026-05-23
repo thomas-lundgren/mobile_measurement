@@ -12,6 +12,7 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
 | `versions/versions.yaml` | `protocol_version`, `schema_version`, `auth_scheme_version`, AUTH_* constants | YAML (hand-authored) | Rust consts, Java consts, Python module |
 | `enums/enums.yaml` | Command names, state-machine names, flow types, direction, role, platform, event types, test results | YAML (hand-authored) | Rust enums, Java enums, Python Literals |
 | `openapi/` | REST API (device-facing + controller-facing) | **Code-first via `utoipa`** on the Rust server — emitted as `openapi/openapi.yaml` | Rust types (native), Kotlin client (Android Controller) |
+| `internal/` | Server-side control IPC (server-main → test-control → data-generator) + the in-process generator→logger sink | Markdown + JSON Schema (`internal_*`) over **local HTTP+JSON** | server processes (axum/serde); not public |
 | `packets/` | Wire-format layout tables for `ProbePacket`, `RealtimePacket` | Markdown layout table + golden hex vectors | Encode/decode conformance tests in every language |
 | `schemas/` | `header.json`, `summary.json`, capability, logging-config, test_plan, RUN_TEST, upload manifest/init | JSON Schema | DTO derivation; tolerant readers in analysis |
 | `upload/` | Upload protocol (phases, resume, compression, test-result reporting) | Markdown spec | Upload manager (mobile) + upload handler (server) |

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/internal_test_status.schema.json",
+  "title": "InternalTestStatus",
+  "description": "Response to GET /internal/tests/{test_id} (test-control -> server-main). server-main polls this to learn when generators are READY (flow_bindings populated) so it can enqueue RUN_TEST, and to track the test to its terminal result.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["test_id", "device_id", "state", "generators"],
+  "properties": {
+    "test_id":   { "type": "string", "pattern": "^tst_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "device_id": { "type": "string" },
+    "state": {
+      "type": "string",
+      "enum": ["IDLE", "PREPARE", "WAITING_FOR_GENERATOR", "WAITING_FOR_CLIENT", "RUNNING", "STOPPING", "DONE", "FAILED"],
+      "description": "Per-device test-control state (enums.yaml test_control_states)."
+    },
+    "flow_bindings": {
+      "type": "array",
+      "items": { "$ref": "https://measurement-platform/contracts/schemas/test_plan.schema.json#/$defs/FlowBinding" },
+      "description": "Allocated ports, one per flow. Absent/empty until state >= WAITING_FOR_CLIENT."
+    },
+    "generators": {
+      "type": "array",
+      "description": "Per-flow generator coordination state.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["flow_id", "generator_id", "state"],
+        "properties": {
+          "flow_id":      { "$ref": "https://measurement-platform/contracts/schemas/test_plan.schema.json#/$defs/FlowId" },
+          "generator_id": { "type": "string" },
+          "state": {
+            "type": "string",
+            "enum": ["INITIALIZING", "READY", "WAITING_FOR_CLIENT", "RUNNING", "STOPPING", "STOPPED", "FAILED"]
+          }
+        }
+      }
+    },
+    "result": {
+      "type": ["string", "null"],
+      "enum": ["COMPLETED", "PARTIAL", "FAILED", "CANCELLED", null],
+      "description": "Terminal result once state is DONE/FAILED; null while in progress."
+    },
+    "error": { "type": ["string", "null"], "description": "Diagnostic when state is FAILED." }
+  }
+}

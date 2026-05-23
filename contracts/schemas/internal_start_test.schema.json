@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/internal_start_test.schema.json",
+  "title": "InternalStartTest",
+  "description": "Body of POST /internal/tests (server-main -> test-control). Internal, loopback-only, no auth. server-main has already assigned test_id and validated the device; test-control allocates ports and coordinates generators from here.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["test_id", "device_id", "server_host", "plan"],
+  "properties": {
+    "test_id":   { "type": "string", "pattern": "^tst_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "device_id": { "type": "string" },
+    "server_host": {
+      "type": "string", "minLength": 1, "maxLength": 253,
+      "description": "Reachable server address the device will connect to; held by server-main as deployment config and passed through to the assembled RunTestPayload."
+    },
+    "plan": {
+      "$ref": "https://measurement-platform/contracts/schemas/test_plan.schema.json",
+      "description": "Port-less plan. test-control allocates a port per flow (flow_bindings)."
+    },
+    "logging_config_override": {
+      "$ref": "https://measurement-platform/contracts/schemas/logging_config.schema.json"
+    }
+  }
+}

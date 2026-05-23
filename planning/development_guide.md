@@ -107,7 +107,7 @@ the format:
 | Shared DTOs + enums (flow type, direction, role, states, versions) | **annotated Rust types** (`serde` + `schemars`/`utoipa`) | native | `openapi-generator` (REST) / `jsonschema2pojo` (non-REST) | enum string round-trip |
 | REST API | OpenAPI 3 **derived from Rust** (`utoipa`, code-first) | `utoipa` (from axum) | `openapi-generator` (Retrofit/OkHttp) | provider + consumer (Pact) contract tests |
 | Measurement packets (probe, realtime UDP) | **The Rust codec in the shared core** (§5) — single impl | `core` crate | calls core over **JNI** (no second codec) | golden vectors as codec regression + JNI round-trip |
-| Control IPC (test-control ↔ generator/server-main) | `.proto` (gRPC) | `tonic` / `prost` | `grpc-java` / `protobuf-java` | one `.proto`, no second impl |
+| Control IPC (server-main ↔ test-control ↔ generator) | **local HTTP + JSON** (loopback, same-host) — JSON Schema (`contracts/internal/`, `internal_*.json`) | `axum` / `serde` (reused) | n/a (server-side only) | schema validation of the `internal_*` examples |
 | Log schemas (Parquet / JSON) | one Arrow schema + JSON Schema | `arrow` / `parquet` crates (in core) | **writes via the shared core** (same `arrow`/`parquet`) | forward-compat read in Python + Rust |
 | JNI boundary (engine config in; log paths / status out) | the core's exported API | `jni` exports | thin Java facade / generated bindings | config round-trip across JNI |
 
@@ -124,8 +124,10 @@ Rules that make it stick:
 
 **Format choice matters:** the core's packet codec uses **fixed-layout** structs (not
 protobuf) — protobuf's varint/tag encoding would destroy the exact byte offsets required
-for RTP-like timing packets; golden vectors lock the layout. Reserve protobuf/gRPC for the
-*control* IPC, where self-describing messages are fine.
+for RTP-like timing packets; golden vectors lock the layout. The *control* IPC uses local
+HTTP+JSON (not gRPC): it is same-host, off the real-time hot path, and lockstep-released, so
+the protobuf/tonic toolchain isn't worth it — reuse the axum/serde stack. See
+`contracts/internal/`.
 
 ---
 
@@ -205,7 +207,7 @@ A **single CI job** is what actually *ensures* symmetry and consistency on every
 ```text
 contracts/
   openapi/            # REST API (device-facing + controller-facing; incl. /devices/enroll, /auth/challenge, /auth/verify, /auth/login)
-  proto/              # gRPC for internal control IPC
+  internal/           # server-side control IPC (HTTP+JSON) + generator→logger sink spec
   packets/            # layout specs + testvectors/ (golden hex/pcap)
   schemas/            # JSON Schema (header.json, summary.json, capability, logging_config)
   parquet/            # Arrow schema definitions per log file

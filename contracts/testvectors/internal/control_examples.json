@@ -1,0 +1,72 @@
+{
+  "description": "Internal control-API message examples. Each validates against its schema. Walks one probe-only test through the two hops.",
+  "examples": [
+    {
+      "name": "start_test",
+      "schema": "internal_start_test.schema.json",
+      "message": {
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+        "device_id": "dev_01HZ8PQRS0000000000000001",
+        "server_host": "10.0.0.1",
+        "plan": {
+          "name": "probe_only_v1",
+          "version": 1,
+          "duration_sec": 60,
+          "flows": [
+            { "flow_id": 1, "type": "probe", "rate_pps": 10 }
+          ]
+        }
+      }
+    },
+    {
+      "name": "generator_prepare",
+      "schema": "internal_generator_prepare.schema.json",
+      "message": {
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+        "flow": { "flow_id": 1, "type": "probe", "rate_pps": 10 },
+        "server_port": 41000,
+        "node_log_dir": "/var/lib/mp/session_2026_05_23/test_001/server"
+      }
+    },
+    {
+      "name": "generator_status_running",
+      "schema": "internal_generator_status.schema.json",
+      "message": {
+        "generator_id": "gen_01HZ8R9F0J2YK3P5Q7S9V1W3Z1",
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+        "flow_id": 1,
+        "state": "RUNNING",
+        "bound_port": 41000,
+        "counters": { "packets_sent": 300, "packets_received": 300, "dropped_rows": 0 }
+      }
+    },
+    {
+      "name": "test_status_waiting_for_client",
+      "schema": "internal_test_status.schema.json",
+      "message": {
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+        "device_id": "dev_01HZ8PQRS0000000000000001",
+        "state": "WAITING_FOR_CLIENT",
+        "flow_bindings": [ { "flow_id": 1, "server_port": 41000 } ],
+        "generators": [
+          { "flow_id": 1, "generator_id": "gen_01HZ8R9F0J2YK3P5Q7S9V1W3Z1", "state": "READY" }
+        ],
+        "result": null
+      }
+    },
+    {
+      "name": "test_status_done",
+      "schema": "internal_test_status.schema.json",
+      "message": {
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+        "device_id": "dev_01HZ8PQRS0000000000000001",
+        "state": "DONE",
+        "flow_bindings": [ { "flow_id": 1, "server_port": 41000 } ],
+        "generators": [
+          { "flow_id": 1, "generator_id": "gen_01HZ8R9F0J2YK3P5Q7S9V1W3Z1", "state": "STOPPED" }
+        ],
+        "result": "COMPLETED"
+      }
+    }
+  ]
+}

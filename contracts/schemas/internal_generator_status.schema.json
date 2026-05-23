@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/internal_generator_status.schema.json",
+  "title": "InternalGeneratorStatus",
+  "description": "Response to GET /internal/generators/{generator_id} and the body returned by .../stop (data-generator -> test-control). Live (or final) state + counters for one flow's generator.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generator_id", "test_id", "flow_id", "state", "counters"],
+  "properties": {
+    "generator_id": { "type": "string" },
+    "test_id":      { "type": "string", "pattern": "^tst_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "flow_id":      { "$ref": "https://measurement-platform/contracts/schemas/test_plan.schema.json#/$defs/FlowId" },
+    "state": {
+      "type": "string",
+      "enum": ["INITIALIZING", "READY", "WAITING_FOR_CLIENT", "RUNNING", "STOPPING", "STOPPED", "FAILED"]
+    },
+    "bound_port": {
+      "type": ["integer", "null"], "minimum": 1024, "maximum": 65535,
+      "description": "Port actually bound; null before READY."
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["packets_sent", "packets_received", "dropped_rows"],
+      "properties": {
+        "packets_sent":     { "type": "integer", "minimum": 0 },
+        "packets_received": { "type": "integer", "minimum": 0 },
+        "bytes_sent":       { "type": "integer", "minimum": 0 },
+        "bytes_received":   { "type": "integer", "minimum": 0 },
+        "dropped_rows": {
+          "type": "integer", "minimum": 0,
+          "description": "Logger-sink rows dropped under ring overflow (see logger_sink.md). >0 marks the test PARTIAL."
+        }
+      }
+    },
+    "error": { "type": ["string", "null"], "description": "Diagnostic when state is FAILED." }
+  }
+}
