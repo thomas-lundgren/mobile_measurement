@@ -81,8 +81,8 @@ All timestamps use two parallel clock domains:
 
 | Field | Purpose |
 |---|---|
-| `t_mono_ns` | Local monotonic ordering |
-| `t_utc_ns` | Cross-device/server correlation |
+| `mono_ns` | Local monotonic ordering |
+| `utc_ns` | Cross-device/server correlation |
 
 Monotonic timestamps are authoritative for:
 
@@ -1122,7 +1122,7 @@ Packet metadata.
 
 Fields:
 
-- timestamps (`t_mono_ns`, `t_utc_ns`)
+- timestamps (`mono_ns`, `utc_ns`)
 - flow IDs
 - protocol
 - ports
@@ -1140,7 +1140,7 @@ Radio metrics.
 
 Fields (standard Android Telephony APIs, Pixel 9 Pro reference):
 
-- `t_mono_ns`, `t_utc_ns` — sample timestamp
+- `mono_ns`, `utc_ns` — sample timestamp
 - `pci` — Physical Cell ID
 - `nci` — NR Cell Identity
 - `tac` — Tracking Area Code
