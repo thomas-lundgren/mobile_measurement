@@ -133,7 +133,7 @@ impl CoreState {
                     send_mono_ns: ts.mono_ns,
                 };
                 let bytes = pkt.to_bytes();
-                if let Err(e) = socket.send(&bytes) {
+                if let Err(e) = socket.send(&bytes[..]) {
                     let mut s = stats.lock().unwrap();
                     s.errors.push(format!("send error: {}", e));
                     continue;
@@ -147,9 +147,7 @@ impl CoreState {
                 }
 
                 if let Ok(n) = socket.recv(&mut recv_buf) {
-                    if n >= ProbePacket::SIZE {
-                        let echoed =
-                            ProbePacket::decode(&recv_buf[..ProbePacket::SIZE].try_into().unwrap());
+                    if let Ok(echoed) = ProbePacket::decode(&recv_buf[..n]) {
                         let recv_ts = Timestamp::now();
                         {
                             let mut s = stats.lock().unwrap();
@@ -194,9 +192,7 @@ impl CoreState {
             let deadline = std::time::Instant::now() + Duration::from_millis(500);
             while std::time::Instant::now() < deadline {
                 if let Ok(n) = socket.recv(&mut recv_buf) {
-                    if n >= ProbePacket::SIZE {
-                        let echoed =
-                            ProbePacket::decode(&recv_buf[..ProbePacket::SIZE].try_into().unwrap());
+                    if let Ok(echoed) = ProbePacket::decode(&recv_buf[..n]) {
                         let recv_ts = Timestamp::now();
                         {
                             let mut s = stats.lock().unwrap();

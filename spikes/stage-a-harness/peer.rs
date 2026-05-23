@@ -10,8 +10,7 @@ fn main() -> std::io::Result<()> {
     let mut buf = [0u8; 2048];
     loop {
         let (n, peer) = socket.recv_from(&mut buf)?;
-        if n >= ProbePacket::SIZE {
-            let _pkt = ProbePacket::decode(&buf[..ProbePacket::SIZE].try_into().unwrap());
+        if ProbePacket::decode(&buf[..n]).is_ok() {
             socket.send_to(&buf[..n], &peer)?;
         }
     }
