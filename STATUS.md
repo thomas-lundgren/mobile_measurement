@@ -4,9 +4,26 @@
 
 ## Summary
 
-The project has moved from **planning-only** to **active implementation**. Stage A (desktop JVM) and Stage B (Pixel 9 Pro physical device) are both complete — all checks pass. **Phase-0 contracts are complete**: every remediation-tracked contract item is drafted and validated (JSON Schema validation or hex/SQL round-trip). What remains of Phase 0 is Phase-1-coupled (the utoipa-generated OpenAPI, the auth-signing golden vector) rather than hand-authored contract work. No production server or Android logger code exists yet — only the spike artifacts, the contracts, and a skeletal workspace.
+Stage A + Stage B spikes complete, **Phase-0 contracts complete**, and **Phase 1 (server + protocol loopback) complete**: the full server-side control plane and all three traffic types run end to end on localhost, proven by an in-process integration test, with no Android needed. `cargo test --workspace` green (23 test suites). The Rust server is real; the Android apps (Phase 2/3) and analysis toolchain (Phase 4) are not yet built.
 
-The working tree is a **git repository** (initialized 2026-05-22; `.gitignore` covers Rust `target/`, Python `venv/`, Gradle/Android caches, throwaway keystores, spike runtime artifacts, and built `jniLibs` `.so`).
+The working tree is a **git repository** (initialized 2026-05-22; `.gitignore` covers Rust `target/`, Python `venv/`, Gradle/Android caches, throwaway keystores, spike runtime artifacts, and built `jniLibs` `.so`). Note: a full debug `target/` reaches ~19 GB — `cargo clean` between large work blocks keeps disk in check.
+
+### Phase 1 — COMPLETE (2026-05-23)
+
+Cargo workspace: `core` (shared engine/codec/logger/auth), `server/contracts-rs` (Rust DTOs+enums, parity-tested), `server/server-main` (axum REST + sqlx), `server/test-control`, `server/data-generator`.
+
+- **1a** workspace + mp-contracts (enums/versions parity gate, DTOs).
+- **1b** core reconciliation: framed `(pkt_t,ver)` packets + golden vectors; `core::auth` verify/sign + auth_signing golden vector; full packets Parquet schema + wait-free SPSC logger sink (drop+count).
+- **1c** server-main DB (sqlx/SQLite, migration from `db/schema.sql` + drift gate) + device registry.
+- **1d** device auth (enroll/challenge/verify) + operator login (HS256 JWT); tokens stored as hashes only.
+- **1e** device control plane: register (→ effective LoggingConfig, `effective ⊆ capability`), command poll/ack queue, status upsert.
+- **1f** data-generator: probe echo + internal control API + SPSC sink → server Parquet.
+- **1g** test-control: per-device state machine, port allocation, generator coordination (HTTP to data-generator).
+- **1h** 3-phase resumable upload (summary/manifest → per-file PUT w/ sha256 verify → complete + tree assembly).
+- **1i** operator orchestration (`POST /tests`) + **full probe end-to-end integration test** + code-first OpenAPI (`contracts/openapi/openapi.yaml`) with a drift gate.
+- **1j** realtime UDP (both directions, OWD/jitter inputs) + bulk TCP (both directions) generators.
+
+Transport is **plain HTTP on loopback** in dev (TLS deferred to Phase-5 hardening, per the Phase-1 design). Auth JWT = HS256.
 
 **Long-term direction:** The platform is designed to grow from a "test instrument" into a continuous network-quality probe that logs real app traffic and monitors latency to arbitrary destinations. See `planning/long_term_traffic_monitoring.md` for the growth roadmap. The MVP architecture (shared Rust core, segmented Parquet, dual clocks, server-configured logging) is intentionally built to support this without rewrite.
 
@@ -180,20 +197,14 @@ The single-source-of-truth boundary definitions. Every schema ships with golden 
 
 **All remediation contract items resolved:** 1.1, 1.2 (test plan + RUN_TEST), 1.3 (upload protocol), 1.4 (`supported_features` dropped), 2.1 (header metadata + parquet join columns), 2.2/2.3 (bidirectional = two flows), 2.8 (per-flow port via flow_bindings), 3.3 (DB schema), 3.4 (internal control API), 3.6 (device status), 3.7 (controller REST), 4.2/4.3/4.4 (interval/direction/event_metadata), M3 (version bump policy), M4b (test_result + PARTIAL rule).
 
-**Phase-1-coupled remnants** (not hand-authored contract work — they land with the server code):
-- OpenAPI assembly via `utoipa` (emits authoritative `contracts/openapi/openapi.yaml`; replaces the two `planning/*_openapi_sketch.yaml`).
-- `testvectors/auth_signing/` cross-platform ECDSA golden vector (pairs with writing the Rust verifier).
-- Reconcile spec §12 timestamp naming (`t_mono_ns` → `mono_ns`) — doc cleanup.
-- `core/packet.rs` + `core/log_writer.rs` reconciliation to the framed packet + full log schemas.
+All Phase-1-coupled contract remnants are now resolved (utoipa OpenAPI + drift gate, auth_signing vector, spec §12 rename, core reconciliation).
 
-### Phase 1 — Server Skeleton (not started)
+### Phase 1 — Server skeleton + protocol loopback (COMPLETE; see Summary)
 
-- `server-main`: REST endpoints, device registry, command queue, persistence (sqlx)
-- `test-control`: per-device state machine, port allocation, generator lifecycle
-- `data-generator`: UDP probe echo first, then realtime UDP, then bulk TCP
-- Synthetic test client
-
-**Blocked by:** Phase 0 contracts.
+Deferred (optional polish, not blocking Phase 2):
+- Standalone `test-client` binary + `scripts/e2e_probe.sh` (the in-process integration test is the authoritative proof; a CLI client + shell wrapper is convenience for manual runs).
+- Clippy cleanup pass for a `-D warnings` CI gate (a few style lints remain in core 1b code).
+- Per-connection real-time tuning (CPU pinning / SCHED_FIFO) — deferred to hardening.
 
 ### Phase 2 — Android Logger MVP (not started)
 
@@ -222,15 +233,12 @@ Real Android logger app (not the throwaway spike). Depends on:
 
 ## Next Recommended Steps
 
-Spike gates are green and **Phase-0 contracts are complete**. The next move is Phase 1 (the server skeleton), which also absorbs the Phase-1-coupled contract remnants:
+Spikes, Phase 0, and Phase 1 are complete. The server is the reference implementation the mobile must match. Options, in priority order:
 
-1. **Phase 1 server skeleton** — wire `axum` + `utoipa` + `sqlx` into `server/`. This:
-   - turns the JSON Schemas into live Rust DTOs and **emits the authoritative `contracts/openapi/openapi.yaml`** (replacing the two `planning/*_openapi_sketch.yaml`);
-   - applies `db/schema.sql` as the first sqlx migration;
-   - implements the device control plane (enroll / challenge / verify / register / command-poll / status / upload) and the internal control API (HTTP+JSON).
-2. **Reconcile core to contracts** — bring `core/packet.rs` to the `(pkt_t, ver)` framing and `core/log_writer.rs` to the full packets schema; add the SPSC logger-sink ring per `internal/logger_sink.md`.
-3. **Add the `auth_signing` golden vector** alongside the Rust verifier (pins the DER-vs-P1363 interop bug).
-4. **Doc cleanup** — reconcile spec §12 `t_mono_ns` → `mono_ns`.
+1. **Phase 2 — Android Logger MVP.** Integrate the shared Rust `core` via JNI (sockets + dual clock + packet codec + SPSC logger sink), wrap it in the Java foreground service + control/REST client, and interop-test against the Phase-1 server. The synthetic-client integration test (`e2e_probe.rs`) + the generated OpenAPI are the conformance targets. Exit: a Pixel 9 Pro runs a full test, logs locally, uploads.
+2. **Phase 4 — Analysis toolchain (Python)** can start in parallel: tolerant Parquet loaders against the `parquet/*.yaml` schemas; OWD-with-uncertainty, RTT/jitter/loss; uses real uploaded sessions from the server.
+3. **Phase 3 — Android Controller** (operator UI) — generate a Kotlin client from `contracts/openapi/openapi.yaml`.
+4. **Phase-1 polish** (deferred): `test-client` bin + `e2e_probe.sh`; clippy `-D warnings` gate.
 
 ---
 
