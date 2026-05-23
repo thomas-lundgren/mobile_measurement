@@ -1,0 +1,41 @@
+{
+  "schema": "../../schemas/device_status.schema.json",
+  "examples": [
+    {
+      "name": "idle_charging",
+      "status": {
+        "logger_state": "IDLE",
+        "current_test_id": null,
+        "logging_config_version": 7,
+        "sampled_at": { "mono_ns": 882013440000, "utc_ns": 1747987200000000000 },
+        "battery": { "level_pct": 84, "charging": true },
+        "storage": { "free_bytes": 41234567890, "total_bytes": 128000000000 },
+        "pending_uploads": 0,
+        "radio": { "pci": 301, "nci": 12345678901, "rsrp": -91, "rsrq": -11, "sinr": 14 }
+      }
+    },
+    {
+      "name": "running_test",
+      "status": {
+        "logger_state": "RUNNING_TEST",
+        "current_test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+        "logging_config_version": 7,
+        "sampled_at": { "mono_ns": 1042013440000, "utc_ns": 1747987360000000000 },
+        "battery": { "level_pct": 79, "charging": false },
+        "storage": { "free_bytes": 40987654321 },
+        "pending_uploads": 2,
+        "radio": { "pci": 305, "nci": 12345679000, "rsrp": -103, "rsrq": -14, "sinr": 6 }
+      }
+    },
+    {
+      "name": "minimal_no_radio",
+      "notes": "Smallest valid heartbeat: required fields only, radio unavailable.",
+      "status": {
+        "logger_state": "ERROR",
+        "logging_config_version": 7,
+        "sampled_at": { "mono_ns": 5000000000, "utc_ns": 1747987400000000000 },
+        "radio": null
+      }
+    }
+  ]
+}

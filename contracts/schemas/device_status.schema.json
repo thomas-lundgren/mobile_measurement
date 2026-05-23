@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/device_status.schema.json",
+  "title": "DeviceStatus",
+  "description": "Body of POST /api/v1/devices/{device_id}/status (remediation 3.6). A periodic device heartbeat: where the logger is in its state machine, what config version it holds (so the server can detect drift and push SET_LOGGING_CONFIG), and health (battery / storage / radio). The server derives device_id from the session token, not from the body or path.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["logger_state", "logging_config_version", "sampled_at"],
+  "properties": {
+    "logger_state": {
+      "type": "string",
+      "enum": [
+        "INITIALIZING", "REGISTERING", "IDLE", "WAITING_FOR_TEST",
+        "PREPARING", "RUNNING_TEST", "COOLDOWN", "UPLOAD_PENDING",
+        "UPLOADING", "ERROR"
+      ],
+      "description": "Current logger state machine value (enums.yaml logger_states)."
+    },
+    "current_test_id": {
+      "type": ["string", "null"],
+      "pattern": "^tst_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "The test in progress, when logger_state is PREPARING / RUNNING_TEST / COOLDOWN; null otherwise."
+    },
+    "logging_config_version": {
+      "type": "integer", "minimum": 1,
+      "description": "Version of the LoggingConfig the device currently holds. If the server's effective version is higher, it pushes SET_LOGGING_CONFIG."
+    },
+    "sampled_at": {
+      "$ref": "#/$defs/DualClock",
+      "description": "When this status snapshot was taken on the device."
+    },
+
+    "battery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level_pct", "charging"],
+      "properties": {
+        "level_pct": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "charging":  { "type": "boolean" }
+      },
+      "description": "Battery health — drives operator decisions about test scheduling and feature trimming."
+    },
+
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["free_bytes"],
+      "properties": {
+        "free_bytes":  { "type": "integer", "minimum": 0, "description": "Free space in app-private storage." },
+        "total_bytes": { "type": "integer", "minimum": 0 }
+      },
+      "description": "Storage headroom — logging-first means a full disk stops measurement, so the server watches this."
+    },
+
+    "pending_uploads": {
+      "type": "integer", "minimum": 0,
+      "description": "Count of completed tests with sealed files not yet fully uploaded."
+    },
+
+    "radio": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "pci":  { "type": ["integer", "null"] },
+        "nci":  { "type": ["integer", "null"] },
+        "rsrp": { "type": ["integer", "null"], "description": "dBm." },
+        "rsrq": { "type": ["integer", "null"], "description": "dB." },
+        "sinr": { "type": ["integer", "null"], "description": "dB." }
+      },
+      "description": "Coarse current serving-cell snapshot for the operator dashboard. NOT a measurement record — the authoritative radio trace is radio.parquet. Null when no serving cell / radio unavailable."
+    }
+  },
+
+  "$defs": {
+    "DualClock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mono_ns", "utc_ns"],
+      "properties": {
+        "mono_ns": { "type": "integer", "minimum": 0 },
+        "utc_ns":  { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
