@@ -63,5 +63,7 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
 | `schemas/header.schema.json` + `schemas/summary.schema.json` | drafted — header = versions + identities + test_plan + logging_config ($ref); summary = per-flow/radio/gps/upload stats (all optional). Examples validated. |
 | `schemas/device_status.schema.json` | drafted — POST /status heartbeat: logger_state, current_test_id, logging_config_version, battery, storage, pending_uploads, radio snapshot (remediation 3.6). Examples validated. |
 | `schemas/create_test_request.schema.json` + `planning/controller_openapi_sketch.yaml` | drafted — controller REST surface (list devices, create/stop test, query status, trigger upload, push logging-config) (remediation 3.7). `CreateTestRequest.plan` is exactly a `$ref` to TestPlan now (no duplicated flow defs). Examples validated. |
+| `internal/` (control_api + logger_sink) + `schemas/internal_*.json` | drafted — server-side control IPC over local HTTP+JSON + the generator→logger ring contract (remediation 3.4). Examples validated. |
+| `db/schema.sql` + `db/README.md` | drafted — server-main SQLite schema, 12 tables (auth / registry / orchestration / upload), enum CHECKs from enums.yaml (remediation 3.3). Executes + constraint-tested. |
 | `openapi/` | pending — wire `utoipa` into `server/` in Phase 1; replaces the `planning/*_openapi_sketch.yaml` design sketches |
 | `testvectors/auth_signing/` | pending — cross-platform ECDSA round-trip vector |
