@@ -41,10 +41,11 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
 3. **Version bumps are deliberate.** Additive changes to schemas do NOT
    bump `schema_version`; non-additive changes (remove, rename, change
    type) do. Bump policy in `versions/versions.yaml`.
-4. **OpenAPI is code-first.** During the planning phase the file
-   `planning/auth_openapi_sketch.yaml` is a design artefact, not the
-   source of truth; it will be deleted when the utoipa-generated
-   `openapi/openapi.yaml` lands in Phase 1.
+4. **OpenAPI is code-first.** During the planning phase the files
+   `planning/auth_openapi_sketch.yaml` (device + operator auth) and
+   `planning/controller_openapi_sketch.yaml` (operator REST surface) are
+   design artefacts, not the source of truth; they will be folded into the
+   utoipa-generated `openapi/openapi.yaml` in Phase 1, then deleted.
 
 ## Status
 
@@ -60,5 +61,6 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
 | `parquet/*.yaml` (packets / radio / gps / clock / events) | drafted — Arrow schemas with dual clock, join columns, nullable capability fields; `core/log_writer.rs` packets schema needs extending to match (currently 6 cols, contract has more). Examples not binary-tested yet. |
 | `schemas/header.schema.json` + `schemas/summary.schema.json` | drafted — header = versions + identities + test_plan + logging_config ($ref); summary = per-flow/radio/gps/upload stats (all optional). Examples validated. |
 | `schemas/device_status.schema.json` | drafted — POST /status heartbeat: logger_state, current_test_id, logging_config_version, battery, storage, pending_uploads, radio snapshot (remediation 3.6). Examples validated. |
-| `openapi/` | pending — wire `utoipa` into `server/` in Phase 1; replaces `planning/auth_openapi_sketch.yaml` |
+| `schemas/create_test_request.schema.json` + `planning/controller_openapi_sketch.yaml` | drafted — controller REST surface (list devices, create/stop test, query status, trigger upload, push logging-config) + the operator's port-less create-test body (remediation 3.7). Examples validated. |
+| `openapi/` | pending — wire `utoipa` into `server/` in Phase 1; replaces the `planning/*_openapi_sketch.yaml` design sketches |
 | `testvectors/auth_signing/` | pending — cross-platform ECDSA round-trip vector |

@@ -1,0 +1,192 @@
+# Design sketch — not the source of truth.
+#
+# Controller-facing (operator) REST surface. Resolves remediation 3.7.
+# The authoritative OpenAPI is generated code-first from annotated Rust DTOs
+# (utoipa) on server-main; this file pins endpoint shapes during planning and
+# will be folded into the generated contracts/openapi/openapi.yaml in Phase 1,
+# then deleted. Operator login lives in planning/auth_openapi_sketch.yaml.
+#
+# All endpoints require TLS + Authorization: Bearer <operator JWT> (role
+# operator or admin; viewer is read-only — GET endpoints only). Device tokens
+# are rejected on these paths (audience separation; development_plan.md §7).
+#
+# Controller actions map onto the device command queue (enums.yaml commands):
+#   POST /tests              -> RUN_TEST   (after test-control allocates ports)
+#   POST /tests/{id}/stop    -> STOP_TEST
+#   POST /devices/{id}/upload-> REQUEST_UPLOAD
+#   PUT  /devices/{id}/logging-config -> SET_LOGGING_CONFIG
+# The Controller never talks to test-control or data-generators directly; it
+# only drives server-main, which owns the queue (control flow per CLAUDE.md).
+
+openapi: 3.1.0
+info:
+  title: Measurement Platform — controller API (design sketch)
+  version: 0.0.0-draft
+
+paths:
+
+  /api/v1/devices:
+    get:
+      summary: List devices with their latest status
+      description: Registry entries joined with the most recent DeviceStatus heartbeat.
+      responses:
+        '200':
+          description: Device list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DeviceListItem' }
+
+  /api/v1/devices/{device_id}:
+    get:
+      summary: Device detail
+      parameters:
+        - { name: device_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Device detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceListItem' }
+        '404': { description: Unknown device }
+
+  /api/v1/devices/{device_id}/upload:
+    post:
+      summary: Ask a device to upload pending logs
+      description: Enqueues REQUEST_UPLOAD for the device.
+      parameters:
+        - { name: device_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '202': { description: Command queued }
+        '404': { description: Unknown device }
+
+  /api/v1/devices/{device_id}/logging-config:
+    put:
+      summary: Push an operator logging-config override to a device
+      description: >
+        Server resolves effective ⊆ capability, bumps logging_config_version,
+        and enqueues SET_LOGGING_CONFIG.
+      parameters:
+        - { name: device_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: 'https://measurement-platform/contracts/schemas/logging_config.schema.json'
+      responses:
+        '202': { description: Command queued }
+        '404': { description: Unknown device }
+
+  /api/v1/tests:
+    get:
+      summary: List tests
+      parameters:
+        - { name: device_id, in: query, required: false, schema: { type: string } }
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, enum: [IDLE, PREPARE, WAITING_FOR_GENERATOR, WAITING_FOR_CLIENT, RUNNING, STOPPING, DONE, FAILED] }
+      responses:
+        '200':
+          description: Test list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TestStatus' }
+    post:
+      summary: Create and start a test
+      description: >
+        Operator submits a port-less plan + target device. test-control
+        allocates one port per flow, assembles the RunTestPayload, and
+        enqueues RUN_TEST. Returns the new test in PREPARE.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: 'https://measurement-platform/contracts/schemas/create_test_request.schema.json'
+      responses:
+        '201':
+          description: Test created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TestStatus' }
+        '404': { description: Unknown device }
+        '409': { description: Device busy / not in a startable state }
+        '422': { description: Plan failed validation }
+
+  /api/v1/tests/{test_id}:
+    get:
+      summary: Test status + result
+      parameters:
+        - { name: test_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Test status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TestStatus' }
+        '404': { description: Unknown test }
+
+  /api/v1/tests/{test_id}/stop:
+    post:
+      summary: Stop a running test
+      description: Enqueues STOP_TEST; the test ends as CANCELLED.
+      parameters:
+        - { name: test_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '202': { description: Stop queued }
+        '404': { description: Unknown test }
+        '409': { description: Test not in a stoppable state }
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Operator JWT (role operator/admin; viewer is GET-only).
+
+  security:
+    - bearerAuth: []
+
+  schemas:
+
+    DeviceListItem:
+      type: object
+      description: Registry info + latest heartbeat. status fields are null until the first DeviceStatus arrives.
+      properties:
+        device_id:    { type: string }
+        device_label: { type: string }
+        model:        { type: string }
+        online:       { type: boolean, description: "Heartbeat seen within the liveness window." }
+        last_seen_utc_ns: { type: integer, format: int64 }
+        logger_state: { type: [string, "null"] }
+        current_test_id: { type: [string, "null"] }
+        logging_config_version: { type: [integer, "null"] }
+        battery_level_pct: { type: [integer, "null"] }
+        pending_uploads: { type: [integer, "null"] }
+
+    TestStatus:
+      type: object
+      properties:
+        test_id:   { type: string }
+        device_id: { type: string }
+        plan_name: { type: string }
+        state:
+          type: string
+          description: test-control per-device state (enums.yaml test_control_states).
+          enum: [IDLE, PREPARE, WAITING_FOR_GENERATOR, WAITING_FOR_CLIENT, RUNNING, STOPPING, DONE, FAILED]
+        result:
+          type: [string, "null"]
+          description: Terminal result once known (enums.yaml test_results); null while running.
+          enum: [COMPLETED, PARTIAL, FAILED, CANCELLED, null]
+        created_utc_ns: { type: integer, format: int64 }
+        started_utc_ns: { type: [integer, "null"], format: int64 }
+        ended_utc_ns:   { type: [integer, "null"], format: int64 }
+        upload_state:
+          type: [string, "null"]
+          enum: [PENDING, IN_PROGRESS, COMPLETE, FAILED, null]

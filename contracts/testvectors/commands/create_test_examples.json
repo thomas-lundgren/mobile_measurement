@@ -1,0 +1,50 @@
+{
+  "schema": "../../schemas/create_test_request.schema.json",
+  "description": "Operator -> server-main POST /tests bodies. Flows omit server_port (server allocates). The server turns each of these into a RunTestPayload (see run_test_examples.json).",
+  "examples": [
+    {
+      "name": "probe_only",
+      "request": {
+        "device_id": "dev_01HZ8PQRS0000000000000001",
+        "plan": {
+          "name": "probe_only_v1",
+          "version": 1,
+          "duration_sec": 60,
+          "flows": [
+            { "flow_id": 1, "type": "probe", "rate_pps": 10 }
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_with_override",
+      "request": {
+        "device_id": "dev_01HZ8PQRS0000000000000001",
+        "plan": {
+          "name": "commute_v1",
+          "version": 2,
+          "duration_sec": 600,
+          "flows": [
+            { "flow_id": 1, "type": "probe", "rate_pps": 10, "packet_size_bytes": 22 },
+            { "flow_id": 2, "type": "realtime_udp", "direction": "FromServer", "rate_pps": 50, "packet_size_bytes": 200 },
+            { "flow_id": 3, "type": "bulk_tcp", "direction": "ToServer" }
+          ]
+        },
+        "logging_config_override": {
+          "version": 8,
+          "radio": {
+            "serving_cell": ["pci", "nci", "rsrp", "rsrq", "sinr"],
+            "neighbor_cells": false, "lte_fallback": true,
+            "cqi": false, "mcs": false, "bler": false, "harq": false,
+            "drx": false, "bwp": false, "mimo_layers": false, "tx_power": false
+          },
+          "qos": { "5qi": false, "qfi": false, "slice_info": false },
+          "mobility": { "explicit_ho_events": false, "rrc_state": false, "beam_switch": false },
+          "events": ["TEST_START", "TEST_STOP"],
+          "gps": true,
+          "clock_calibration_interval_sec": 60
+        }
+      }
+    }
+  ]
+}
