@@ -27,5 +27,10 @@ uuid = { version = "1", features = ["v4", "serde"] }
 once_cell = "1"
 libc = "0.2"
 
+# Device auth (ECDSA P-256 / SPKI / ASN.1 DER) — shared verify + sign primitive
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8", "pem"] }
+spki = { version = "0.7", features = ["alloc", "pem"] }
+base64 = "0.22"
+
 [dev-dependencies]
 tempfile = "3"

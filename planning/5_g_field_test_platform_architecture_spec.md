@@ -412,7 +412,10 @@ Two principal types, one validation pipeline on `server-main`:
   Every later session: `POST /auth/challenge` returns a random nonce + `challenge_id`; the
   device signs the domain-separated blob
   `"mp-auth-v1" || server_id || challenge_id || nonce` with `ECDSA_P256_SHA256` /
-  `ASN.1 DER`; `POST /auth/verify` returns a short-lived opaque **session token** used as
+  `ASN.1 DER`. The `||` is realized canonically as the four UTF-8 strings joined by a
+  `0x1F` (Unit Separator) byte — unambiguous since the fields are ULIDs / base64 and contain
+  no control chars; the exact bytes are pinned in `contracts/testvectors/auth_signing/`.
+  `POST /auth/verify` returns a short-lived opaque **session token** used as
   `Authorization: Bearer …` on all subsequent calls. Identity is derived **from the verified
   signature, never from a client-claimed `device_id`**. Revocation = delete the pubkey row.
 

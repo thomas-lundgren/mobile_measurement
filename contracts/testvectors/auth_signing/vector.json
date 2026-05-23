@@ -1,0 +1,12 @@
+{
+  "alg": "ECDSA_P256_SHA256",
+  "challenge_id": "chl_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+  "description": "Cross-platform auth-signing golden vector. message = mp-auth-v1 0x1F server_id 0x1F challenge_id 0x1F nonce (UTF-8). ECDSA P-256 SHA-256, deterministic (RFC 6979); SPKI-DER pubkey + ASN.1-DER signature, base64. Every implementation (Rust verifier, Android/iOS signer) MUST reproduce signature_der_b64 and verify it.",
+  "domain": "mp-auth-v1",
+  "message_hex": "6d702d617574682d76311f7372765f6d61696e5f30311f63686c5f3031485a38523946304a32594b335035513753395631573358351f596d787662324a68633255324e473576626d4e6c4d7a4a696558526c63336834654868346548673d",
+  "nonce": "Ymxvb2Jhc2U2NG5vbmNlMzJieXRlc3h4eHh4eHg=",
+  "priv_key_pem": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgAQIDBAUGBwgJCgsM\nDQ4PEBESExQVFhcYGRobHB0eHyChRANCAARRXD1uueOWuQTT/sp/VP3NDMHpl783\nXcpRWtCmw7QDX0U2vjpQ8xj7+aVHWQKiIVAr7w1X4IxTsswKVvF9n5NU\n-----END PRIVATE KEY-----\n",
+  "pub_key_spki_b64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEUVw9brnjlrkE0/7Kf1T9zQzB6Ze/N13KUVrQpsO0A19FNr46UPMY+/mlR1kCoiFQK+8NV+CMU7LMClbxfZ+TVA==",
+  "server_id": "srv_main_01",
+  "signature_der_b64": "MEQCID2huUl/NqWVuLepCD1GRX/HPUM0ADUKut2B4kQlJ0ovAiAaGmgubc8WL9Rv+7a06g6fDoDczGwTiFDyTrPC2As2cg=="
+}
