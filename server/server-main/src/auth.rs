@@ -41,7 +41,12 @@ fn bearer(headers: &HeaderMap) -> Option<String> {
 
 // --- device: enroll --------------------------------------------------------
 
-async fn enroll(
+#[utoipa::path(
+    post, path = "/api/v1/devices/enroll", tag = "device-auth",
+    request_body = EnrollRequest,
+    responses((status = 200, body = EnrollResponse), (status = 401), (status = 400))
+)]
+pub async fn enroll(
     State(st): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<EnrollRequest>,
@@ -119,7 +124,12 @@ async fn enroll(
 
 // --- device: challenge -----------------------------------------------------
 
-async fn challenge(
+#[utoipa::path(
+    post, path = "/api/v1/auth/challenge", tag = "device-auth",
+    request_body = ChallengeRequest,
+    responses((status = 200, body = ChallengeResponse), (status = 404))
+)]
+pub async fn challenge(
     State(st): State<AppState>,
     Json(req): Json<ChallengeRequest>,
 ) -> Result<Json<ChallengeResponse>, AppError> {
@@ -161,7 +171,12 @@ async fn challenge(
 
 // --- device: verify --------------------------------------------------------
 
-async fn verify(
+#[utoipa::path(
+    post, path = "/api/v1/auth/verify", tag = "device-auth",
+    request_body = VerifyRequest,
+    responses((status = 200, body = VerifyResponse), (status = 401))
+)]
+pub async fn verify(
     State(st): State<AppState>,
     Json(req): Json<VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, AppError> {
@@ -227,7 +242,12 @@ pub struct Claims {
     pub exp: usize,
 }
 
-async fn login(
+#[utoipa::path(
+    post, path = "/api/v1/auth/login", tag = "operator-auth",
+    request_body = LoginRequest,
+    responses((status = 200, body = LoginResponse), (status = 401))
+)]
+pub async fn login(
     State(st): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, AppError> {

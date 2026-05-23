@@ -17,7 +17,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use mp_contracts::{
     FlowBinding, GeneratorRef, GeneratorState, InternalGeneratorPrepare, InternalStartTest,
-    InternalTestStatus, TestControlState, TestPlan, TestResult,
+    InternalTestStatus, TestControlState, TestResult,
 };
 
 use genclient::GenClient;
@@ -36,8 +36,6 @@ pub struct Config {
 struct TestEntry {
     test_id: String,
     device_id: String,
-    session_id: String,
-    plan: TestPlan,
     state: TestControlState,
     flow_bindings: Vec<FlowBinding>,
     generators: Vec<GeneratorRef>,
@@ -97,8 +95,6 @@ async fn start(
     let entry = Arc::new(Mutex::new(TestEntry {
         test_id: req.test_id.clone(),
         device_id: req.device_id.clone(),
-        session_id: req.session_id.clone(),
-        plan: req.plan.clone(),
         state: TestControlState::Prepare,
         flow_bindings: Vec::new(),
         generators: Vec::new(),

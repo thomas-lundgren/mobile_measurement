@@ -5,7 +5,7 @@ use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use fieldtest_core::auth as core_auth;
 use mp_contracts::*;
-use mp_server_main::{auth, build_router, commands, db, AppState};
+use mp_server_main::{build_router, commands, db, AppState};
 use p256::ecdsa::SigningKey;
 use serde_json::json;
 use tower::ServiceExt;

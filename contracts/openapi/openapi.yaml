@@ -1,0 +1,1070 @@
+openapi: 3.1.0
+info:
+  title: Measurement Platform API
+  description: ''
+  license:
+    name: ''
+  version: 0.1.0
+paths:
+  /api/v1/auth/challenge:
+    post:
+      tags:
+      - device-auth
+      operationId: challenge
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChallengeRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengeResponse'
+        '404':
+          description: ''
+  /api/v1/auth/login:
+    post:
+      tags:
+      - operator-auth
+      operationId: login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: ''
+  /api/v1/auth/verify:
+    post:
+      tags:
+      - device-auth
+      operationId: verify
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyResponse'
+        '401':
+          description: ''
+  /api/v1/devices/enroll:
+    post:
+      tags:
+      - device-auth
+      operationId: enroll
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrollRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrollResponse'
+        '400':
+          description: ''
+        '401':
+          description: ''
+  /api/v1/devices/register:
+    post:
+      tags:
+      - device
+      operationId: register
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Capability'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoggingConfig'
+        '401':
+          description: ''
+  /api/v1/devices/{device_id}/command:
+    get:
+      tags:
+      - device
+      operationId: poll_command
+      parameters:
+      - name: device_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCommand'
+        '204':
+          description: ''
+        '401':
+          description: ''
+  /api/v1/devices/{device_id}/command/{command_id}/ack:
+    post:
+      tags:
+      - device
+      operationId: ack_command
+      parameters:
+      - name: device_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: command_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: ''
+        '401':
+          description: ''
+        '404':
+          description: ''
+  /api/v1/devices/{device_id}/status:
+    post:
+      tags:
+      - device
+      operationId: post_status
+      parameters:
+      - name: device_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceStatus'
+        required: true
+      responses:
+        '204':
+          description: ''
+        '401':
+          description: ''
+  /api/v1/tests:
+    post:
+      tags:
+      - operator
+      operationId: create_test
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTestRequest'
+        required: true
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestStatus'
+        '401':
+          description: ''
+        '404':
+          description: ''
+        '409':
+          description: ''
+  /api/v1/tests/{test_id}:
+    get:
+      tags:
+      - operator
+      operationId: get_test
+      parameters:
+      - name: test_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestStatus'
+        '401':
+          description: ''
+        '404':
+          description: ''
+  /api/v1/tests/{test_id}/summary:
+    post:
+      tags:
+      - upload
+      operationId: summary
+      parameters:
+      - name: test_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadManifest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadInitResponse'
+        '401':
+          description: ''
+        '404':
+          description: ''
+  /api/v1/tests/{test_id}/upload/{upload_id}/complete:
+    post:
+      tags:
+      - upload
+      operationId: complete
+      parameters:
+      - name: test_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: upload_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: ''
+        '401':
+          description: ''
+        '409':
+          description: ''
+  /api/v1/tests/{test_id}/upload/{upload_id}/files/{path}:
+    put:
+      tags:
+      - upload
+      operationId: put_file
+      parameters:
+      - name: test_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: upload_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+        required: true
+      responses:
+        '204':
+          description: ''
+        '401':
+          description: ''
+        '422':
+          description: ''
+components:
+  schemas:
+    Battery:
+      type: object
+      required:
+      - level_pct
+      - charging
+      properties:
+        charging:
+          type: boolean
+        level_pct:
+          type: integer
+          format: int32
+          minimum: 0
+    Capability:
+      type: object
+      description: |-
+        What a device CAN do. The server resolves the effective LoggingConfig as
+        `intersection(plan_profile, capability)` + overrides.
+      required:
+      - radio
+      - qos
+      - mobility
+      - timestamp_sources
+      properties:
+        mobility:
+          $ref: '#/components/schemas/MobilityCapability'
+        qos:
+          $ref: '#/components/schemas/QosCapability'
+        radio:
+          $ref: '#/components/schemas/RadioCapability'
+        timestamp_sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimestampSource'
+    ChallengeRequest:
+      type: object
+      required:
+      - device_id
+      properties:
+        device_id:
+          type: string
+    ChallengeResponse:
+      type: object
+      required:
+      - challenge_id
+      - nonce
+      - server_id
+      - expires_at_utc_ns
+      - server_time_utc_ns
+      - auth_domain
+      properties:
+        auth_domain:
+          type: string
+        challenge_id:
+          type: string
+        expires_at_utc_ns:
+          type: integer
+          format: int64
+        nonce:
+          type: string
+          description: base64, 32 random bytes.
+        server_id:
+          type: string
+        server_time_utc_ns:
+          type: integer
+          format: int64
+    Command:
+      type: string
+      description: Server → device commands (`enums.yaml` commands).
+      enum:
+      - RunTest
+      - StopTest
+      - SetLoggingConfig
+      - RequestStatus
+      - RequestUpload
+      - RebootLogger
+    CreateTestRequest:
+      type: object
+      description: |-
+        Operator → server-main body of `POST /api/v1/tests`. `plan` is a port-less
+        TestPlan; the server allocates ports.
+      required:
+      - device_id
+      - plan
+      properties:
+        device_id:
+          type: string
+        logging_config_override:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/LoggingConfig'
+        plan:
+          $ref: '#/components/schemas/TestPlan'
+    DeviceCommand:
+      type: object
+      description: |-
+        One queued command delivered to a device. `payload` shape depends on
+        `command` (e.g. RunTestPayload for RUN_TEST); the device acks by
+        `command_id`.
+      required:
+      - command_id
+      - command
+      properties:
+        command:
+          $ref: '#/components/schemas/Command'
+        command_id:
+          type: integer
+          format: int64
+        payload:
+          type: object
+    DeviceStatus:
+      type: object
+      description: Body of `POST /devices/{id}/status` — the periodic device heartbeat.
+      required:
+      - logger_state
+      - logging_config_version
+      - sampled_at
+      properties:
+        battery:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/Battery'
+        current_test_id:
+          type:
+          - string
+          - 'null'
+        logger_state:
+          $ref: '#/components/schemas/LoggerState'
+        logging_config_version:
+          type: integer
+          format: int32
+          minimum: 0
+        pending_uploads:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        radio:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RadioSnapshot'
+        sampled_at:
+          $ref: '#/components/schemas/DualClock'
+        storage:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/Storage'
+    Direction:
+      type: string
+      description: Flow direction (`enums.yaml` directions). Bidirectional intentionally absent.
+      enum:
+      - FromServer
+      - ToServer
+    DualClock:
+      type: object
+      required:
+      - mono_ns
+      - utc_ns
+      properties:
+        mono_ns:
+          type: integer
+          format: int64
+        utc_ns:
+          type: integer
+          format: int64
+    EnrollRequest:
+      type: object
+      description: Body of `POST /devices/enroll` (Bearer = one-time enrollment token).
+      required:
+      - device_pubkey
+      - pubkey_format
+      - sig_alg
+      - sig_format
+      - platform
+      - protocol_version
+      properties:
+        device_pubkey:
+          type: string
+          description: SPKI DER, base64.
+        hw_info:
+          $ref: '#/components/schemas/HwInfo'
+        platform:
+          $ref: '#/components/schemas/Platform'
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 0
+        pubkey_format:
+          type: string
+        sig_alg:
+          type: string
+        sig_format:
+          type: string
+    EnrollResponse:
+      type: object
+      required:
+      - device_id
+      - node_id
+      - server_time_utc_ns
+      - schema_version
+      - logging_config_version
+      properties:
+        device_id:
+          type: string
+        logging_config_version:
+          type: integer
+          format: int32
+          minimum: 0
+        node_id:
+          type: string
+        schema_version:
+          type: integer
+          format: int32
+          minimum: 0
+        server_time_utc_ns:
+          type: integer
+          format: int64
+    Flow:
+      oneOf:
+      - type: object
+        required:
+        - flow_id
+        - rate_pps
+        - type
+        properties:
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          packet_size_bytes:
+            type: integer
+            format: int32
+            minimum: 0
+          rate_pps:
+            type: integer
+            format: int32
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - probe
+      - type: object
+        required:
+        - flow_id
+        - direction
+        - rate_pps
+        - packet_size_bytes
+        - type
+        properties:
+          direction:
+            $ref: '#/components/schemas/Direction'
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          packet_size_bytes:
+            type: integer
+            format: int32
+            minimum: 0
+          rate_pps:
+            type: integer
+            format: int32
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - realtime_udp
+      - type: object
+        required:
+        - flow_id
+        - direction
+        - type
+        properties:
+          direction:
+            $ref: '#/components/schemas/Direction'
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          target_bytes:
+            type:
+            - integer
+            - 'null'
+            format: int32
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - bulk_tcp
+      description: A flow, discriminated by `type`. Port-less — `Flow` carries no server_port.
+    FlowBinding:
+      type: object
+      description: |-
+        Server-allocated port for one flow, keyed by flow_id. Lives in
+        RunTestPayload / header, not in the plan.
+      required:
+      - flow_id
+      - server_port
+      properties:
+        flow_id:
+          type: integer
+          format: int32
+          minimum: 0
+        server_port:
+          type: integer
+          format: int32
+          minimum: 0
+    GateableEvent:
+      type: string
+      description: |-
+        The config-gateable subset of event types (operational events are always
+        logged regardless of config — see enums.yaml event_type_provenance).
+      enum:
+      - TEST_START
+      - TEST_STOP
+      - SIGNAL_LOSS_START
+      - SIGNAL_LOSS_END
+    HwInfo:
+      type: object
+      properties:
+        device_label:
+          type:
+          - string
+          - 'null'
+        manufacturer:
+          type:
+          - string
+          - 'null'
+        model:
+          type:
+          - string
+          - 'null'
+        os_version:
+          type:
+          - string
+          - 'null'
+    LoggerState:
+      type: string
+      description: Logger app state (`enums.yaml` logger_states).
+      enum:
+      - Initializing
+      - Registering
+      - Idle
+      - WaitingForTest
+      - Preparing
+      - RunningTest
+      - Cooldown
+      - UploadPending
+      - Uploading
+      - Error
+    LoggingConfig:
+      type: object
+      description: What a device WILL log. Server enforces `effective ⊆ capability`.
+      required:
+      - version
+      - radio
+      - qos
+      - mobility
+      - events
+      - gps
+      - clock_calibration_interval_sec
+      properties:
+        clock_calibration_interval_sec:
+          type: integer
+          format: int32
+          minimum: 0
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/GateableEvent'
+          description: Gateable measurement events to log live (subset of EventType).
+        gps:
+          type: boolean
+        mobility:
+          $ref: '#/components/schemas/MobilityLogging'
+        qos:
+          $ref: '#/components/schemas/QosLogging'
+        radio:
+          $ref: '#/components/schemas/RadioLogging'
+        version:
+          type: integer
+          format: int32
+          description: Monotonic config version; drives SET_LOGGING_CONFIG drift detection.
+          minimum: 0
+    LoginRequest:
+      type: object
+      required:
+      - username
+      - password
+      properties:
+        password:
+          type: string
+        username:
+          type: string
+    LoginResponse:
+      type: object
+      required:
+      - jwt
+      - expires_at_utc_ns
+      - role
+      properties:
+        expires_at_utc_ns:
+          type: integer
+          format: int64
+        jwt:
+          type: string
+        role:
+          $ref: '#/components/schemas/OperatorRole'
+    ManifestFile:
+      type: object
+      required:
+      - path
+      - size_bytes
+      - sha256
+      - encoding
+      properties:
+        encoding:
+          type: string
+        path:
+          type: string
+        sha256:
+          type: string
+          description: Lowercase hex SHA-256 of the stored (post-encoding) bytes.
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+    MobilityCapability:
+      type: object
+      properties:
+        beam_switch:
+          type: boolean
+        explicit_ho_events:
+          type: boolean
+        rrc_state:
+          type: boolean
+    MobilityLogging:
+      type: object
+      properties:
+        beam_switch:
+          type: boolean
+        explicit_ho_events:
+          type: boolean
+        rrc_state:
+          type: boolean
+    OperatorRole:
+      type: string
+      description: Operator JWT role claim (`enums.yaml` operator_roles).
+      enum:
+      - Viewer
+      - Operator
+      - Admin
+    Platform:
+      type: string
+      description: Device platform (`enums.yaml` platforms).
+      enum:
+      - Android
+      - Ios
+    QosCapability:
+      type: object
+      properties:
+        5qi:
+          type: boolean
+          description: 5G QoS Identifier availability.
+        qfi:
+          type: boolean
+        slice_info:
+          type: boolean
+    QosLogging:
+      type: object
+      properties:
+        5qi:
+          type: boolean
+        qfi:
+          type: boolean
+        slice_info:
+          type: boolean
+    RadioCapability:
+      type: object
+      required:
+      - serving_cell
+      properties:
+        bler:
+          type: boolean
+        bwp:
+          type: boolean
+        cqi:
+          type: boolean
+        drx:
+          type: boolean
+        harq:
+          type: boolean
+        lte_fallback:
+          type: boolean
+        mcs:
+          type: boolean
+        mimo_layers:
+          type: boolean
+        neighbor_cells:
+          type: boolean
+        serving_cell:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServingCellField'
+        tx_power:
+          type: boolean
+    RadioLogging:
+      type: object
+      required:
+      - serving_cell
+      properties:
+        bler:
+          type: boolean
+        bwp:
+          type: boolean
+        cqi:
+          type: boolean
+        drx:
+          type: boolean
+        harq:
+          type: boolean
+        lte_fallback:
+          type: boolean
+        mcs:
+          type: boolean
+        mimo_layers:
+          type: boolean
+        neighbor_cells:
+          type: boolean
+        serving_cell:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServingCellField'
+        tx_power:
+          type: boolean
+    RadioSnapshot:
+      type: object
+      description: Coarse serving-cell snapshot for the dashboard — NOT a measurement record.
+      properties:
+        nci:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        pci:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        rsrp:
+          type:
+          - integer
+          - 'null'
+          format: int32
+        rsrq:
+          type:
+          - integer
+          - 'null'
+          format: int32
+        sinr:
+          type:
+          - integer
+          - 'null'
+          format: int32
+    RunTestPayload:
+      type: object
+      description: Payload of the RUN_TEST command delivered to a device.
+      required:
+      - test_id
+      - server_host
+      - test_plan
+      - flow_bindings
+      properties:
+        flow_bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/FlowBinding'
+        logging_config_override:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/LoggingConfig'
+        server_host:
+          type: string
+        test_id:
+          type: string
+        test_plan:
+          $ref: '#/components/schemas/TestPlan'
+    ServingCellField:
+      type: string
+      description: Per-sample serving-cell fields a device can report.
+      enum:
+      - pci
+      - nci
+      - tac
+      - nrarfcn
+      - rsrp
+      - rsrq
+      - sinr
+    Storage:
+      type: object
+      required:
+      - free_bytes
+      properties:
+        free_bytes:
+          type: integer
+          format: int64
+        total_bytes:
+          type:
+          - integer
+          - 'null'
+          format: int64
+    TestControlState:
+      type: string
+      description: test-control per-device state (`enums.yaml` test_control_states).
+      enum:
+      - Idle
+      - Prepare
+      - WaitingForGenerator
+      - WaitingForClient
+      - Running
+      - Stopping
+      - Done
+      - Failed
+    TestPlan:
+      type: object
+      description: |-
+        The port-less recipe for one test. Server-allocated ports travel separately
+        as `FlowBinding`s (see RunTestPayload / header).
+      required:
+      - name
+      - version
+      - duration_sec
+      - flows
+      properties:
+        duration_sec:
+          type: integer
+          format: int32
+          minimum: 0
+        flows:
+          type: array
+          items:
+            $ref: '#/components/schemas/Flow'
+        name:
+          type: string
+        version:
+          type: integer
+          format: int32
+          minimum: 0
+    TestResult:
+      type: string
+      description: Terminal test result (`enums.yaml` test_results).
+      enum:
+      - Completed
+      - Partial
+      - Failed
+      - Cancelled
+    TestStatus:
+      type: object
+      description: Controller-facing test status.
+      required:
+      - test_id
+      - device_id
+      - plan_name
+      - state
+      - created_utc_ns
+      properties:
+        created_utc_ns:
+          type: integer
+          format: int64
+        device_id:
+          type: string
+        ended_utc_ns:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        plan_name:
+          type: string
+        result:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TestResult'
+        started_utc_ns:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        state:
+          $ref: '#/components/schemas/TestControlState'
+        test_id:
+          type: string
+    TimestampSource:
+      type: string
+      description: Available clock sources.
+      enum:
+      - mono
+      - utc
+      - gps
+    UploadInitResponse:
+      type: object
+      description: 'Response to phase 1: the resume mechanism (file-granular).'
+      required:
+      - upload_id
+      - needed_paths
+      properties:
+        needed_paths:
+          type: array
+          items:
+            type: string
+        upload_id:
+          type: string
+    UploadManifest:
+      type: object
+      description: Body of `POST /tests/{id}/summary` (upload phase 1).
+      required:
+      - test_result
+      - node
+      - files
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManifestFile'
+        node:
+          type: string
+          description: Only the mobile uploads.
+        result_reason:
+          type:
+          - string
+          - 'null'
+        test_result:
+          $ref: '#/components/schemas/TestResult'
+    VerifyRequest:
+      type: object
+      required:
+      - challenge_id
+      - signature
+      properties:
+        challenge_id:
+          type: string
+        signature:
+          type: string
+          description: base64 ASN.1-DER signature over the mp-auth-v1 blob.
+    VerifyResponse:
+      type: object
+      required:
+      - session_token
+      - expires_at_utc_ns
+      - logging_config_version
+      properties:
+        expires_at_utc_ns:
+          type: integer
+          format: int64
+        logging_config_version:
+          type: integer
+          format: int32
+          minimum: 0
+        session_token:
+          type: string

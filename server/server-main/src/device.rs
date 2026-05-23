@@ -35,7 +35,12 @@ async fn authed_for(st: &AppState, headers: &HeaderMap, path_device: Option<&str
     Ok(device_id)
 }
 
-async fn register(
+#[utoipa::path(
+    post, path = "/api/v1/devices/register", tag = "device",
+    request_body = Capability,
+    responses((status = 200, body = LoggingConfig), (status = 401))
+)]
+pub async fn register(
     State(st): State<AppState>,
     headers: HeaderMap,
     Json(cap): Json<Capability>,
@@ -57,7 +62,12 @@ async fn register(
     Ok(Json(resolve_effective_config(&cap, version as u32)))
 }
 
-async fn poll_command(
+#[utoipa::path(
+    get, path = "/api/v1/devices/{device_id}/command", tag = "device",
+    params(("device_id" = String, Path)),
+    responses((status = 200, body = DeviceCommand), (status = 204), (status = 401))
+)]
+pub async fn poll_command(
     State(st): State<AppState>,
     headers: HeaderMap,
     Path(device_id): Path<String>,
@@ -78,7 +88,12 @@ async fn poll_command(
     }
 }
 
-async fn ack_command(
+#[utoipa::path(
+    post, path = "/api/v1/devices/{device_id}/command/{command_id}/ack", tag = "device",
+    params(("device_id" = String, Path), ("command_id" = i64, Path)),
+    responses((status = 204), (status = 404), (status = 401))
+)]
+pub async fn ack_command(
     State(st): State<AppState>,
     headers: HeaderMap,
     Path((device_id, command_id)): Path<(String, i64)>,
@@ -91,7 +106,13 @@ async fn ack_command(
     }
 }
 
-async fn post_status(
+#[utoipa::path(
+    post, path = "/api/v1/devices/{device_id}/status", tag = "device",
+    params(("device_id" = String, Path)),
+    request_body = DeviceStatus,
+    responses((status = 204), (status = 401))
+)]
+pub async fn post_status(
     State(st): State<AppState>,
     headers: HeaderMap,
     Path(device_id): Path<String>,

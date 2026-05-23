@@ -45,7 +45,13 @@ fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-async fn summary(
+#[utoipa::path(
+    post, path = "/api/v1/tests/{test_id}/summary", tag = "upload",
+    params(("test_id" = String, Path)),
+    request_body = UploadManifest,
+    responses((status = 200, body = UploadInitResponse), (status = 401), (status = 404))
+)]
+pub async fn summary(
     State(st): State<AppState>,
     headers: HeaderMap,
     Path(test_id): Path<String>,
@@ -121,7 +127,13 @@ async fn load_manifest(st: &AppState, upload_id: &str, test_id: &str) -> Result<
     serde_json::from_str(&mj).map_err(|_| AppError::Internal)
 }
 
-async fn put_file(
+#[utoipa::path(
+    put, path = "/api/v1/tests/{test_id}/upload/{upload_id}/files/{path}", tag = "upload",
+    params(("test_id" = String, Path), ("upload_id" = String, Path), ("path" = String, Path)),
+    request_body(content = String, content_type = "application/octet-stream"),
+    responses((status = 204), (status = 422), (status = 401))
+)]
+pub async fn put_file(
     State(st): State<AppState>,
     headers: HeaderMap,
     Path((test_id, upload_id, path)): Path<(String, String, String)>,
@@ -167,7 +179,12 @@ async fn put_file(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn complete(
+#[utoipa::path(
+    post, path = "/api/v1/tests/{test_id}/upload/{upload_id}/complete", tag = "upload",
+    params(("test_id" = String, Path), ("upload_id" = String, Path)),
+    responses((status = 204), (status = 409), (status = 401))
+)]
+pub async fn complete(
     State(st): State<AppState>,
     headers: HeaderMap,
     Path((test_id, upload_id)): Path<(String, String)>,

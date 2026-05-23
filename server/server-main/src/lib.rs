@@ -5,6 +5,7 @@ pub mod commands;
 pub mod db;
 pub mod device;
 pub mod error;
+pub mod openapi;
 pub mod registry;
 pub mod resolve;
 pub mod state;

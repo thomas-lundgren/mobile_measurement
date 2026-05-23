@@ -29,7 +29,12 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/tests/{test_id}", get(get_test))
 }
 
-async fn create_test(
+#[utoipa::path(
+    post, path = "/api/v1/tests", tag = "operator",
+    request_body = CreateTestRequest,
+    responses((status = 201, body = TestStatus), (status = 401), (status = 404), (status = 409))
+)]
+pub async fn create_test(
     State(st): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<CreateTestRequest>,
@@ -157,7 +162,12 @@ async fn create_test(
     Ok((StatusCode::CREATED, Json(status)))
 }
 
-async fn get_test(
+#[utoipa::path(
+    get, path = "/api/v1/tests/{test_id}", tag = "operator",
+    params(("test_id" = String, Path)),
+    responses((status = 200, body = TestStatus), (status = 401), (status = 404))
+)]
+pub async fn get_test(
     State(st): State<AppState>,
     headers: HeaderMap,
     Path(test_id): Path<String>,
@@ -167,7 +177,7 @@ async fn get_test(
 }
 
 fn flow_descr(flow: Option<&mp_contracts::Flow>) -> (&'static str, Option<&'static str>) {
-    use mp_contracts::{Direction, Flow};
+    use mp_contracts::Flow;
     match flow {
         Some(Flow::Probe { .. }) => ("probe", None),
         Some(Flow::RealtimeUdp { direction, .. }) => ("realtime_udp", Some(dir_wire(*direction))),
