@@ -8,6 +8,7 @@ pub mod command;
 pub mod device_status;
 pub mod internal;
 pub mod logging_config;
+pub mod orchestration;
 pub mod test_plan;
 pub mod upload;
 
@@ -17,5 +18,6 @@ pub use command::*;
 pub use device_status::*;
 pub use internal::*;
 pub use logging_config::*;
+pub use orchestration::*;
 pub use test_plan::*;
 pub use upload::*;
