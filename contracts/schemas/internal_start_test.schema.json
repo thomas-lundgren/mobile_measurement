@@ -6,10 +6,11 @@
 
   "type": "object",
   "additionalProperties": false,
-  "required": ["test_id", "device_id", "server_host", "plan"],
+  "required": ["test_id", "device_id", "session_id", "server_host", "plan"],
   "properties": {
     "test_id":   { "type": "string", "pattern": "^tst_[0-9A-HJKMNP-TV-Z]{26}$" },
     "device_id": { "type": "string" },
+    "session_id": { "type": "string", "description": "Logging session; propagated to generator prepare for log join columns." },
     "server_host": {
       "type": "string", "minLength": 1, "maxLength": 253,
       "description": "Reachable server address the device will connect to; held by server-main as deployment config and passed through to the assembled RunTestPayload."

@@ -22,7 +22,7 @@ generator coordination to test-control.
 POST /internal/tests
 ```
 Body: [`internal_start_test.schema.json`](../schemas/internal_start_test.schema.json)
-— `{ test_id, device_id, server_host, plan (port-less TestPlan), logging_config_override? }`.
+— `{ test_id, device_id, session_id, server_host, plan (port-less TestPlan), logging_config_override? }`.
 test-control allocates one port per flow, spins up a generator per flow, and
 drives the per-device state machine (`enums.yaml test_control_states`).
 Returns `202 Accepted`.

@@ -2,10 +2,48 @@
 //! 1f covers the test-control → data-generator hop; the server-main →
 //! test-control hop DTOs are added in 1g.
 
-use crate::dto::test_plan::Flow;
-use crate::enums::GeneratorState;
+use crate::dto::logging_config::LoggingConfig;
+use crate::dto::test_plan::{Flow, FlowBinding, TestPlan};
+use crate::enums::{GeneratorState, TestControlState, TestResult};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+/// `POST /internal/tests` (server-main → test-control). server-main has
+/// assigned the ids and created the session/test rows; test-control allocates
+/// ports and coordinates generators.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct InternalStartTest {
+    pub test_id: String,
+    pub device_id: String,
+    pub session_id: String,
+    pub server_host: String,
+    pub plan: TestPlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logging_config_override: Option<LoggingConfig>,
+}
+
+/// `GET /internal/tests/{id}` (test-control → server-main).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct InternalTestStatus {
+    pub test_id: String,
+    pub device_id: String,
+    pub state: TestControlState,
+    #[serde(default)]
+    pub flow_bindings: Vec<FlowBinding>,
+    pub generators: Vec<GeneratorRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<TestResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Per-flow generator coordination state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct GeneratorRef {
+    pub flow_id: u32,
+    pub generator_id: String,
+    pub state: GeneratorState,
+}
 
 /// `POST /internal/generators` (test-control → data-generator). Configures one
 /// generator for one flow. device_id/session_id are carried so the server-side

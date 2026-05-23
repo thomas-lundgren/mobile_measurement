@@ -7,6 +7,7 @@
       "message": {
         "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
         "device_id": "dev_01HZ8PQRS0000000000000001",
+        "session_id": "ses_2026_05_23_001",
         "server_host": "10.0.0.1",
         "plan": {
           "name": "probe_only_v1",

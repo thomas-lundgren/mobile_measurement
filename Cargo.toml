@@ -4,6 +4,7 @@ members = [
     "server/contracts-rs",
     "server/server-main",
     "server/data-generator",
+    "server/test-control",
     "spikes/stage-a-harness",
 ]
 resolver = "2"
