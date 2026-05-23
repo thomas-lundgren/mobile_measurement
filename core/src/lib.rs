@@ -23,6 +23,23 @@ pub struct CoreConfig {
     pub log_dir: String,
     #[serde(default = "default_segment_rows")]
     pub segment_rows: usize,
+    // Join-column context for the packets log (constant per file). Defaulted
+    // for the spike; the data-generator/Logger supplies real values (1f/2).
+    #[serde(default = "default_unknown")]
+    pub device_id: String,
+    #[serde(default = "default_unknown")]
+    pub session_id: String,
+    #[serde(default = "default_unknown")]
+    pub test_id: String,
+    #[serde(default = "default_node")]
+    pub node: String,
+}
+
+fn default_unknown() -> String {
+    "unknown".to_string()
+}
+fn default_node() -> String {
+    "mobile".to_string()
 }
 
 fn default_segment_rows() -> usize {
@@ -75,8 +92,13 @@ pub struct CoreState {
 
 impl CoreState {
     pub fn new(config: CoreConfig) -> std::io::Result<Self> {
-        let writer =
-            SegmentedPacketWriter::new(&config.log_dir, config.segment_rows)?;
+        let ctx = log_writer::LogContext {
+            device_id: config.device_id.clone(),
+            session_id: config.session_id.clone(),
+            test_id: config.test_id.clone(),
+            node: config.node.clone(),
+        };
+        let writer = SegmentedPacketWriter::new(&config.log_dir, config.segment_rows, ctx)?;
         Ok(Self {
             _config: config,
             writer: Mutex::new(Some(writer)),
@@ -158,13 +180,13 @@ impl CoreState {
                         }
                         if let Ok(mut w) = writer.lock() {
                             if let Some(ref mut wr) = *w {
-                                let _ = wr.append(&PacketRow {
+                                let _ = wr.append(&PacketRow::probe(
                                     flow_id,
-                                    sequence_number: echoed.sequence_number,
-                                    direction: Direction::Received,
-                                    timestamp: recv_ts,
-                                    payload_size: n as u32,
-                                });
+                                    echoed.sequence_number,
+                                    Direction::Received,
+                                    recv_ts,
+                                    n as u32,
+                                ));
                             }
                         }
                     }
@@ -172,13 +194,13 @@ impl CoreState {
 
                 if let Ok(mut w) = writer.lock() {
                     if let Some(ref mut wr) = *w {
-                        let _ = wr.append(&PacketRow {
+                        let _ = wr.append(&PacketRow::probe(
                             flow_id,
-                            sequence_number: seq,
-                            direction: Direction::Sent,
-                            timestamp: ts,
-                            payload_size: bytes.len() as u32,
-                        });
+                            seq,
+                            Direction::Sent,
+                            ts,
+                            bytes.len() as u32,
+                        ));
                     }
                 }
 
@@ -203,13 +225,13 @@ impl CoreState {
                         }
                         if let Ok(mut w) = writer.lock() {
                             if let Some(ref mut wr) = *w {
-                                let _ = wr.append(&PacketRow {
+                                let _ = wr.append(&PacketRow::probe(
                                     flow_id,
-                                    sequence_number: echoed.sequence_number,
-                                    direction: Direction::Received,
-                                    timestamp: recv_ts,
-                                    payload_size: n as u32,
-                                });
+                                    echoed.sequence_number,
+                                    Direction::Received,
+                                    recv_ts,
+                                    n as u32,
+                                ));
                             }
                         }
                     }

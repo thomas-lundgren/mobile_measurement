@@ -32,5 +32,8 @@ p256 = { version = "0.13", features = ["ecdsa", "pkcs8", "pem"] }
 spki = { version = "0.7", features = ["alloc", "pem"] }
 base64 = "0.22"
 
+# Wait-free SPSC ring for the generator → logger handoff
+rtrb = "0.3"
+
 [dev-dependencies]
 tempfile = "3"
