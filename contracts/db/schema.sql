@@ -92,7 +92,7 @@ CREATE TABLE device_status (
                            ('INITIALIZING','REGISTERING','IDLE','WAITING_FOR_TEST',
                             'PREPARING','RUNNING_TEST','COOLDOWN','UPLOAD_PENDING',
                             'UPLOADING','ERROR')),
-  current_test_id        TEXT REFERENCES tests(test_id),
+  current_test_id        TEXT,  -- informational (dashboard); intentionally no FK so a heartbeat never 500s on test-row timing
   logging_config_version INTEGER NOT NULL,
   battery_level_pct      INTEGER CHECK (battery_level_pct BETWEEN 0 AND 100),
   battery_charging       INTEGER CHECK (battery_charging IN (0,1)),
