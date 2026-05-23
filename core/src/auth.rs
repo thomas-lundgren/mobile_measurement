@@ -74,6 +74,15 @@ pub fn sign_der_b64(signing_key: &SigningKey, message: &[u8]) -> String {
     b64().encode(sig.to_der().as_bytes())
 }
 
+/// True if `spki_b64` decodes to a valid P-256 SPKI public key. Used by the
+/// server to reject garbage at enrollment.
+pub fn pubkey_is_valid(spki_b64: &str) -> bool {
+    let Ok(der) = b64().decode(spki_b64) else {
+        return false;
+    };
+    VerifyingKey::from_public_key_der(&der).is_ok()
+}
+
 /// SPKI-DER (base64) public key for a signing key — what a device registers.
 pub fn public_key_spki_b64(signing_key: &SigningKey) -> String {
     let vk = VerifyingKey::from(signing_key);
