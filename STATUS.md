@@ -1,12 +1,12 @@
 # 5G Field Test Platform — Current Status
 
-> As of 2026-05-22
+> As of 2026-05-23
 
 ## Summary
 
-The project has moved from **planning-only** to **active implementation**. Stage A (desktop JVM) and Stage B (Pixel 9 Pro physical device) are both complete — all checks pass. The **Phase-0 contracts are now substantially authored** (versions, enums, packets, test plan / RUN_TEST, capability + logging config, upload protocol, log schemas), each with validated golden vectors / examples. No production server or Android logger code exists yet — only the spike artifacts, the contracts, and a skeletal workspace.
+The project has moved from **planning-only** to **active implementation**. Stage A (desktop JVM) and Stage B (Pixel 9 Pro physical device) are both complete — all checks pass. **Phase-0 contracts are complete**: every remediation-tracked contract item is drafted and validated (JSON Schema validation or hex/SQL round-trip). What remains of Phase 0 is Phase-1-coupled (the utoipa-generated OpenAPI, the auth-signing golden vector) rather than hand-authored contract work. No production server or Android logger code exists yet — only the spike artifacts, the contracts, and a skeletal workspace.
 
-The working tree is now a **git repository** (initialized 2026-05-22; `.gitignore` covers Rust `target/`, Python `venv/`, Gradle/Android caches, throwaway keystores, spike runtime artifacts, and built `jniLibs` `.so`).
+The working tree is a **git repository** (initialized 2026-05-22; `.gitignore` covers Rust `target/`, Python `venv/`, Gradle/Android caches, throwaway keystores, spike runtime artifacts, and built `jniLibs` `.so`).
 
 **Long-term direction:** The platform is designed to grow from a "test instrument" into a continuous network-quality probe that logs real app traffic and monitors latency to arbitrary destinations. See `planning/long_term_traffic_monitoring.md` for the growth roadmap. The MVP architecture (shared Rust core, segmented Parquet, dual clocks, server-configured logging) is intentionally built to support this without rewrite.
 
@@ -69,22 +69,30 @@ The working tree is now a **git repository** (initialized 2026-05-22; `.gitignor
 | Real APK size on device | ✅ 13 MB installed |
 | FG longevity (≥5 min, real) | ✅ Completed without OS kill |
 
-#### Contracts (`contracts/`) — DRAFTED 2026-05-22
+#### Contracts (`contracts/`) — COMPLETE 2026-05-23
 
-Authored the single-source-of-truth boundary definitions. Every schema ships with golden vectors / examples that are validated (JSON Schema validation or hex round-trip).
+The single-source-of-truth boundary definitions. Every schema ships with golden vectors / examples that are validated (JSON Schema validation, hex round-trip, or SQL execution).
 
 | Contract | Files | Notes |
 |----------|-------|-------|
 | Versions + auth constants | `versions/versions.yaml` | protocol/schema/auth_scheme versions; AUTH_* constants; bump policy |
-| Enums | `enums/enums.yaml` | commands, 3 state machines, flow types, direction (FromServer/ToServer — Bidirectional dropped), roles, platforms, event types (+ provenance), test results |
+| Enums | `enums/enums.yaml` | commands, 3 state machines, flow types, direction (FromServer/ToServer — Bidirectional dropped), roles, platforms, event types (+ 3-way provenance), test results |
 | Wire packets | `packets/{README,probe,realtime}.md` + `testvectors/packets/*.json` | `(pkt_t, ver)` framing, no runtime extensibility — grow by version bump; Probe v1 + Realtime v1; vectors round-trip |
-| Test plan / RUN_TEST | `schemas/{test_plan,run_test_command}.schema.json` + `testvectors/commands/` | per-flow server_port; bidirectional = two flows |
+| Test plan / RUN_TEST | `schemas/{test_plan,run_test_command}.schema.json` + `testvectors/commands/` | **port-less TestPlan** (single Flow source); ports as `flow_bindings`; bidirectional = two flows |
 | Capability + logging config | `schemas/{capability,logging_config}.schema.json` + testvectors | `supported_features` dropped; effective ⊆ capability |
 | Upload protocol | `upload/README.md` + `schemas/upload_{manifest,init_response}.schema.json` + testvectors | 3-phase resumable per-file; test_result + PARTIAL rule (loss ≠ PARTIAL) |
 | Log schemas | `parquet/*.yaml` (packets/radio/gps/clock/events) + `schemas/{header,summary}.schema.json` + `testvectors/log/` | dual clock, join columns, nullable capability fields, one JSON `event_metadata` column |
-| Auth endpoints (design sketch) | `planning/auth_openapi_sketch.yaml` | enrollment + challenge/response (P-256 Keystore/Secure Enclave, cross-platform); to be replaced by utoipa codegen |
+| Device status | `schemas/device_status.schema.json` + testvectors | POST /status heartbeat (logger_state, config version, battery, storage, radio snapshot) |
+| Controller REST | `schemas/create_test_request.schema.json` + `planning/controller_openapi_sketch.yaml` | operator surface (list/create/stop/status/upload); port-less create-test body |
+| Internal control IPC | `internal/{control_api,logger_sink}.md` + `schemas/internal_*.json` + testvectors | **local HTTP+JSON not gRPC**; generator→logger SPSC ring (drop+count) |
+| DB schema | `db/schema.sql` + `db/README.md` | server-main SQLite (WAL), 12 tables, enum CHECKs; executes + constraint-tested |
+| Auth + controller endpoints (design sketches) | `planning/{auth,controller}_openapi_sketch.yaml` | to be replaced by utoipa codegen in Phase 1 |
 
-**Auth model decided:** device auth is enrollment + per-session challenge/response over a non-exportable P-256 keypair (Android Keystore / iOS Secure Enclave), `ECDSA_P256_SHA256` / SPKI / ASN.1 DER pinned for cross-platform interop. Operator auth is username/password → JWT. Spec §5.3, dev-plan §7, dev-guide §8, AGENTS.md all updated.
+**Key decisions locked in this phase:**
+- **Auth:** device = enrollment + per-session challenge/response over a non-exportable P-256 keypair (Android Keystore / iOS Secure Enclave), `ECDSA_P256_SHA256` / SPKI / ASN.1 DER pinned cross-platform; operator = username/password → JWT. Spec §5.3, dev-plan §7, dev-guide §8, AGENTS.md updated.
+- **Wire formats grow by version bump, not runtime extensibility** (no TLV tails) — closed monorepo, lockstep release.
+- **Port-less TestPlan + flow_bindings**: the operator authors the recipe, the server owns the bindings — kills the flow-definition duplication.
+- **Real-time data path:** generator + logger = one process / separate threads on both nodes (forced on mobile by JNI); SPSC ring handoff with drop+count overflow; control IPC is local HTTP+JSON (gRPC dropped).
 
 **Known contract→code drift** (Phase-1 reconciliation): `core/src/packet.rs` (unframed 20-byte probe) and `core/src/log_writer.rs` (6-column packets schema) predate the contracts and must be brought up to the framed packet layout and full packets schema.
 
@@ -168,18 +176,15 @@ Authored the single-source-of-truth boundary definitions. Every schema ships wit
 
 ## Pending Work (by Phase)
 
-### Phase 0 — Contracts (mostly drafted; see Completed Work)
+### Phase 0 — Contracts (COMPLETE; see Completed Work)
 
-**Resolved this session:** 1.1, 1.2 (test plan + RUN_TEST), 1.3 (upload protocol), 1.4 (`supported_features` dropped), 2.1 (header metadata + parquet join columns), 2.2/2.3 (bidirectional = two flows), 2.8 (per-flow port), 4.2/4.3/4.4 (interval/direction/event_metadata), M3 (version bump policy), M4b (test_result + PARTIAL rule).
+**All remediation contract items resolved:** 1.1, 1.2 (test plan + RUN_TEST), 1.3 (upload protocol), 1.4 (`supported_features` dropped), 2.1 (header metadata + parquet join columns), 2.2/2.3 (bidirectional = two flows), 2.8 (per-flow port via flow_bindings), 3.3 (DB schema), 3.4 (internal control API), 3.6 (device status), 3.7 (controller REST), 4.2/4.3/4.4 (interval/direction/event_metadata), M3 (version bump policy), M4b (test_result + PARTIAL rule).
 
-**Still open in Phase 0:**
-- 3.6 Device `status` payload (`POST /status` body)
-- 3.7 Controller-facing REST endpoints (P1 — blocks Controller MVP)
-- 3.4 Internal test-control ↔ data-generator API
-- 3.3 DB schema (sqlx migrations)
-- `testvectors/auth_signing/` cross-platform ECDSA golden vector
-- OpenAPI assembly via `utoipa` (lands with the Phase-1 server; replaces `planning/auth_openapi_sketch.yaml`)
-- Reconcile spec §12 timestamp naming (`t_mono_ns` → `mono_ns`)
+**Phase-1-coupled remnants** (not hand-authored contract work — they land with the server code):
+- OpenAPI assembly via `utoipa` (emits authoritative `contracts/openapi/openapi.yaml`; replaces the two `planning/*_openapi_sketch.yaml`).
+- `testvectors/auth_signing/` cross-platform ECDSA golden vector (pairs with writing the Rust verifier).
+- Reconcile spec §12 timestamp naming (`t_mono_ns` → `mono_ns`) — doc cleanup.
+- `core/packet.rs` + `core/log_writer.rs` reconciliation to the framed packet + full log schemas.
 
 ### Phase 1 — Server Skeleton (not started)
 
@@ -217,11 +222,15 @@ Real Android logger app (not the throwaway spike). Depends on:
 
 ## Next Recommended Steps
 
-Spike gates are green and the core contracts are drafted. Remaining options, roughly in priority order:
+Spike gates are green and **Phase-0 contracts are complete**. The next move is Phase 1 (the server skeleton), which also absorbs the Phase-1-coupled contract remnants:
 
-1. **Finish Phase-0 control-plane contracts** — device `status` payload (3.6), controller REST endpoints (3.7, blocks Controller MVP), internal test-control ↔ data-generator API (3.4).
-2. **Begin Phase 1 server skeleton** — wire `axum` + `utoipa` into `server/`, which produces the authoritative `contracts/openapi/openapi.yaml` and lets the auth/test-plan/upload schemas become live Rust DTOs. Reconcile `core/packet.rs` + `core/log_writer.rs` to the drafted packet/log contracts as part of this.
-3. **Add the `auth_signing` golden vector** so the Rust verifier and (later) the Android signer are pinned against the DER-vs-P1363 interop bug.
+1. **Phase 1 server skeleton** — wire `axum` + `utoipa` + `sqlx` into `server/`. This:
+   - turns the JSON Schemas into live Rust DTOs and **emits the authoritative `contracts/openapi/openapi.yaml`** (replacing the two `planning/*_openapi_sketch.yaml`);
+   - applies `db/schema.sql` as the first sqlx migration;
+   - implements the device control plane (enroll / challenge / verify / register / command-poll / status / upload) and the internal control API (HTTP+JSON).
+2. **Reconcile core to contracts** — bring `core/packet.rs` to the `(pkt_t, ver)` framing and `core/log_writer.rs` to the full packets schema; add the SPSC logger-sink ring per `internal/logger_sink.md`.
+3. **Add the `auth_signing` golden vector** alongside the Rust verifier (pins the DER-vs-P1363 interop bug).
+4. **Doc cleanup** — reconcile spec §12 `t_mono_ns` → `mono_ns`.
 
 ---
 
