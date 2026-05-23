@@ -89,20 +89,6 @@ async fn probe_echo_end_to_end() {
 }
 
 #[tokio::test]
-async fn rejects_non_probe_flow() {
-    let st = AppState::default();
-    let dir = tempfile::tempdir().unwrap();
-    let (s, _) = send(&st, "POST", "/internal/generators", Some(json!({
-        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
-        "device_id": "dev_x", "session_id": "ses_x",
-        "flow": { "flow_id": 2, "type": "realtime_udp", "direction": "FromServer", "rate_pps": 50, "packet_size_bytes": 200 },
-        "server_port": free_port(),
-        "node_log_dir": dir.path().to_str().unwrap()
-    }))).await;
-    assert_eq!(s, StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
 async fn unknown_generator_404() {
     let st = AppState::default();
     let (s, _) = send(&st, "GET", "/internal/generators/gen_missing", None).await;

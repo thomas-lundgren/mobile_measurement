@@ -18,11 +18,18 @@ use axum::{Json, Router};
 use fieldtest_core::log_writer::{packet_channel, spawn_packet_writer, LogContext};
 use mp_contracts::{Flow, GeneratorCounters, GeneratorState, InternalGeneratorPrepare, InternalGeneratorStatus};
 
-use flow::{spawn_probe_echo, Counters};
+use flow::Counters;
 
 const RING_CAPACITY: usize = 8192;
 const SEGMENT_ROWS: usize = 1000;
 const READ_TIMEOUT: Duration = Duration::from_millis(200);
+
+fn bind_udp(port: u16) -> Result<UdpSocket, (StatusCode, String)> {
+    let s = UdpSocket::bind(("0.0.0.0", port))
+        .map_err(|e| (StatusCode::CONFLICT, format!("bind udp {port}: {e}")))?;
+    s.set_read_timeout(Some(READ_TIMEOUT)).map_err(internal)?;
+    Ok(s)
+}
 
 struct GeneratorEntry {
     test_id: String,
@@ -70,19 +77,11 @@ async fn prepare(
     State(st): State<AppState>,
     Json(req): Json<InternalGeneratorPrepare>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    if !matches!(req.flow, Flow::Probe { .. }) {
-        return Err((StatusCode::BAD_REQUEST, "only probe flows supported (1f)".into()));
-    }
     let flow_id = req.flow.flow_id();
 
-    let socket = UdpSocket::bind(("0.0.0.0", req.server_port))
-        .map_err(|e| (StatusCode::CONFLICT, format!("bind {}: {e}", req.server_port)))?;
-    socket.set_read_timeout(Some(READ_TIMEOUT)).map_err(internal)?;
-    let bound_port = socket.local_addr().map_err(internal)?.port();
-
     let ctx = LogContext {
-        device_id: req.device_id,
-        session_id: req.session_id,
+        device_id: req.device_id.clone(),
+        session_id: req.session_id.clone(),
         test_id: req.test_id.clone(),
         node: "server".to_string(),
     };
@@ -92,7 +91,34 @@ async fn prepare(
     let state = Arc::new(Mutex::new(GeneratorState::Ready));
     let counters = Arc::new(Counters::default());
     let stop = Arc::new(AtomicBool::new(false));
-    let handle = spawn_probe_echo(socket, sink, writer, flow_id, state.clone(), counters.clone(), stop.clone());
+
+    // bind the right socket per flow type and spawn its real-time thread
+    let (handle, bound_port) = match &req.flow {
+        Flow::Probe { .. } => {
+            let socket = bind_udp(req.server_port)?;
+            let port = socket.local_addr().map_err(internal)?.port();
+            (flow::spawn_probe_echo(socket, sink, writer, flow_id, state.clone(), counters.clone(), stop.clone()), port)
+        }
+        Flow::RealtimeUdp { direction, rate_pps, packet_size_bytes, .. } => {
+            let socket = bind_udp(req.server_port)?;
+            let port = socket.local_addr().map_err(internal)?.port();
+            let h = flow::spawn_realtime_udp(
+                socket, sink, writer, flow_id, *direction, *rate_pps, *packet_size_bytes as usize,
+                state.clone(), counters.clone(), stop.clone(),
+            );
+            (h, port)
+        }
+        Flow::BulkTcp { direction, target_bytes, .. } => {
+            let listener = std::net::TcpListener::bind(("0.0.0.0", req.server_port))
+                .map_err(|e| (StatusCode::CONFLICT, format!("bind tcp {}: {e}", req.server_port)))?;
+            let port = listener.local_addr().map_err(internal)?.port();
+            let h = flow::spawn_bulk_tcp(
+                listener, sink, writer, flow_id, *direction, target_bytes.map(|t| t as u64),
+                state.clone(), counters.clone(), stop.clone(),
+            );
+            (h, port)
+        }
+    };
 
     let generator_id = format!("gen_{}", ulid::Ulid::new());
     let entry = Arc::new(GeneratorEntry {
