@@ -15,22 +15,57 @@ use tower::ServiceExt;
 async fn state(upload_root: &std::path::Path) -> AppState {
     let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
     let url = format!("sqlite://{}/mp.db", dir.path().display());
-    AppState::new(db::connect(&url).await.unwrap(), "test-secret", "srv_test_01")
-        .with_upload_root(upload_root.to_path_buf())
+    AppState::new(
+        db::connect(&url).await.unwrap(),
+        "test-secret",
+        "srv_test_01",
+    )
+    .with_upload_root(upload_root.to_path_buf())
 }
 
-async fn req(state: &AppState, method: &str, path: &str, bearer: Option<&str>, body: Body, ctype: Option<&str>) -> (StatusCode, Vec<u8>) {
+async fn req(
+    state: &AppState,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    body: Body,
+    ctype: Option<&str>,
+) -> (StatusCode, Vec<u8>) {
     let mut b = Request::builder().method(method).uri(path);
-    if let Some(t) = bearer { b = b.header("authorization", format!("Bearer {t}")); }
-    if let Some(c) = ctype { b = b.header("content-type", c); }
-    let resp = build_router(state.clone()).oneshot(b.body(body).unwrap()).await.unwrap();
+    if let Some(t) = bearer {
+        b = b.header("authorization", format!("Bearer {t}"));
+    }
+    if let Some(c) = ctype {
+        b = b.header("content-type", c);
+    }
+    let resp = build_router(state.clone())
+        .oneshot(b.body(body).unwrap())
+        .await
+        .unwrap();
     let status = resp.status();
-    let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec();
+    let bytes = to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
     (status, bytes)
 }
 
-async fn json_req(state: &AppState, method: &str, path: &str, bearer: Option<&str>, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
-    let (s, bytes) = req(state, method, path, bearer, Body::from(body.to_string()), Some("application/json")).await;
+async fn json_req(
+    state: &AppState,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let (s, bytes) = req(
+        state,
+        method,
+        path,
+        bearer,
+        Body::from(body.to_string()),
+        Some("application/json"),
+    )
+    .await;
     let v = serde_json::from_slice(&bytes).unwrap_or(json!(null));
     (s, v)
 }
@@ -41,24 +76,54 @@ async fn device_session(st: &AppState) -> (String, String) {
         let secret: [u8; 32] = std::array::from_fn(|i| (i + 3) as u8);
         SigningKey::from_bytes(&secret.into()).unwrap()
     };
-    mp_server_main::registry::mint_enrollment_token(&st.pool, &mp_server_main::util::hash_token("tok"), 0, i64::MAX).await.unwrap();
+    mp_server_main::registry::mint_enrollment_token(
+        &st.pool,
+        &mp_server_main::util::hash_token("tok"),
+        0,
+        i64::MAX,
+    )
+    .await
+    .unwrap();
     let (_, b) = json_req(st, "POST", "/api/v1/devices/enroll", Some("tok"), json!({
         "device_pubkey": core_auth::public_key_spki_b64(&sk),
         "pubkey_format": AUTH_PUBKEY_FORMAT, "sig_alg": AUTH_SIGNING_ALG, "sig_format": AUTH_SIG_FORMAT,
         "platform": "android", "hw_info": {}, "protocol_version": PROTOCOL_VERSION
     })).await;
     let device_id = b["device_id"].as_str().unwrap().to_string();
-    let (_, b) = json_req(st, "POST", "/api/v1/auth/challenge", None, json!({"device_id": device_id})).await;
-    let (cid, nonce) = (b["challenge_id"].as_str().unwrap().to_string(), b["nonce"].as_str().unwrap().to_string());
-    let sig = core_auth::sign_der_b64(&sk, &core_auth::build_message(AUTH_DOMAIN, "srv_test_01", &cid, &nonce));
-    let (_, b) = json_req(st, "POST", "/api/v1/auth/verify", None, json!({"challenge_id": cid, "signature": sig})).await;
+    let (_, b) = json_req(
+        st,
+        "POST",
+        "/api/v1/auth/challenge",
+        None,
+        json!({"device_id": device_id}),
+    )
+    .await;
+    let (cid, nonce) = (
+        b["challenge_id"].as_str().unwrap().to_string(),
+        b["nonce"].as_str().unwrap().to_string(),
+    );
+    let sig = core_auth::sign_der_b64(
+        &sk,
+        &core_auth::build_message(AUTH_DOMAIN, "srv_test_01", &cid, &nonce),
+    );
+    let (_, b) = json_req(
+        st,
+        "POST",
+        "/api/v1/auth/verify",
+        None,
+        json!({"challenge_id": cid, "signature": sig}),
+    )
+    .await;
     (device_id, b["session_token"].as_str().unwrap().to_string())
 }
 
 /// Create a session + test row owned by the device (server-main does this in 1i).
 async fn make_test(st: &AppState, device_id: &str, test_id: &str) {
     sqlx::query("INSERT INTO sessions(session_id, device_id, started_at) VALUES('ses_up', ?, 0)")
-        .bind(device_id).execute(&st.pool).await.unwrap();
+        .bind(device_id)
+        .execute(&st.pool)
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO tests(test_id, session_id, device_id, plan_name, plan_version, plan_json, server_host, logging_config_json, logging_config_version, state, created_at) \
          VALUES (?, 'ses_up', ?, 'p', 1, '{}', 'h', '{}', 1, 'DONE', 0)",
@@ -67,7 +132,10 @@ async fn make_test(st: &AppState, device_id: &str, test_id: &str) {
 }
 
 fn manifest_file(path: &str, bytes: &[u8]) -> serde_json::Value {
-    let sha: String = Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect();
+    let sha: String = Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     json!({ "path": path, "size_bytes": bytes.len(), "sha256": sha, "encoding": "identity" })
 }
 
@@ -87,27 +155,67 @@ async fn full_upload_then_complete() {
     });
 
     // phase 1: summary → upload_id + both files needed
-    let (s, body) = json_req(&st, "POST", &format!("/api/v1/tests/{test_id}/summary"), Some(&session), manifest).await;
+    let (s, body) = json_req(
+        &st,
+        "POST",
+        &format!("/api/v1/tests/{test_id}/summary"),
+        Some(&session),
+        manifest,
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "summary: {body}");
     let upload_id = body["upload_id"].as_str().unwrap().to_string();
     assert_eq!(body["needed_paths"].as_array().unwrap().len(), 2);
 
     // phase 2: PUT both files
-    for (path, bytes) in [("header.json", &header), ("mobile/packets.parquet", &packets)] {
+    for (path, bytes) in [
+        ("header.json", &header),
+        ("mobile/packets.parquet", &packets),
+    ] {
         let url = format!("/api/v1/tests/{test_id}/upload/{upload_id}/files/{path}");
-        let (s, _) = req(&st, "PUT", &url, Some(&session), Body::from(bytes.clone()), Some("application/octet-stream")).await;
+        let (s, _) = req(
+            &st,
+            "PUT",
+            &url,
+            Some(&session),
+            Body::from(bytes.clone()),
+            Some("application/octet-stream"),
+        )
+        .await;
         assert_eq!(s, StatusCode::NO_CONTENT, "put {path}");
     }
 
     // phase 3: complete
-    let (s, _) = req(&st, "POST", &format!("/api/v1/tests/{test_id}/upload/{upload_id}/complete"), Some(&session), Body::empty(), None).await;
+    let (s, _) = req(
+        &st,
+        "POST",
+        &format!("/api/v1/tests/{test_id}/upload/{upload_id}/complete"),
+        Some(&session),
+        Body::empty(),
+        None,
+    )
+    .await;
     assert_eq!(s, StatusCode::NO_CONTENT);
 
     // tree assembled under upload_root/session/test/...
-    assert!(root.path().join("ses_up").join(test_id).join("header.json").exists());
-    assert!(root.path().join("ses_up").join(test_id).join("mobile/packets.parquet").exists());
+    assert!(root
+        .path()
+        .join("ses_up")
+        .join(test_id)
+        .join("header.json")
+        .exists());
+    assert!(root
+        .path()
+        .join("ses_up")
+        .join(test_id)
+        .join("mobile/packets.parquet")
+        .exists());
     // upload marked COMPLETE
-    let st_str: String = sqlx::query_scalar("SELECT state FROM uploads WHERE test_id = ?").bind(test_id).fetch_one(&st.pool).await.unwrap();
+    let st_str: String = sqlx::query_scalar("SELECT state FROM uploads WHERE test_id = ?")
+        .bind(test_id)
+        .fetch_one(&st.pool)
+        .await
+        .unwrap();
     assert_eq!(st_str, "COMPLETE");
 }
 
@@ -124,22 +232,52 @@ async fn resume_returns_only_missing() {
     let manifest = json!({ "test_result": "COMPLETED", "node": "mobile",
         "files": [ manifest_file("header.json", &a), manifest_file("mobile/clock.parquet", &b) ] });
 
-    let (_, body) = json_req(&st, "POST", &format!("/api/v1/tests/{test_id}/summary"), Some(&session), manifest.clone()).await;
+    let (_, body) = json_req(
+        &st,
+        "POST",
+        &format!("/api/v1/tests/{test_id}/summary"),
+        Some(&session),
+        manifest.clone(),
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap().to_string();
 
     // upload only header.json
     let url = format!("/api/v1/tests/{test_id}/upload/{upload_id}/files/header.json");
-    req(&st, "PUT", &url, Some(&session), Body::from(a.clone()), None).await;
+    req(
+        &st,
+        "PUT",
+        &url,
+        Some(&session),
+        Body::from(a.clone()),
+        None,
+    )
+    .await;
 
     // re-summary → only the clock file remains; same upload_id
-    let (_, body2) = json_req(&st, "POST", &format!("/api/v1/tests/{test_id}/summary"), Some(&session), manifest).await;
+    let (_, body2) = json_req(
+        &st,
+        "POST",
+        &format!("/api/v1/tests/{test_id}/summary"),
+        Some(&session),
+        manifest,
+    )
+    .await;
     assert_eq!(body2["upload_id"], upload_id, "idempotent upload_id");
     let needed = body2["needed_paths"].as_array().unwrap();
     assert_eq!(needed.len(), 1);
     assert_eq!(needed[0], "mobile/clock.parquet");
 
     // complete now fails (missing) → 409
-    let (s, _) = req(&st, "POST", &format!("/api/v1/tests/{test_id}/upload/{upload_id}/complete"), Some(&session), Body::empty(), None).await;
+    let (s, _) = req(
+        &st,
+        "POST",
+        &format!("/api/v1/tests/{test_id}/upload/{upload_id}/complete"),
+        Some(&session),
+        Body::empty(),
+        None,
+    )
+    .await;
     assert_eq!(s, StatusCode::CONFLICT);
 }
 
@@ -154,12 +292,27 @@ async fn hash_mismatch_rejected() {
     let good = b"the-real-bytes".to_vec();
     let manifest = json!({ "test_result": "COMPLETED", "node": "mobile",
         "files": [ manifest_file("header.json", &good) ] });
-    let (_, body) = json_req(&st, "POST", &format!("/api/v1/tests/{test_id}/summary"), Some(&session), manifest).await;
+    let (_, body) = json_req(
+        &st,
+        "POST",
+        &format!("/api/v1/tests/{test_id}/summary"),
+        Some(&session),
+        manifest,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap().to_string();
 
     // PUT different bytes → 422
     let url = format!("/api/v1/tests/{test_id}/upload/{upload_id}/files/header.json");
-    let (s, _) = req(&st, "PUT", &url, Some(&session), Body::from(b"tampered".to_vec()), None).await;
+    let (s, _) = req(
+        &st,
+        "PUT",
+        &url,
+        Some(&session),
+        Body::from(b"tampered".to_vec()),
+        None,
+    )
+    .await;
     assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
@@ -171,10 +324,24 @@ async fn foreign_test_and_unauth_rejected() {
     let manifest = json!({ "test_result": "COMPLETED", "node": "mobile", "files": [] });
 
     // unauthenticated
-    let (s, _) = json_req(&st, "POST", "/api/v1/tests/tst_x/summary", None, manifest.clone()).await;
+    let (s, _) = json_req(
+        &st,
+        "POST",
+        "/api/v1/tests/tst_x/summary",
+        None,
+        manifest.clone(),
+    )
+    .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
 
     // a test that doesn't exist / isn't owned → 404
-    let (s, _) = json_req(&st, "POST", "/api/v1/tests/tst_not_mine/summary", Some(&session), manifest).await;
+    let (s, _) = json_req(
+        &st,
+        "POST",
+        "/api/v1/tests/tst_not_mine/summary",
+        Some(&session),
+        manifest,
+    )
+    .await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }

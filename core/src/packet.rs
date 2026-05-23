@@ -24,7 +24,9 @@ impl std::fmt::Display for PacketError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PacketError::ShortBuffer => write!(f, "short packet buffer"),
-            PacketError::UnknownType(t, v) => write!(f, "unknown packet (pkt_t={t:#04x}, ver={v:#04x})"),
+            PacketError::UnknownType(t, v) => {
+                write!(f, "unknown packet (pkt_t={t:#04x}, ver={v:#04x})")
+            }
         }
     }
 }
@@ -153,13 +155,22 @@ mod tests {
 
     #[test]
     fn probe_roundtrip() {
-        let pkt = ProbePacket { flow_id: 42, sequence_number: 1_234_567_890, send_mono_ns: 98_765_432_100 };
+        let pkt = ProbePacket {
+            flow_id: 42,
+            sequence_number: 1_234_567_890,
+            send_mono_ns: 98_765_432_100,
+        };
         assert_eq!(ProbePacket::decode(&pkt.to_bytes()).unwrap(), pkt);
     }
 
     #[test]
     fn realtime_roundtrip_and_padding() {
-        let pkt = RealtimePacket { flow_id: 7, sequence_number: 42, send_mono_ns: 1_000_000_000, send_utc_ns: 1_747_900_000_000_000_000 };
+        let pkt = RealtimePacket {
+            flow_id: 7,
+            sequence_number: 42,
+            send_mono_ns: 1_000_000_000,
+            send_utc_ns: 1_747_900_000_000_000_000,
+        };
         assert_eq!(RealtimePacket::decode(&pkt.to_bytes()).unwrap(), pkt);
         let padded = pkt.to_bytes_padded(64);
         assert_eq!(padded.len(), 64);
@@ -169,13 +180,22 @@ mod tests {
 
     #[test]
     fn rejects_unknown_and_short() {
-        assert_eq!(Packet::decode(&[0xff, 0x01, 0, 0]), Err(PacketError::UnknownType(0xff, 0x01)));
-        assert_eq!(ProbePacket::decode(&[PKT_PROBE, VER_1, 0, 0]), Err(PacketError::ShortBuffer));
+        assert_eq!(
+            Packet::decode(&[0xff, 0x01, 0, 0]),
+            Err(PacketError::UnknownType(0xff, 0x01))
+        );
+        assert_eq!(
+            ProbePacket::decode(&[PKT_PROBE, VER_1, 0, 0]),
+            Err(PacketError::ShortBuffer)
+        );
         assert_eq!(Packet::decode(&[0x01]), Err(PacketError::ShortBuffer));
     }
 
     fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     fn vectors_dir() -> PathBuf {
@@ -184,8 +204,10 @@ mod tests {
 
     #[test]
     fn golden_probe_v1() {
-        let doc: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(vectors_dir().join("probe_v1.json")).unwrap()).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(vectors_dir().join("probe_v1.json")).unwrap(),
+        )
+        .unwrap();
         for case in doc["cases"].as_array().unwrap() {
             let name = case["name"].as_str().unwrap();
             let d = &case["decoded"];
@@ -196,14 +218,20 @@ mod tests {
             };
             let expected = hex_to_bytes(case["hex"].as_str().unwrap());
             assert_eq!(pkt.to_bytes().to_vec(), expected, "encode `{name}`");
-            assert_eq!(ProbePacket::decode(&expected).unwrap(), pkt, "decode `{name}`");
+            assert_eq!(
+                ProbePacket::decode(&expected).unwrap(),
+                pkt,
+                "decode `{name}`"
+            );
         }
     }
 
     #[test]
     fn golden_realtime_v1() {
-        let doc: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(vectors_dir().join("realtime_v1.json")).unwrap()).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(vectors_dir().join("realtime_v1.json")).unwrap(),
+        )
+        .unwrap();
         for case in doc["cases"].as_array().unwrap() {
             let name = case["name"].as_str().unwrap();
             let d = &case["decoded"];
@@ -215,8 +243,16 @@ mod tests {
             };
             let expected = hex_to_bytes(case["hex"].as_str().unwrap());
             let pad = case["trailing_pad_bytes"].as_u64().unwrap_or(0) as usize;
-            assert_eq!(pkt.to_bytes_padded(RealtimePacket::WIRE_LEN + pad), expected, "encode `{name}`");
-            assert_eq!(RealtimePacket::decode(&expected).unwrap(), pkt, "decode `{name}`");
+            assert_eq!(
+                pkt.to_bytes_padded(RealtimePacket::WIRE_LEN + pad),
+                expected,
+                "encode `{name}`"
+            );
+            assert_eq!(
+                RealtimePacket::decode(&expected).unwrap(),
+                pkt,
+                "decode `{name}`"
+            );
         }
     }
 }

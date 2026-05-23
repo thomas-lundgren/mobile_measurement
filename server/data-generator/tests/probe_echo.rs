@@ -13,10 +13,24 @@ use mp_data_generator::{build_router, AppState};
 use serde_json::json;
 use tower::ServiceExt;
 
-async fn send(state: &AppState, method: &str, path: &str, body: Option<serde_json::Value>) -> (StatusCode, serde_json::Value) {
+async fn send(
+    state: &AppState,
+    method: &str,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> (StatusCode, serde_json::Value) {
     let req = match body {
-        Some(v) => Request::builder().method(method).uri(path).header("content-type", "application/json").body(Body::from(v.to_string())).unwrap(),
-        None => Request::builder().method(method).uri(path).body(Body::empty()).unwrap(),
+        Some(v) => Request::builder()
+            .method(method)
+            .uri(path)
+            .header("content-type", "application/json")
+            .body(Body::from(v.to_string()))
+            .unwrap(),
+        None => Request::builder()
+            .method(method)
+            .uri(path)
+            .body(Body::empty())
+            .unwrap(),
     };
     let resp = build_router(state.clone()).oneshot(req).await.unwrap();
     let status = resp.status();
@@ -26,7 +40,11 @@ async fn send(state: &AppState, method: &str, path: &str, body: Option<serde_jso
 }
 
 fn free_port() -> u16 {
-    UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    UdpSocket::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
 }
 
 #[tokio::test]
@@ -37,24 +55,35 @@ async fn probe_echo_end_to_end() {
     let port = free_port();
 
     // prepare a probe generator
-    let (s, body) = send(&st, "POST", "/internal/generators", Some(json!({
-        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
-        "device_id": "dev_01HZ8PQRS0000000000000001",
-        "session_id": "ses_2026_05_23_001",
-        "flow": { "flow_id": 1, "type": "probe", "rate_pps": 10 },
-        "server_port": port,
-        "node_log_dir": log_dir.to_str().unwrap()
-    }))).await;
+    let (s, body) = send(
+        &st,
+        "POST",
+        "/internal/generators",
+        Some(json!({
+            "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+            "device_id": "dev_01HZ8PQRS0000000000000001",
+            "session_id": "ses_2026_05_23_001",
+            "flow": { "flow_id": 1, "type": "probe", "rate_pps": 10 },
+            "server_port": port,
+            "node_log_dir": log_dir.to_str().unwrap()
+        })),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "prepare: {body}");
     let gen_id = body["generator_id"].as_str().unwrap().to_string();
 
     // act as the UE: send 20 probes, expect echoes
     let ue = UdpSocket::bind("127.0.0.1:0").unwrap();
-    ue.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+    ue.set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
     let server = format!("127.0.0.1:{port}");
     let mut echoes = 0;
     for seq in 1..=20u64 {
-        let pkt = ProbePacket { flow_id: 1, sequence_number: seq, send_mono_ns: Timestamp::now().mono_ns };
+        let pkt = ProbePacket {
+            flow_id: 1,
+            sequence_number: seq,
+            send_mono_ns: Timestamp::now().mono_ns,
+        };
         ue.send_to(&pkt.to_bytes(), &server).unwrap();
         let mut buf = [0u8; 2048];
         if let Ok((n, _)) = ue.recv_from(&mut buf) {
@@ -74,7 +103,13 @@ async fn probe_echo_end_to_end() {
     assert_eq!(status["counters"]["dropped_rows"], 0);
 
     // stop → STOPPED
-    let (s, status) = send(&st, "POST", &format!("/internal/generators/{gen_id}/stop"), None).await;
+    let (s, status) = send(
+        &st,
+        "POST",
+        &format!("/internal/generators/{gen_id}/stop"),
+        None,
+    )
+    .await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(status["state"], "STOPPED");
 
@@ -85,7 +120,10 @@ async fn probe_echo_end_to_end() {
         .map(|e| e.path())
         .filter(|p| p.extension().map(|x| x == "parquet").unwrap_or(false))
         .collect();
-    assert!(!files.is_empty(), "expected server packets.parquet segments");
+    assert!(
+        !files.is_empty(),
+        "expected server packets.parquet segments"
+    );
 }
 
 #[tokio::test]

@@ -20,7 +20,11 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(pool: SqlitePool, jwt_secret: impl Into<String>, server_id: impl Into<String>) -> Self {
+    pub fn new(
+        pool: SqlitePool,
+        jwt_secret: impl Into<String>,
+        server_id: impl Into<String>,
+    ) -> Self {
         Self {
             pool,
             jwt_secret: Arc::new(jwt_secret.into()),

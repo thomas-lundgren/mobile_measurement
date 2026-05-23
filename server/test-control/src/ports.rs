@@ -11,17 +11,16 @@ pub struct PortAllocator {
 
 impl PortAllocator {
     pub fn new(base: u16, count: u16) -> Self {
-        Self { base, count, used: HashSet::new() }
+        Self {
+            base,
+            count,
+            used: HashSet::new(),
+        }
     }
 
     /// Allocate the lowest free port in the range, or None if exhausted.
     pub fn allocate(&mut self) -> Option<u16> {
-        for p in self.base..self.base.saturating_add(self.count) {
-            if self.used.insert(p) {
-                return Some(p);
-            }
-        }
-        None
+        (self.base..self.base.saturating_add(self.count)).find(|&p| self.used.insert(p))
     }
 
     pub fn release(&mut self, port: u16) {

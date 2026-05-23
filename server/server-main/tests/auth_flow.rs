@@ -18,8 +18,16 @@ async fn state() -> AppState {
     AppState::new(pool, "test-secret", "srv_test_01")
 }
 
-async fn post(state: &AppState, path: &str, bearer: Option<&str>, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
-    let mut req = Request::builder().method("POST").uri(path).header("content-type", "application/json");
+async fn post(
+    state: &AppState,
+    path: &str,
+    bearer: Option<&str>,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let mut req = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("content-type", "application/json");
     if let Some(b) = bearer {
         req = req.header("authorization", format!("Bearer {b}"));
     }
@@ -27,7 +35,11 @@ async fn post(state: &AppState, path: &str, bearer: Option<&str>, body: serde_js
     let resp = build_router(state.clone()).oneshot(req).await.unwrap();
     let status = resp.status();
     let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-    let val = if bytes.is_empty() { json!(null) } else { serde_json::from_slice(&bytes).unwrap() };
+    let val = if bytes.is_empty() {
+        json!(null)
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
     (status, val)
 }
 
@@ -67,13 +79,25 @@ async fn full_device_flow_then_session_validates() {
     mint(&st, "enroll-tok-1").await;
 
     // enroll
-    let (s, body) = post(&st, "/api/v1/devices/enroll", Some("enroll-tok-1"), enroll_body(&sk)).await;
+    let (s, body) = post(
+        &st,
+        "/api/v1/devices/enroll",
+        Some("enroll-tok-1"),
+        enroll_body(&sk),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "enroll: {body}");
     let device_id = body["device_id"].as_str().unwrap().to_string();
     assert!(device_id.starts_with("dev_"));
 
     // challenge
-    let (s, body) = post(&st, "/api/v1/auth/challenge", None, json!({ "device_id": device_id })).await;
+    let (s, body) = post(
+        &st,
+        "/api/v1/auth/challenge",
+        None,
+        json!({ "device_id": device_id }),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "challenge: {body}");
     let challenge_id = body["challenge_id"].as_str().unwrap().to_string();
     let nonce = body["nonce"].as_str().unwrap().to_string();
@@ -82,13 +106,22 @@ async fn full_device_flow_then_session_validates() {
     // sign the canonical blob and verify
     let msg = core_auth::build_message(AUTH_DOMAIN, "srv_test_01", &challenge_id, &nonce);
     let sig = core_auth::sign_der_b64(&sk, &msg);
-    let (s, body) = post(&st, "/api/v1/auth/verify", None, json!({ "challenge_id": challenge_id, "signature": sig })).await;
+    let (s, body) = post(
+        &st,
+        "/api/v1/auth/verify",
+        None,
+        json!({ "challenge_id": challenge_id, "signature": sig }),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "verify: {body}");
     let session = body["session_token"].as_str().unwrap().to_string();
 
     // the issued session token validates to the device_id
     let mut headers = axum::http::HeaderMap::new();
-    headers.insert("authorization", format!("Bearer {session}").parse().unwrap());
+    headers.insert(
+        "authorization",
+        format!("Bearer {session}").parse().unwrap(),
+    );
     assert_eq!(auth::authed_device(&st, &headers).await.unwrap(), device_id);
 }
 
@@ -96,19 +129,43 @@ async fn full_device_flow_then_session_validates() {
 async fn enroll_rejects_bad_token() {
     let st = state().await;
     let sk = signing_key();
-    let (s, _) = post(&st, "/api/v1/devices/enroll", Some("never-minted"), enroll_body(&sk)).await;
+    let (s, _) = post(
+        &st,
+        "/api/v1/devices/enroll",
+        Some("never-minted"),
+        enroll_body(&sk),
+    )
+    .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
     // no device was created (rolled back)
-    assert_eq!(mp_server_main::registry::list_devices(&st.pool).await.unwrap().len(), 0);
+    assert_eq!(
+        mp_server_main::registry::list_devices(&st.pool)
+            .await
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[tokio::test]
 async fn enroll_token_is_single_use() {
     let st = state().await;
     mint(&st, "tok").await;
-    let (s1, _) = post(&st, "/api/v1/devices/enroll", Some("tok"), enroll_body(&signing_key())).await;
+    let (s1, _) = post(
+        &st,
+        "/api/v1/devices/enroll",
+        Some("tok"),
+        enroll_body(&signing_key()),
+    )
+    .await;
     assert_eq!(s1, StatusCode::OK);
-    let (s2, _) = post(&st, "/api/v1/devices/enroll", Some("tok"), enroll_body(&signing_key())).await;
+    let (s2, _) = post(
+        &st,
+        "/api/v1/devices/enroll",
+        Some("tok"),
+        enroll_body(&signing_key()),
+    )
+    .await;
     assert_eq!(s2, StatusCode::UNAUTHORIZED, "token already consumed");
 }
 
@@ -119,29 +176,56 @@ async fn verify_rejects_bad_signature() {
     mint(&st, "t").await;
     let (_, body) = post(&st, "/api/v1/devices/enroll", Some("t"), enroll_body(&sk)).await;
     let device_id = body["device_id"].as_str().unwrap().to_string();
-    let (_, body) = post(&st, "/api/v1/auth/challenge", None, json!({ "device_id": device_id })).await;
+    let (_, body) = post(
+        &st,
+        "/api/v1/auth/challenge",
+        None,
+        json!({ "device_id": device_id }),
+    )
+    .await;
     let challenge_id = body["challenge_id"].as_str().unwrap().to_string();
 
     // sign a DIFFERENT message (wrong nonce)
-    let wrong = core_auth::build_message(AUTH_DOMAIN, "srv_test_01", &challenge_id, "not-the-nonce");
+    let wrong =
+        core_auth::build_message(AUTH_DOMAIN, "srv_test_01", &challenge_id, "not-the-nonce");
     let sig = core_auth::sign_der_b64(&sk, &wrong);
-    let (s, _) = post(&st, "/api/v1/auth/verify", None, json!({ "challenge_id": challenge_id, "signature": sig })).await;
+    let (s, _) = post(
+        &st,
+        "/api/v1/auth/verify",
+        None,
+        json!({ "challenge_id": challenge_id, "signature": sig }),
+    )
+    .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
 async fn challenge_unknown_device_is_404() {
     let st = state().await;
-    let (s, _) = post(&st, "/api/v1/auth/challenge", None, json!({ "device_id": "dev_does_not_exist" })).await;
+    let (s, _) = post(
+        &st,
+        "/api/v1/auth/challenge",
+        None,
+        json!({ "device_id": "dev_does_not_exist" }),
+    )
+    .await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn operator_login() {
     let st = state().await;
-    auth::create_operator(&st.pool, "alice", "s3cret", OperatorRole::Operator).await.unwrap();
+    auth::create_operator(&st.pool, "alice", "s3cret", OperatorRole::Operator)
+        .await
+        .unwrap();
 
-    let (s, body) = post(&st, "/api/v1/auth/login", None, json!({ "username": "alice", "password": "s3cret" })).await;
+    let (s, body) = post(
+        &st,
+        "/api/v1/auth/login",
+        None,
+        json!({ "username": "alice", "password": "s3cret" }),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "login: {body}");
     assert_eq!(body["role"], "operator");
     let jwt = body["jwt"].as_str().unwrap().to_string();
@@ -154,6 +238,12 @@ async fn operator_login() {
     assert_eq!(claims.role, "operator");
 
     // wrong password rejected
-    let (s, _) = post(&st, "/api/v1/auth/login", None, json!({ "username": "alice", "password": "wrong" })).await;
+    let (s, _) = post(
+        &st,
+        "/api/v1/auth/login",
+        None,
+        json!({ "username": "alice", "password": "wrong" }),
+    )
+    .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
 }

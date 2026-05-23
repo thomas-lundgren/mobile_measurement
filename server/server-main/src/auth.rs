@@ -133,10 +133,11 @@ pub async fn challenge(
     State(st): State<AppState>,
     Json(req): Json<ChallengeRequest>,
 ) -> Result<Json<ChallengeResponse>, AppError> {
-    let exists: Option<(String,)> = sqlx::query_as("SELECT device_id FROM devices WHERE device_id = ? AND status = 'active'")
-        .bind(&req.device_id)
-        .fetch_optional(&st.pool)
-        .await?;
+    let exists: Option<(String,)> =
+        sqlx::query_as("SELECT device_id FROM devices WHERE device_id = ? AND status = 'active'")
+            .bind(&req.device_id)
+            .fetch_optional(&st.pool)
+            .await?;
     if exists.is_none() {
         return Err(AppError::NotFound);
     }
@@ -197,16 +198,24 @@ pub async fn verify(
     if consumed_at.is_some() || expires_at <= now {
         return Err(AppError::Unauthorized);
     }
-    if !fieldtest_core::auth::verify_challenge(&pubkey, &st.server_id, &req.challenge_id, &nonce, &req.signature) {
+    if !fieldtest_core::auth::verify_challenge(
+        &pubkey,
+        &st.server_id,
+        &req.challenge_id,
+        &nonce,
+        &req.signature,
+    ) {
         return Err(AppError::Unauthorized);
     }
 
     // Single-use: consume the challenge atomically; lose a race → reject.
-    let consumed = sqlx::query("UPDATE auth_challenges SET consumed_at = ? WHERE challenge_id = ? AND consumed_at IS NULL")
-        .bind(now)
-        .bind(&req.challenge_id)
-        .execute(&st.pool)
-        .await?;
+    let consumed = sqlx::query(
+        "UPDATE auth_challenges SET consumed_at = ? WHERE challenge_id = ? AND consumed_at IS NULL",
+    )
+    .bind(now)
+    .bind(&req.challenge_id)
+    .execute(&st.pool)
+    .await?;
     if consumed.rows_affected() != 1 {
         return Err(AppError::Unauthorized);
     }
@@ -221,10 +230,11 @@ pub async fn verify(
         .execute(&st.pool)
         .await?;
 
-    let lcv: i64 = sqlx::query_scalar("SELECT logging_config_version FROM devices WHERE device_id = ?")
-        .bind(&device_id)
-        .fetch_one(&st.pool)
-        .await?;
+    let lcv: i64 =
+        sqlx::query_scalar("SELECT logging_config_version FROM devices WHERE device_id = ?")
+            .bind(&device_id)
+            .fetch_one(&st.pool)
+            .await?;
 
     Ok(Json(VerifyResponse {
         session_token: token,
@@ -251,22 +261,34 @@ pub async fn login(
     State(st): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, AppError> {
-    let row: Option<(String, String)> = sqlx::query_as("SELECT password_hash, role FROM operators WHERE username = ?")
-        .bind(&req.username)
-        .fetch_optional(&st.pool)
-        .await?;
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT password_hash, role FROM operators WHERE username = ?")
+            .bind(&req.username)
+            .fetch_optional(&st.pool)
+            .await?;
     let Some((password_hash, role)) = row else {
         return Err(AppError::Unauthorized);
     };
     let parsed = PasswordHash::new(&password_hash).map_err(|_| AppError::Internal)?;
-    if Argon2::default().verify_password(req.password.as_bytes(), &parsed).is_err() {
+    if Argon2::default()
+        .verify_password(req.password.as_bytes(), &parsed)
+        .is_err()
+    {
         return Err(AppError::Unauthorized);
     }
 
     let exp_secs = (now_utc_ns() / 1_000_000_000) as u64 + JWT_TTL_SECS;
-    let claims = Claims { sub: req.username.clone(), role: role.clone(), exp: exp_secs as usize };
-    let jwt = encode(&Header::default(), &claims, &EncodingKey::from_secret(st.jwt_secret.as_bytes()))
-        .map_err(|_| AppError::Internal)?;
+    let claims = Claims {
+        sub: req.username.clone(),
+        role: role.clone(),
+        exp: exp_secs as usize,
+    };
+    let jwt = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(st.jwt_secret.as_bytes()),
+    )
+    .map_err(|_| AppError::Internal)?;
     let role_enum: OperatorRole =
         serde_json::from_value(serde_json::Value::String(role)).map_err(|_| AppError::Internal)?;
 

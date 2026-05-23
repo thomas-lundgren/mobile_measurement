@@ -16,7 +16,9 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use fieldtest_core::log_writer::{packet_channel, spawn_packet_writer, LogContext};
-use mp_contracts::{Flow, GeneratorCounters, GeneratorState, InternalGeneratorPrepare, InternalGeneratorStatus};
+use mp_contracts::{
+    Flow, GeneratorCounters, GeneratorState, InternalGeneratorPrepare, InternalGeneratorStatus,
+};
 
 use flow::Counters;
 
@@ -97,24 +99,64 @@ async fn prepare(
         Flow::Probe { .. } => {
             let socket = bind_udp(req.server_port)?;
             let port = socket.local_addr().map_err(internal)?.port();
-            (flow::spawn_probe_echo(socket, sink, writer, flow_id, state.clone(), counters.clone(), stop.clone()), port)
+            (
+                flow::spawn_probe_echo(
+                    socket,
+                    sink,
+                    writer,
+                    flow_id,
+                    state.clone(),
+                    counters.clone(),
+                    stop.clone(),
+                ),
+                port,
+            )
         }
-        Flow::RealtimeUdp { direction, rate_pps, packet_size_bytes, .. } => {
+        Flow::RealtimeUdp {
+            direction,
+            rate_pps,
+            packet_size_bytes,
+            ..
+        } => {
             let socket = bind_udp(req.server_port)?;
             let port = socket.local_addr().map_err(internal)?.port();
             let h = flow::spawn_realtime_udp(
-                socket, sink, writer, flow_id, *direction, *rate_pps, *packet_size_bytes as usize,
-                state.clone(), counters.clone(), stop.clone(),
+                socket,
+                sink,
+                writer,
+                flow_id,
+                *direction,
+                *rate_pps,
+                *packet_size_bytes as usize,
+                state.clone(),
+                counters.clone(),
+                stop.clone(),
             );
             (h, port)
         }
-        Flow::BulkTcp { direction, target_bytes, .. } => {
-            let listener = std::net::TcpListener::bind(("0.0.0.0", req.server_port))
-                .map_err(|e| (StatusCode::CONFLICT, format!("bind tcp {}: {e}", req.server_port)))?;
+        Flow::BulkTcp {
+            direction,
+            target_bytes,
+            ..
+        } => {
+            let listener =
+                std::net::TcpListener::bind(("0.0.0.0", req.server_port)).map_err(|e| {
+                    (
+                        StatusCode::CONFLICT,
+                        format!("bind tcp {}: {e}", req.server_port),
+                    )
+                })?;
             let port = listener.local_addr().map_err(internal)?.port();
             let h = flow::spawn_bulk_tcp(
-                listener, sink, writer, flow_id, *direction, target_bytes.map(|t| t as u64),
-                state.clone(), counters.clone(), stop.clone(),
+                listener,
+                sink,
+                writer,
+                flow_id,
+                *direction,
+                target_bytes.map(|t| t as u64),
+                state.clone(),
+                counters.clone(),
+                stop.clone(),
             );
             (h, port)
         }
@@ -131,7 +173,10 @@ async fn prepare(
         stop,
         handle: Mutex::new(Some(handle)),
     });
-    st.manager.lock().unwrap().insert(generator_id.clone(), entry);
+    st.manager
+        .lock()
+        .unwrap()
+        .insert(generator_id.clone(), entry);
 
     Ok(Json(serde_json::json!({ "generator_id": generator_id })))
 }

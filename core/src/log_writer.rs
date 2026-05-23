@@ -1,12 +1,12 @@
-//! Segmented Parquet packet logger + the real-time SPSC handoff.
+//! Segmented Parquet packet logger plus the real-time SPSC handoff.
 //!
-//! Schema mirrors `contracts/parquet/packets.parquet.yaml`: per-file join
-//! columns (device_id/session_id/test_id/node, constant, dictionary-friendly)
-//! + per-row data. Segmented so a crash loses at most one open segment
-//! (invariant 1). The generator never writes Parquet directly — it pushes
+//! The schema mirrors `contracts/parquet/packets.parquet.yaml`: constant
+//! per-file join columns (device_id/session_id/test_id/node) alongside per-row
+//! data. Files are segmented so a crash loses at most one open segment
+//! (invariant 1). The generator never writes Parquet directly; it pushes
 //! `PacketRow`s onto a wait-free SPSC ring (`LogSink`) drained by a writer
-//! thread (`spawn_packet_writer`); on overflow it drops + counts, never blocks
-//! (see `contracts/internal/logger_sink.md`).
+//! thread (`spawn_packet_writer`), dropping and counting on overflow rather
+//! than blocking (see `contracts/internal/logger_sink.md`).
 
 use arrow::array::{RecordBatch, StringArray, UInt32Array, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
@@ -81,7 +81,13 @@ pub struct PacketRow {
 
 impl PacketRow {
     /// Minimal probe-style row (UDP, no ports/sender/intervals).
-    pub fn probe(flow_id: u32, sequence_number: u64, direction: Direction, timestamp: Timestamp, payload_size: u32) -> Self {
+    pub fn probe(
+        flow_id: u32,
+        sequence_number: u64,
+        direction: Direction,
+        timestamp: Timestamp,
+        payload_size: u32,
+    ) -> Self {
         Self {
             flow_id,
             sequence_number,
@@ -135,7 +141,11 @@ pub struct SegmentedPacketWriter {
 }
 
 impl SegmentedPacketWriter {
-    pub fn new(log_dir: impl AsRef<Path>, segment_rows: usize, ctx: LogContext) -> std::io::Result<Self> {
+    pub fn new(
+        log_dir: impl AsRef<Path>,
+        segment_rows: usize,
+        ctx: LogContext,
+    ) -> std::io::Result<Self> {
         let log_dir = log_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&log_dir)?;
         let mut w = Self {
@@ -176,7 +186,7 @@ impl SegmentedPacketWriter {
             .set_compression(parquet::basic::Compression::ZSTD(Default::default()))
             .build();
         let writer = ArrowWriter::try_new(file, self.schema.clone(), Some(props))
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         self.current = Some((writer, path));
         Ok(())
     }
@@ -194,26 +204,79 @@ impl SegmentedPacketWriter {
                 Arc::new(rep(&self.ctx.session_id)) as _,
                 Arc::new(rep(&self.ctx.test_id)) as _,
                 Arc::new(rep(&self.ctx.node)) as _,
-                Arc::new(UInt32Array::from(self.rows.iter().map(|r| r.flow_id).collect::<Vec<_>>())) as _,
-                Arc::new(UInt64Array::from(self.rows.iter().map(|r| r.sequence_number).collect::<Vec<_>>())) as _,
-                Arc::new(StringArray::from(self.rows.iter().map(|r| r.direction.as_str()).collect::<Vec<_>>())) as _,
-                Arc::new(UInt64Array::from(self.rows.iter().map(|r| r.timestamp.mono_ns).collect::<Vec<_>>())) as _,
-                Arc::new(UInt64Array::from(self.rows.iter().map(|r| r.timestamp.utc_ns).collect::<Vec<_>>())) as _,
-                Arc::new(UInt32Array::from(self.rows.iter().map(|r| r.payload_size).collect::<Vec<_>>())) as _,
-                Arc::new(StringArray::from(self.rows.iter().map(|r| r.protocol.as_str()).collect::<Vec<_>>())) as _,
-                Arc::new(UInt32Array::from(self.rows.iter().map(|r| r.local_port).collect::<Vec<_>>())) as _,
-                Arc::new(UInt32Array::from(self.rows.iter().map(|r| r.remote_port).collect::<Vec<_>>())) as _,
-                Arc::new(UInt64Array::from(self.rows.iter().map(|r| r.sender.map(|t| t.mono_ns)).collect::<Vec<_>>())) as _,
-                Arc::new(UInt64Array::from(self.rows.iter().map(|r| r.sender.map(|t| t.utc_ns)).collect::<Vec<_>>())) as _,
-                Arc::new(UInt64Array::from(self.rows.iter().map(|r| r.expected_interval_ns).collect::<Vec<_>>())) as _,
-                Arc::new(UInt64Array::from(self.rows.iter().map(|r| r.actual_interval_ns).collect::<Vec<_>>())) as _,
+                Arc::new(UInt32Array::from(
+                    self.rows.iter().map(|r| r.flow_id).collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt64Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.sequence_number)
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(StringArray::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.direction.as_str())
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt64Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.timestamp.mono_ns)
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt64Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.timestamp.utc_ns)
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt32Array::from(
+                    self.rows.iter().map(|r| r.payload_size).collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(StringArray::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.protocol.as_str())
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt32Array::from(
+                    self.rows.iter().map(|r| r.local_port).collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt32Array::from(
+                    self.rows.iter().map(|r| r.remote_port).collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt64Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.sender.map(|t| t.mono_ns))
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt64Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.sender.map(|t| t.utc_ns))
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt64Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.expected_interval_ns)
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt64Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.actual_interval_ns)
+                        .collect::<Vec<_>>(),
+                )) as _,
             ],
         )
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(std::io::Error::other)?;
 
         if let Some((mut writer, _)) = self.current.take() {
-            writer.write(&batch).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-            writer.close().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            writer.write(&batch).map_err(std::io::Error::other)?;
+            writer.close().map_err(std::io::Error::other)?;
         }
         self.rows.clear();
         Ok(())
@@ -259,7 +322,14 @@ impl LogSink {
 pub fn packet_channel(capacity: usize) -> (LogSink, Consumer<PacketRow>, Arc<AtomicU64>) {
     let (tx, rx) = RingBuffer::new(capacity);
     let dropped = Arc::new(AtomicU64::new(0));
-    (LogSink { tx, dropped: dropped.clone() }, rx, dropped)
+    (
+        LogSink {
+            tx,
+            dropped: dropped.clone(),
+        },
+        rx,
+        dropped,
+    )
 }
 
 /// Handle to a running writer thread.
@@ -306,7 +376,10 @@ pub fn spawn_packet_writer(
         }
         let _ = writer.flush();
     });
-    Ok(WriterHandle { stop, handle: Some(handle) })
+    Ok(WriterHandle {
+        stop,
+        handle: Some(handle),
+    })
 }
 
 #[cfg(test)]
@@ -324,7 +397,10 @@ mod tests {
     }
 
     fn ts(i: u64) -> Timestamp {
-        Timestamp { mono_ns: 1_000 + i, utc_ns: 1_747_900_000_000_000_000 + i }
+        Timestamp {
+            mono_ns: 1_000 + i,
+            utc_ns: 1_747_900_000_000_000_000 + i,
+        }
     }
 
     fn parquet_files(dir: &Path) -> Vec<PathBuf> {
@@ -343,7 +419,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let mut w = SegmentedPacketWriter::new(tmp.path(), 3, ctx()).unwrap();
         for i in 0..7u64 {
-            w.append(&PacketRow::probe(1, i, Direction::Sent, ts(i), 64)).unwrap();
+            w.append(&PacketRow::probe(1, i, Direction::Sent, ts(i), 64))
+                .unwrap();
         }
         drop(w);
 
@@ -352,13 +429,25 @@ mod tests {
 
         // read back the first segment: full schema + correct join columns
         let file = File::open(&files[0]).unwrap();
-        let mut reader = ParquetRecordBatchReaderBuilder::try_new(file).unwrap().build().unwrap();
+        let mut reader = ParquetRecordBatchReaderBuilder::try_new(file)
+            .unwrap()
+            .build()
+            .unwrap();
         let batch = reader.next().unwrap().unwrap();
         assert_eq!(batch.num_columns(), 17, "join + data columns");
-        let names: Vec<String> = batch.schema().fields().iter().map(|f| f.name().clone()).collect();
+        let names: Vec<String> = batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().clone())
+            .collect();
         assert_eq!(names[0], "device_id");
         assert!(names.iter().any(|n| n == "actual_interval_ns"));
-        let dev = batch.column(0).as_any().downcast_ref::<StringArray>().unwrap();
+        let dev = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
         assert_eq!(dev.value(0), "dev_1");
     }
 
@@ -392,7 +481,10 @@ mod tests {
         let mut total = 0;
         for f in parquet_files(tmp.path()) {
             let file = File::open(&f).unwrap();
-            let reader = ParquetRecordBatchReaderBuilder::try_new(file).unwrap().build().unwrap();
+            let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+                .unwrap()
+                .build()
+                .unwrap();
             for b in reader {
                 total += b.unwrap().num_rows();
             }

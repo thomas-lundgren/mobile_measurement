@@ -11,7 +11,7 @@ fn main() -> std::io::Result<()> {
     loop {
         let (n, peer) = socket.recv_from(&mut buf)?;
         if ProbePacket::decode(&buf[..n]).is_ok() {
-            socket.send_to(&buf[..n], &peer)?;
+            socket.send_to(&buf[..n], peer)?;
         }
     }
 }

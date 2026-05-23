@@ -9,7 +9,10 @@ pub struct TcClient {
 
 impl TcClient {
     pub fn new(base: impl Into<String>) -> Self {
-        Self { http: reqwest::Client::new(), base: base.into() }
+        Self {
+            http: reqwest::Client::new(),
+            base: base.into(),
+        }
     }
 
     pub async fn start_test(&self, body: &InternalStartTest) -> Result<(), String> {
@@ -23,7 +26,11 @@ impl TcClient {
         if resp.status().is_success() {
             Ok(())
         } else {
-            Err(format!("start_test {}: {}", resp.status(), resp.text().await.unwrap_or_default()))
+            Err(format!(
+                "start_test {}: {}",
+                resp.status(),
+                resp.text().await.unwrap_or_default()
+            ))
         }
     }
 

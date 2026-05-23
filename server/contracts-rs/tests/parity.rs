@@ -45,13 +45,25 @@ fn enums_match_yaml() {
 
     let cases: Vec<(&str, BTreeSet<String>)> = vec![
         ("commands", rust_set(Command::ALL, Command::wire)),
-        ("test_control_states", rust_set(TestControlState::ALL, TestControlState::wire)),
-        ("generator_states", rust_set(GeneratorState::ALL, GeneratorState::wire)),
-        ("logger_states", rust_set(LoggerState::ALL, LoggerState::wire)),
+        (
+            "test_control_states",
+            rust_set(TestControlState::ALL, TestControlState::wire),
+        ),
+        (
+            "generator_states",
+            rust_set(GeneratorState::ALL, GeneratorState::wire),
+        ),
+        (
+            "logger_states",
+            rust_set(LoggerState::ALL, LoggerState::wire),
+        ),
         ("flow_types", rust_set(FlowType::ALL, FlowType::wire)),
         ("directions", rust_set(Direction::ALL, Direction::wire)),
         ("roles", rust_set(Role::ALL, Role::wire)),
-        ("operator_roles", rust_set(OperatorRole::ALL, OperatorRole::wire)),
+        (
+            "operator_roles",
+            rust_set(OperatorRole::ALL, OperatorRole::wire),
+        ),
         ("platforms", rust_set(Platform::ALL, Platform::wire)),
         ("event_types", rust_set(EventType::ALL, EventType::wire)),
         ("test_results", rust_set(TestResult::ALL, TestResult::wire)),
@@ -67,19 +79,43 @@ fn enums_match_yaml() {
 fn versions_match_yaml() {
     let v = yaml("versions/versions.yaml");
     let ver = v.get("versions").expect("versions key");
-    assert_eq!(ver.get("protocol_version").unwrap().as_u64().unwrap() as u32, PROTOCOL_VERSION);
-    assert_eq!(ver.get("schema_version").unwrap().as_u64().unwrap() as u32, SCHEMA_VERSION);
-    assert_eq!(ver.get("auth_scheme_version").unwrap().as_u64().unwrap() as u32, AUTH_SCHEME_VERSION);
     assert_eq!(
-        ver.get("logging_config_version_initial").unwrap().as_u64().unwrap() as u32,
+        ver.get("protocol_version").unwrap().as_u64().unwrap() as u32,
+        PROTOCOL_VERSION
+    );
+    assert_eq!(
+        ver.get("schema_version").unwrap().as_u64().unwrap() as u32,
+        SCHEMA_VERSION
+    );
+    assert_eq!(
+        ver.get("auth_scheme_version").unwrap().as_u64().unwrap() as u32,
+        AUTH_SCHEME_VERSION
+    );
+    assert_eq!(
+        ver.get("logging_config_version_initial")
+            .unwrap()
+            .as_u64()
+            .unwrap() as u32,
         LOGGING_CONFIG_VERSION_INITIAL
     );
 
     let auth = v.get("auth_constants").expect("auth_constants key");
-    assert_eq!(auth.get("AUTH_SIGNING_ALG").unwrap().as_str().unwrap(), AUTH_SIGNING_ALG);
-    assert_eq!(auth.get("AUTH_PUBKEY_FORMAT").unwrap().as_str().unwrap(), AUTH_PUBKEY_FORMAT);
-    assert_eq!(auth.get("AUTH_SIG_FORMAT").unwrap().as_str().unwrap(), AUTH_SIG_FORMAT);
-    assert_eq!(auth.get("AUTH_DOMAIN").unwrap().as_str().unwrap(), AUTH_DOMAIN);
+    assert_eq!(
+        auth.get("AUTH_SIGNING_ALG").unwrap().as_str().unwrap(),
+        AUTH_SIGNING_ALG
+    );
+    assert_eq!(
+        auth.get("AUTH_PUBKEY_FORMAT").unwrap().as_str().unwrap(),
+        AUTH_PUBKEY_FORMAT
+    );
+    assert_eq!(
+        auth.get("AUTH_SIG_FORMAT").unwrap().as_str().unwrap(),
+        AUTH_SIG_FORMAT
+    );
+    assert_eq!(
+        auth.get("AUTH_DOMAIN").unwrap().as_str().unwrap(),
+        AUTH_DOMAIN
+    );
 }
 
 #[test]
@@ -92,7 +128,8 @@ fn capability_examples_deserialize() {
         let cap: Capability = serde_json::from_value(ex["capability"].clone())
             .unwrap_or_else(|e| panic!("capability example `{name}`: {e}"));
         // round-trip back to JSON and re-parse
-        let round: Capability = serde_json::from_value(serde_json::to_value(&cap).unwrap()).unwrap();
+        let round: Capability =
+            serde_json::from_value(serde_json::to_value(&cap).unwrap()).unwrap();
         assert_eq!(cap, round, "capability round-trip `{name}`");
     }
 }

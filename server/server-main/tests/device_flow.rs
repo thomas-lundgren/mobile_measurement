@@ -13,22 +13,39 @@ use tower::ServiceExt;
 async fn state() -> AppState {
     let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
     let url = format!("sqlite://{}/mp.db", dir.path().display());
-    AppState::new(db::connect(&url).await.unwrap(), "test-secret", "srv_test_01")
+    AppState::new(
+        db::connect(&url).await.unwrap(),
+        "test-secret",
+        "srv_test_01",
+    )
 }
 
-async fn send(state: &AppState, method: &str, path: &str, bearer: Option<&str>, body: Option<serde_json::Value>) -> (StatusCode, serde_json::Value) {
+async fn send(
+    state: &AppState,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    body: Option<serde_json::Value>,
+) -> (StatusCode, serde_json::Value) {
     let mut req = Request::builder().method(method).uri(path);
     if let Some(b) = bearer {
         req = req.header("authorization", format!("Bearer {b}"));
     }
     let req = match body {
-        Some(v) => req.header("content-type", "application/json").body(Body::from(v.to_string())).unwrap(),
+        Some(v) => req
+            .header("content-type", "application/json")
+            .body(Body::from(v.to_string()))
+            .unwrap(),
         None => req.body(Body::empty()).unwrap(),
     };
     let resp = build_router(state.clone()).oneshot(req).await.unwrap();
     let status = resp.status();
     let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-    let val = if bytes.is_empty() { json!(null) } else { serde_json::from_slice(&bytes).unwrap() };
+    let val = if bytes.is_empty() {
+        json!(null)
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
     (status, val)
 }
 
@@ -38,7 +55,14 @@ async fn enrolled_session(st: &AppState) -> (String, String) {
         let secret: [u8; 32] = std::array::from_fn(|i| (i + 11) as u8);
         SigningKey::from_bytes(&secret.into()).unwrap()
     };
-    mp_server_main::registry::mint_enrollment_token(&st.pool, &mp_server_main::util::hash_token("tok"), 0, i64::MAX).await.unwrap();
+    mp_server_main::registry::mint_enrollment_token(
+        &st.pool,
+        &mp_server_main::util::hash_token("tok"),
+        0,
+        i64::MAX,
+    )
+    .await
+    .unwrap();
     let (_, b) = send(st, "POST", "/api/v1/devices/enroll", Some("tok"), Some(json!({
         "device_pubkey": core_auth::public_key_spki_b64(&sk),
         "pubkey_format": AUTH_PUBKEY_FORMAT, "sig_alg": AUTH_SIGNING_ALG, "sig_format": AUTH_SIG_FORMAT,
@@ -46,10 +70,30 @@ async fn enrolled_session(st: &AppState) -> (String, String) {
     }))).await;
     let device_id = b["device_id"].as_str().unwrap().to_string();
 
-    let (_, b) = send(st, "POST", "/api/v1/auth/challenge", None, Some(json!({"device_id": device_id}))).await;
-    let (cid, nonce) = (b["challenge_id"].as_str().unwrap().to_string(), b["nonce"].as_str().unwrap().to_string());
-    let sig = core_auth::sign_der_b64(&sk, &core_auth::build_message(AUTH_DOMAIN, "srv_test_01", &cid, &nonce));
-    let (_, b) = send(st, "POST", "/api/v1/auth/verify", None, Some(json!({"challenge_id": cid, "signature": sig}))).await;
+    let (_, b) = send(
+        st,
+        "POST",
+        "/api/v1/auth/challenge",
+        None,
+        Some(json!({"device_id": device_id})),
+    )
+    .await;
+    let (cid, nonce) = (
+        b["challenge_id"].as_str().unwrap().to_string(),
+        b["nonce"].as_str().unwrap().to_string(),
+    );
+    let sig = core_auth::sign_der_b64(
+        &sk,
+        &core_auth::build_message(AUTH_DOMAIN, "srv_test_01", &cid, &nonce),
+    );
+    let (_, b) = send(
+        st,
+        "POST",
+        "/api/v1/auth/verify",
+        None,
+        Some(json!({"challenge_id": cid, "signature": sig})),
+    )
+    .await;
     (device_id, b["session_token"].as_str().unwrap().to_string())
 }
 
@@ -69,7 +113,14 @@ async fn register_returns_effective_subset_of_capability() {
     let st = state().await;
     let (_dev, session) = enrolled_session(&st).await;
 
-    let (s, cfg) = send(&st, "POST", "/api/v1/devices/register", Some(&session), Some(pixel_capability())).await;
+    let (s, cfg) = send(
+        &st,
+        "POST",
+        "/api/v1/devices/register",
+        Some(&session),
+        Some(pixel_capability()),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "register: {cfg}");
     // serving_cell ⊆ capability (tac/nrarfcn not reported → absent)
     let sc = cfg["radio"]["serving_cell"].as_array().unwrap();
@@ -83,9 +134,23 @@ async fn register_returns_effective_subset_of_capability() {
 #[tokio::test]
 async fn endpoints_require_session() {
     let st = state().await;
-    let (s, _) = send(&st, "POST", "/api/v1/devices/register", None, Some(pixel_capability())).await;
+    let (s, _) = send(
+        &st,
+        "POST",
+        "/api/v1/devices/register",
+        None,
+        Some(pixel_capability()),
+    )
+    .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
-    let (s, _) = send(&st, "POST", "/api/v1/devices/register", Some("garbage-token"), Some(pixel_capability())).await;
+    let (s, _) = send(
+        &st,
+        "POST",
+        "/api/v1/devices/register",
+        Some("garbage-token"),
+        Some(pixel_capability()),
+    )
+    .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
 }
 
@@ -100,7 +165,9 @@ async fn command_enqueue_poll_ack_cycle() {
     assert_eq!(s, StatusCode::NO_CONTENT);
 
     // enqueue REQUEST_STATUS, then poll → 200 with the command
-    commands::enqueue(&st.pool, &device_id, Command::RequestStatus, None).await.unwrap();
+    commands::enqueue(&st.pool, &device_id, Command::RequestStatus, None)
+        .await
+        .unwrap();
     let (s, body) = send(&st, "GET", &path, Some(&session), None).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(body["command"], "REQUEST_STATUS");
@@ -130,7 +197,9 @@ async fn run_test_payload_round_trips_through_queue() {
                        "flows": [{ "flow_id": 1, "type": "probe", "rate_pps": 10 }] },
         "flow_bindings": [{ "flow_id": 1, "server_port": 41000 }]
     });
-    commands::enqueue(&st.pool, &device_id, Command::RunTest, Some(&payload)).await.unwrap();
+    commands::enqueue(&st.pool, &device_id, Command::RunTest, Some(&payload))
+        .await
+        .unwrap();
 
     let path = format!("/api/v1/devices/{device_id}/command");
     let (s, body) = send(&st, "GET", &path, Some(&session), None).await;

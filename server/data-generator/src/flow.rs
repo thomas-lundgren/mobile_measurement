@@ -56,19 +56,38 @@ pub fn spawn_probe_echo(
                         *state.lock().unwrap() = GeneratorState::Running;
                     }
                     counters.received.fetch_add(1, Ordering::Relaxed);
-                    counters.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
-                    let seq = ProbePacket::decode(&buf[..n]).map(|p| p.sequence_number).unwrap_or(0);
-                    sink.push(PacketRow::probe(flow_id, seq, Direction::Received, recv_ts, n as u32));
+                    counters
+                        .bytes_received
+                        .fetch_add(n as u64, Ordering::Relaxed);
+                    let seq = ProbePacket::decode(&buf[..n])
+                        .map(|p| p.sequence_number)
+                        .unwrap_or(0);
+                    sink.push(PacketRow::probe(
+                        flow_id,
+                        seq,
+                        Direction::Received,
+                        recv_ts,
+                        n as u32,
+                    ));
 
                     // echo verbatim
                     let send_ts = Timestamp::now();
                     if socket.send_to(&buf[..n], peer).is_ok() {
                         counters.sent.fetch_add(1, Ordering::Relaxed);
                         counters.bytes_sent.fetch_add(n as u64, Ordering::Relaxed);
-                        sink.push(PacketRow::probe(flow_id, seq, Direction::Sent, send_ts, n as u32));
+                        sink.push(PacketRow::probe(
+                            flow_id,
+                            seq,
+                            Direction::Sent,
+                            send_ts,
+                            n as u32,
+                        ));
                     }
                 }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                Err(ref e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
                     // read timeout — loop to re-check stop
                 }
                 Err(_) => { /* transient; keep serving */ }
@@ -125,11 +144,18 @@ pub fn spawn_realtime_udp(
                 let mut next = Instant::now();
                 while !stop.load(Ordering::Acquire) {
                     let ts = Timestamp::now();
-                    let pkt = RealtimePacket { flow_id, sequence_number: seq, send_mono_ns: ts.mono_ns, send_utc_ns: ts.utc_ns };
+                    let pkt = RealtimePacket {
+                        flow_id,
+                        sequence_number: seq,
+                        send_mono_ns: ts.mono_ns,
+                        send_utc_ns: ts.utc_ns,
+                    };
                     let bytes = pkt.to_bytes_padded(packet_size);
                     if socket.send_to(&bytes, peer).is_ok() {
                         counters.sent.fetch_add(1, Ordering::Relaxed);
-                        counters.bytes_sent.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                        counters
+                            .bytes_sent
+                            .fetch_add(bytes.len() as u64, Ordering::Relaxed);
                         sink.push(PacketRow {
                             flow_id,
                             sequence_number: seq,
@@ -166,9 +192,17 @@ pub fn spawn_realtime_udp(
                                 *state.lock().unwrap() = GeneratorState::Running;
                             }
                             counters.received.fetch_add(1, Ordering::Relaxed);
-                            counters.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
+                            counters
+                                .bytes_received
+                                .fetch_add(n as u64, Ordering::Relaxed);
                             let (sender, seq) = match RealtimePacket::decode(&buf[..n]) {
-                                Ok(p) => (Some(Timestamp { mono_ns: p.send_mono_ns, utc_ns: p.send_utc_ns }), p.sequence_number),
+                                Ok(p) => (
+                                    Some(Timestamp {
+                                        mono_ns: p.send_mono_ns,
+                                        utc_ns: p.send_utc_ns,
+                                    }),
+                                    p.sequence_number,
+                                ),
                                 Err(_) => (None, 0),
                             };
                             let actual = last_recv_mono.map(|l| recv_ts.mono_ns.saturating_sub(l));
@@ -235,8 +269,12 @@ pub fn spawn_bulk_tcp(
             }
         };
         stream.set_nonblocking(false).ok();
-        stream.set_read_timeout(Some(Duration::from_millis(200))).ok();
-        stream.set_write_timeout(Some(Duration::from_millis(200))).ok();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .ok();
+        stream
+            .set_write_timeout(Some(Duration::from_millis(200)))
+            .ok();
         *state.lock().unwrap() = GeneratorState::Running;
 
         let mut seq = 0u64;
@@ -271,7 +309,9 @@ pub fn spawn_bulk_tcp(
                         Ok(n) => {
                             let ts = Timestamp::now();
                             counters.received.fetch_add(1, Ordering::Relaxed);
-                            counters.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
+                            counters
+                                .bytes_received
+                                .fetch_add(n as u64, Ordering::Relaxed);
                             sink.push(bulk_row(flow_id, seq, Direction::Received, ts, n as u32));
                             seq += 1;
                         }
@@ -302,7 +342,10 @@ fn bulk_row(flow_id: u32, seq: u64, direction: Direction, ts: Timestamp, size: u
 }
 
 fn would_block(e: &std::io::Error) -> bool {
-    matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    )
 }
 
 fn finalize(state: &Arc<Mutex<GeneratorState>>, sink: LogSink, writer: WriterHandle) {

@@ -201,9 +201,10 @@ All Phase-1-coupled contract remnants are now resolved (utoipa OpenAPI + drift g
 
 ### Phase 1 — Server skeleton + protocol loopback (COMPLETE; see Summary)
 
+**CI gate wired** (2026-05-23): `ci/check.sh` (and `.github/workflows/ci.yml`) run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace` (the test suite also enforces enum/version parity, packet + auth golden vectors, OpenAPI drift, DB-migration drift, and the probe e2e). `ci/validate_contracts.py` validates every `contracts/` example + packet vector. The whole workspace is fmt-clean and clippy-clean (`-D warnings`).
+
 Deferred (optional polish, not blocking Phase 2):
 - Standalone `test-client` binary + `scripts/e2e_probe.sh` (the in-process integration test is the authoritative proof; a CLI client + shell wrapper is convenience for manual runs).
-- Clippy cleanup pass for a `-D warnings` CI gate (a few style lints remain in core 1b code).
 - Per-connection real-time tuning (CPU pinning / SCHED_FIFO) — deferred to hardening.
 
 ### Phase 2 — Android Logger MVP (not started)

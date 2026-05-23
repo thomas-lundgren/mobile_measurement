@@ -57,7 +57,12 @@ impl AppState {
     pub fn new(cfg: Config) -> Self {
         let gen = GenClient::new(cfg.generator_base_url.clone());
         let ports = Mutex::new(PortAllocator::new(cfg.port_base, cfg.port_count));
-        AppState(Arc::new(Inner { cfg, gen, ports, tests: Mutex::new(HashMap::new()) }))
+        AppState(Arc::new(Inner {
+            cfg,
+            gen,
+            ports,
+            tests: Mutex::new(HashMap::new()),
+        }))
     }
 
     fn get(&self, test_id: &str) -> Option<Arc<Mutex<TestEntry>>> {
@@ -101,7 +106,10 @@ async fn start(
         result: None,
         error: None,
     }));
-    st.0.tests.lock().unwrap().insert(req.test_id.clone(), entry);
+    st.0.tests
+        .lock()
+        .unwrap()
+        .insert(req.test_id.clone(), entry);
     tokio::spawn(drive(st.clone(), req));
     Ok(StatusCode::ACCEPTED)
 }
@@ -116,15 +124,14 @@ async fn drive(st: AppState, req: InternalStartTest) {
     let mut allocated: Vec<u16> = Vec::new();
     let mut bindings: Vec<FlowBinding> = Vec::new();
     let mut generators: Vec<GeneratorRef> = Vec::new();
-    let node_log_dir = st
-        .0
-        .cfg
-        .log_root
-        .join(&req.session_id)
-        .join(&req.test_id)
-        .join("server")
-        .to_string_lossy()
-        .to_string();
+    let node_log_dir =
+        st.0.cfg
+            .log_root
+            .join(&req.session_id)
+            .join(&req.test_id)
+            .join("server")
+            .to_string_lossy()
+            .to_string();
 
     for flow in &req.plan.flows {
         let flow_id = flow.flow_id();
@@ -144,10 +151,24 @@ async fn drive(st: AppState, req: InternalStartTest) {
         };
         match st.0.gen.prepare(&prep).await {
             Ok(gid) => {
-                bindings.push(FlowBinding { flow_id, server_port: port });
-                generators.push(GeneratorRef { flow_id, generator_id: gid, state: GeneratorState::Initializing });
+                bindings.push(FlowBinding {
+                    flow_id,
+                    server_port: port,
+                });
+                generators.push(GeneratorRef {
+                    flow_id,
+                    generator_id: gid,
+                    state: GeneratorState::Initializing,
+                });
             }
-            Err(e) => return fail(&entry, &st, &allocated, &format!("generator prepare failed: {e}")),
+            Err(e) => {
+                return fail(
+                    &entry,
+                    &st,
+                    &allocated,
+                    &format!("generator prepare failed: {e}"),
+                )
+            }
         }
     }
 
@@ -166,7 +187,10 @@ async fn drive(st: AppState, req: InternalStartTest) {
             if let Ok(s) = st.0.gen.status(&g.generator_id).await {
                 g.state = s.state;
             }
-            if !matches!(g.state, GeneratorState::Ready | GeneratorState::Running | GeneratorState::WaitingForClient) {
+            if !matches!(
+                g.state,
+                GeneratorState::Ready | GeneratorState::Running | GeneratorState::WaitingForClient
+            ) {
                 all_ready = false;
             }
         }
@@ -201,7 +225,9 @@ async fn status(
     State(st): State<AppState>,
     Path(test_id): Path<String>,
 ) -> Result<Json<InternalTestStatus>, (StatusCode, String)> {
-    let entry = st.get(&test_id).ok_or((StatusCode::NOT_FOUND, "unknown test".into()))?;
+    let entry = st
+        .get(&test_id)
+        .ok_or((StatusCode::NOT_FOUND, "unknown test".into()))?;
 
     // refresh generator states; promote WAITING_FOR_CLIENT → RUNNING if any
     // generator has seen the client.
@@ -232,7 +258,9 @@ async fn stop(
     State(st): State<AppState>,
     Path(test_id): Path<String>,
 ) -> Result<Json<InternalTestStatus>, (StatusCode, String)> {
-    let entry = st.get(&test_id).ok_or((StatusCode::NOT_FOUND, "unknown test".into()))?;
+    let entry = st
+        .get(&test_id)
+        .ok_or((StatusCode::NOT_FOUND, "unknown test".into()))?;
     entry.lock().unwrap().state = TestControlState::Stopping;
 
     let (gens, bindings): (Vec<GeneratorRef>, Vec<FlowBinding>) = {

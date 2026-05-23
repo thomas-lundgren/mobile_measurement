@@ -20,12 +20,19 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/devices/register", post(register))
         .route("/api/v1/devices/{device_id}/command", get(poll_command))
-        .route("/api/v1/devices/{device_id}/command/{command_id}/ack", post(ack_command))
+        .route(
+            "/api/v1/devices/{device_id}/command/{command_id}/ack",
+            post(ack_command),
+        )
         .route("/api/v1/devices/{device_id}/status", post(post_status))
 }
 
 /// Authenticate, and if the route carries a `{device_id}`, require it to match.
-async fn authed_for(st: &AppState, headers: &HeaderMap, path_device: Option<&str>) -> Result<String, AppError> {
+async fn authed_for(
+    st: &AppState,
+    headers: &HeaderMap,
+    path_device: Option<&str>,
+) -> Result<String, AppError> {
     let device_id = authed_device(st, headers).await?;
     if let Some(p) = path_device {
         if p != device_id {
@@ -54,10 +61,11 @@ pub async fn register(
         .execute(&st.pool)
         .await?;
 
-    let version: i64 = sqlx::query_scalar("SELECT logging_config_version FROM devices WHERE device_id = ?")
-        .bind(&device_id)
-        .fetch_one(&st.pool)
-        .await?;
+    let version: i64 =
+        sqlx::query_scalar("SELECT logging_config_version FROM devices WHERE device_id = ?")
+            .bind(&device_id)
+            .fetch_one(&st.pool)
+            .await?;
 
     Ok(Json(resolve_effective_config(&cap, version as u32)))
 }
@@ -83,7 +91,12 @@ pub async fn poll_command(
                 Some(s) => serde_json::from_str(&s).map_err(|_| AppError::Internal)?,
                 None => serde_json::Value::Null,
             };
-            Ok(Json(DeviceCommand { command_id, command, payload }).into_response())
+            Ok(Json(DeviceCommand {
+                command_id,
+                command,
+                payload,
+            })
+            .into_response())
         }
     }
 }

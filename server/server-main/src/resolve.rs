@@ -86,9 +86,21 @@ mod tests {
                 mimo_layers: false,
                 tx_power: false,
             },
-            qos: QosCapability { qi_5: false, qfi: false, slice_info: false },
-            mobility: MobilityCapability { explicit_ho_events: false, rrc_state: false, beam_switch: false },
-            timestamp_sources: vec![TimestampSource::Mono, TimestampSource::Utc, TimestampSource::Gps],
+            qos: QosCapability {
+                qi_5: false,
+                qfi: false,
+                slice_info: false,
+            },
+            mobility: MobilityCapability {
+                explicit_ho_events: false,
+                rrc_state: false,
+                beam_switch: false,
+            },
+            timestamp_sources: vec![
+                TimestampSource::Mono,
+                TimestampSource::Utc,
+                TimestampSource::Gps,
+            ],
         }
     }
 
@@ -99,7 +111,10 @@ mod tests {
 
         // serving_cell ⊆ capability.serving_cell (tac/nrarfcn dropped here)
         for f in &cfg.radio.serving_cell {
-            assert!(cap.radio.serving_cell.contains(f), "{f:?} not in capability");
+            assert!(
+                cap.radio.serving_cell.contains(f),
+                "{f:?} not in capability"
+            );
         }
         assert!(!cfg.radio.serving_cell.contains(&ServingCellField::Tac));
         // a flag can't be enabled beyond capability

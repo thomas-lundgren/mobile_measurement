@@ -22,18 +22,29 @@ use crate::util::{new_id, now_utc_ns};
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/tests/{test_id}/summary", post(summary))
-        .route("/api/v1/tests/{test_id}/upload/{upload_id}/files/{*path}", put(put_file))
-        .route("/api/v1/tests/{test_id}/upload/{upload_id}/complete", post(complete))
+        .route(
+            "/api/v1/tests/{test_id}/upload/{upload_id}/files/{*path}",
+            put(put_file),
+        )
+        .route(
+            "/api/v1/tests/{test_id}/upload/{upload_id}/complete",
+            post(complete),
+        )
 }
 
 /// Authenticate the device and confirm it owns `test_id`; returns the test's
 /// session_id (used to build the storage path).
-async fn owned_test(st: &AppState, headers: &HeaderMap, test_id: &str) -> Result<(String, String), AppError> {
+async fn owned_test(
+    st: &AppState,
+    headers: &HeaderMap,
+    test_id: &str,
+) -> Result<(String, String), AppError> {
     let device_id = authed_device(st, headers).await?;
-    let row: Option<(String, String)> = sqlx::query_as("SELECT device_id, session_id FROM tests WHERE test_id = ?")
-        .bind(test_id)
-        .fetch_optional(&st.pool)
-        .await?;
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT device_id, session_id FROM tests WHERE test_id = ?")
+            .bind(test_id)
+            .fetch_optional(&st.pool)
+            .await?;
     match row {
         Some((owner, session_id)) if owner == device_id => Ok((device_id, session_id)),
         Some(_) => Err(AppError::Forbidden),
@@ -42,7 +53,10 @@ async fn owned_test(st: &AppState, headers: &HeaderMap, test_id: &str) -> Result
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 #[utoipa::path(
@@ -64,10 +78,11 @@ pub async fn summary(
     let manifest_json = serde_json::to_string(&manifest).map_err(|_| AppError::Internal)?;
 
     // Idempotent initiate: keep the same upload_id across re-posts.
-    let existing: Option<(String,)> = sqlx::query_as("SELECT upload_id FROM uploads WHERE test_id = ? AND node = 'mobile'")
-        .bind(&test_id)
-        .fetch_optional(&st.pool)
-        .await?;
+    let existing: Option<(String,)> =
+        sqlx::query_as("SELECT upload_id FROM uploads WHERE test_id = ? AND node = 'mobile'")
+            .bind(&test_id)
+            .fetch_optional(&st.pool)
+            .await?;
     let upload_id = match existing {
         Some((id,)) => {
             sqlx::query(
@@ -99,15 +114,24 @@ pub async fn summary(
     };
 
     let needed = missing_paths(&st, &test_id, &manifest).await?;
-    Ok(Json(UploadInitResponse { upload_id, needed_paths: needed }))
+    Ok(Json(UploadInitResponse {
+        upload_id,
+        needed_paths: needed,
+    }))
 }
 
 /// Manifest files not yet stored with a matching hash.
-async fn missing_paths(st: &AppState, test_id: &str, manifest: &UploadManifest) -> Result<Vec<String>, AppError> {
-    let received: Vec<(String, String)> = sqlx::query_as("SELECT path, sha256 FROM upload_files WHERE test_id = ? AND node = 'mobile'")
-        .bind(test_id)
-        .fetch_all(&st.pool)
-        .await?;
+async fn missing_paths(
+    st: &AppState,
+    test_id: &str,
+    manifest: &UploadManifest,
+) -> Result<Vec<String>, AppError> {
+    let received: Vec<(String, String)> = sqlx::query_as(
+        "SELECT path, sha256 FROM upload_files WHERE test_id = ? AND node = 'mobile'",
+    )
+    .bind(test_id)
+    .fetch_all(&st.pool)
+    .await?;
     let have: HashSet<(String, String)> = received.into_iter().collect();
     Ok(manifest
         .files
@@ -117,12 +141,17 @@ async fn missing_paths(st: &AppState, test_id: &str, manifest: &UploadManifest) 
         .collect())
 }
 
-async fn load_manifest(st: &AppState, upload_id: &str, test_id: &str) -> Result<UploadManifest, AppError> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT manifest_json FROM uploads WHERE upload_id = ? AND test_id = ?")
-        .bind(upload_id)
-        .bind(test_id)
-        .fetch_optional(&st.pool)
-        .await?;
+async fn load_manifest(
+    st: &AppState,
+    upload_id: &str,
+    test_id: &str,
+) -> Result<UploadManifest, AppError> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT manifest_json FROM uploads WHERE upload_id = ? AND test_id = ?")
+            .bind(upload_id)
+            .bind(test_id)
+            .fetch_optional(&st.pool)
+            .await?;
     let (mj,) = row.ok_or(AppError::NotFound)?;
     serde_json::from_str(&mj).map_err(|_| AppError::Internal)
 }
@@ -159,9 +188,13 @@ pub async fn put_file(
 
     let dest = st.upload_root.join(&session_id).join(&test_id).join(&path);
     if let Some(parent) = dest.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|_| AppError::Internal)?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|_| AppError::Internal)?;
     }
-    tokio::fs::write(&dest, &body).await.map_err(|_| AppError::Internal)?;
+    tokio::fs::write(&dest, &body)
+        .await
+        .map_err(|_| AppError::Internal)?;
 
     sqlx::query(
         "INSERT OR REPLACE INTO upload_files(test_id, node, path, sha256, size_bytes, encoding, received_at) \

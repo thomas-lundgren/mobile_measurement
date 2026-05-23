@@ -5,7 +5,7 @@
 //! per-connection, and `journal_mode=WAL` cannot run inside a migration
 //! transaction), so the migration file holds DDL only.
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteJournalMode};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use std::str::FromStr;
 
@@ -59,20 +59,28 @@ mod tests {
     fn migration_matches_contract_schema() {
         // Drift gate: the migration must equal contracts/db/schema.sql with the
         // two per-connection PRAGMAs removed (those are set in connect()).
-        let migration = std::fs::read_to_string(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/migrations/0001_init.sql"),
-        )
+        let migration = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/migrations/0001_init.sql"
+        ))
         .unwrap();
-        let contract = std::fs::read_to_string(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../../contracts/db/schema.sql"),
-        )
+        let contract = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../contracts/db/schema.sql"
+        ))
         .unwrap();
         let stripped = contract
             .replace("PRAGMA foreign_keys = ON;\n", "")
             .replace("PRAGMA journal_mode = WAL;\n", "");
         assert_eq!(
-            migration.replace('\n', " ").split_whitespace().collect::<Vec<_>>(),
-            stripped.replace('\n', " ").split_whitespace().collect::<Vec<_>>(),
+            migration
+                .replace('\n', " ")
+                .split_whitespace()
+                .collect::<Vec<_>>(),
+            stripped
+                .replace('\n', " ")
+                .split_whitespace()
+                .collect::<Vec<_>>(),
             "migration drifted from contracts/db/schema.sql (regen: strip the two PRAGMAs)"
         );
     }

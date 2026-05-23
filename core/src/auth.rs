@@ -97,7 +97,8 @@ mod tests {
     use std::path::PathBuf;
 
     fn vector_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../contracts/testvectors/auth_signing/vector.json")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../contracts/testvectors/auth_signing/vector.json")
     }
 
     #[test]
@@ -109,7 +110,10 @@ mod tests {
         let pub_b64 = doc["pub_key_spki_b64"].as_str().unwrap();
         let message = {
             let h = doc["message_hex"].as_str().unwrap();
-            (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect::<Vec<u8>>()
+            (0..h.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
+                .collect::<Vec<u8>>()
         };
         let sig_b64 = doc["signature_der_b64"].as_str().unwrap();
 
@@ -123,14 +127,17 @@ mod tests {
         assert!(verify(pub_b64, &message, sig_b64), "verify should pass");
         let mut bad = message.clone();
         bad[0] ^= 0x01;
-        assert!(!verify(pub_b64, &bad, sig_b64), "verify must fail on tamper");
+        assert!(
+            !verify(pub_b64, &bad, sig_b64),
+            "verify must fail on tamper"
+        );
     }
 
     #[test]
     fn challenge_blob_roundtrip() {
         // a freshly generated key signs and verifies a challenge end-to-end
         let sk = SigningKey::from_pkcs8_pem(
-            &serde_json::from_str::<serde_json::Value>(
+            serde_json::from_str::<serde_json::Value>(
                 &std::fs::read_to_string(vector_path()).unwrap(),
             )
             .unwrap()["priv_key_pem"]
@@ -139,10 +146,19 @@ mod tests {
         )
         .unwrap();
         let pub_b64 = public_key_spki_b64(&sk);
-        let (server_id, challenge_id, nonce) =
-            ("srv_main_01", "chl_01HZ8R9F0J2YK3P5Q7S9V1W3X5", "Ymxvb2Jhc2U2NG5vbmNlMzJieXRlc3h4eHh4eHg=");
+        let (server_id, challenge_id, nonce) = (
+            "srv_main_01",
+            "chl_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+            "Ymxvb2Jhc2U2NG5vbmNlMzJieXRlc3h4eHh4eHg=",
+        );
         let msg = build_message(AUTH_DOMAIN, server_id, challenge_id, nonce);
         let sig = sign_der_b64(&sk, &msg);
-        assert!(verify_challenge(&pub_b64, server_id, challenge_id, nonce, &sig));
+        assert!(verify_challenge(
+            &pub_b64,
+            server_id,
+            challenge_id,
+            nonce,
+            &sig
+        ));
     }
 }

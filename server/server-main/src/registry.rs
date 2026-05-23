@@ -85,12 +85,14 @@ pub async fn mint_enrollment_token(
     created_at: i64,
     expires_at: i64,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO enrollment_tokens(token_hash, created_at, expires_at) VALUES (?, ?, ?)")
-        .bind(token_hash)
-        .bind(created_at)
-        .bind(expires_at)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO enrollment_tokens(token_hash, created_at, expires_at) VALUES (?, ?, ?)",
+    )
+    .bind(token_hash)
+    .bind(created_at)
+    .bind(expires_at)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -196,7 +198,10 @@ mod tests {
 
         let d = get_device(&pool, "dev_a").await.unwrap().unwrap();
         assert_eq!(d.platform, "android");
-        assert_eq!(d.logging_config_version, mp_contracts::LOGGING_CONFIG_VERSION_INITIAL as i64);
+        assert_eq!(
+            d.logging_config_version,
+            mp_contracts::LOGGING_CONFIG_VERSION_INITIAL as i64
+        );
         assert_eq!(d.status, "active");
 
         assert!(get_device(&pool, "dev_missing").await.unwrap().is_none());
@@ -208,7 +213,10 @@ mod tests {
         let pool = pool().await;
         let mut d = sample_device("dev_x");
         d.platform = "windows".into();
-        assert!(insert_device(&pool, &d).await.is_err(), "CHECK should reject platform");
+        assert!(
+            insert_device(&pool, &d).await.is_err(),
+            "CHECK should reject platform"
+        );
     }
 
     #[tokio::test]
@@ -217,14 +225,38 @@ mod tests {
         // The enroll flow inserts the device before consuming the token
         // (consumed_by_device_id FKs devices), so create it first.
         insert_device(&pool, &sample_device("dev_a")).await.unwrap();
-        mint_enrollment_token(&pool, "hash1", 0, 10_000).await.unwrap();
+        mint_enrollment_token(&pool, "hash1", 0, 10_000)
+            .await
+            .unwrap();
 
-        assert!(consume_enrollment_token(&pool, "hash1", 100, "dev_a").await.unwrap(), "first use ok");
-        assert!(!consume_enrollment_token(&pool, "hash1", 200, "dev_a").await.unwrap(), "second use rejected");
-        assert!(!consume_enrollment_token(&pool, "missing", 100, "dev_a").await.unwrap(), "unknown rejected");
+        assert!(
+            consume_enrollment_token(&pool, "hash1", 100, "dev_a")
+                .await
+                .unwrap(),
+            "first use ok"
+        );
+        assert!(
+            !consume_enrollment_token(&pool, "hash1", 200, "dev_a")
+                .await
+                .unwrap(),
+            "second use rejected"
+        );
+        assert!(
+            !consume_enrollment_token(&pool, "missing", 100, "dev_a")
+                .await
+                .unwrap(),
+            "unknown rejected"
+        );
 
-        mint_enrollment_token(&pool, "expired", 0, 50).await.unwrap();
-        assert!(!consume_enrollment_token(&pool, "expired", 100, "dev_a").await.unwrap(), "expired rejected");
+        mint_enrollment_token(&pool, "expired", 0, 50)
+            .await
+            .unwrap();
+        assert!(
+            !consume_enrollment_token(&pool, "expired", 100, "dev_a")
+                .await
+                .unwrap(),
+            "expired rejected"
+        );
     }
 
     #[tokio::test]
@@ -250,14 +282,18 @@ mod tests {
         s.battery_level_pct = Some(79);
         upsert_device_status(&pool, &s).await.unwrap();
 
-        let (state, batt): (String, i64) =
-            sqlx::query_as("SELECT logger_state, battery_level_pct FROM device_status WHERE device_id='dev_a'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (state, batt): (String, i64) = sqlx::query_as(
+            "SELECT logger_state, battery_level_pct FROM device_status WHERE device_id='dev_a'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(state, "RUNNING_TEST");
         assert_eq!(batt, 79);
-        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM device_status").fetch_one(&pool).await.unwrap();
+        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM device_status")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(n, 1, "upsert keeps one row per device");
     }
 }

@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::{Json, Router};
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use mp_contracts::{
     CreateTestRequest, InternalStartTest, RunTestPayload, TestControlState, TestResult, TestStatus,
 };
@@ -53,10 +53,12 @@ pub async fn create_test(
     }
 
     // device must exist; grab its current config version
-    let lcv: Option<i64> = sqlx::query_scalar("SELECT logging_config_version FROM devices WHERE device_id = ? AND status = 'active'")
-        .bind(&req.device_id)
-        .fetch_optional(&st.pool)
-        .await?;
+    let lcv: Option<i64> = sqlx::query_scalar(
+        "SELECT logging_config_version FROM devices WHERE device_id = ? AND status = 'active'",
+    )
+    .bind(&req.device_id)
+    .fetch_optional(&st.pool)
+    .await?;
     let lcv = lcv.ok_or(AppError::NotFound)?;
 
     let test_id = new_id("tst");
@@ -109,9 +111,14 @@ pub async fn create_test(
 
     let deadline = tokio::time::Instant::now() + PREPARE_TIMEOUT;
     let bindings = loop {
-        let status = tc.test_status(&test_id).await.map_err(|_| AppError::Internal)?;
+        let status = tc
+            .test_status(&test_id)
+            .await
+            .map_err(|_| AppError::Internal)?;
         match status.state {
-            TestControlState::WaitingForClient | TestControlState::Running => break status.flow_bindings,
+            TestControlState::WaitingForClient | TestControlState::Running => {
+                break status.flow_bindings
+            }
             TestControlState::Failed => {
                 set_state(&st, &test_id, "FAILED", Some(TestResult::Failed)).await?;
                 return Err(AppError::Conflict);
@@ -149,7 +156,13 @@ pub async fn create_test(
         logging_config_override: req.logging_config_override.clone(),
     };
     let payload_val = serde_json::to_value(&payload).map_err(|_| AppError::Internal)?;
-    commands::enqueue(&st.pool, &req.device_id, mp_contracts::Command::RunTest, Some(&payload_val)).await?;
+    commands::enqueue(
+        &st.pool,
+        &req.device_id,
+        mp_contracts::Command::RunTest,
+        Some(&payload_val),
+    )
+    .await?;
 
     set_state(&st, &test_id, "WAITING_FOR_CLIENT", None).await?;
     sqlx::query("UPDATE tests SET started_at = ? WHERE test_id = ?")
@@ -158,7 +171,9 @@ pub async fn create_test(
         .execute(&st.pool)
         .await?;
 
-    let status = read_status(&st, &test_id).await?.ok_or(AppError::Internal)?;
+    let status = read_status(&st, &test_id)
+        .await?
+        .ok_or(AppError::Internal)?;
     Ok((StatusCode::CREATED, Json(status)))
 }
 
@@ -173,7 +188,10 @@ pub async fn get_test(
     Path(test_id): Path<String>,
 ) -> Result<Json<TestStatus>, AppError> {
     authed_operator(&st, &headers)?;
-    read_status(&st, &test_id).await?.map(Json).ok_or(AppError::NotFound)
+    read_status(&st, &test_id)
+        .await?
+        .map(Json)
+        .ok_or(AppError::NotFound)
 }
 
 fn flow_descr(flow: Option<&mp_contracts::Flow>) -> (&'static str, Option<&'static str>) {
@@ -193,7 +211,12 @@ fn dir_wire(d: mp_contracts::Direction) -> &'static str {
     }
 }
 
-async fn set_state(st: &AppState, test_id: &str, state: &str, result: Option<TestResult>) -> Result<(), AppError> {
+async fn set_state(
+    st: &AppState,
+    test_id: &str,
+    state: &str,
+    result: Option<TestResult>,
+) -> Result<(), AppError> {
     sqlx::query("UPDATE tests SET state = ?, result = ? WHERE test_id = ?")
         .bind(state)
         .bind(result.map(|r| r.wire()))
@@ -203,8 +226,19 @@ async fn set_state(st: &AppState, test_id: &str, state: &str, result: Option<Tes
     Ok(())
 }
 
+/// (device_id, plan_name, state, result, created_at, started_at, ended_at)
+type TestRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    i64,
+    Option<i64>,
+    Option<i64>,
+);
+
 async fn read_status(st: &AppState, test_id: &str) -> Result<Option<TestStatus>, AppError> {
-    let row: Option<(String, String, String, Option<String>, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
+    let row: Option<TestRow> = sqlx::query_as(
         "SELECT device_id, plan_name, state, result, created_at, started_at, ended_at \
          FROM tests WHERE test_id = ?",
     )
@@ -214,9 +248,12 @@ async fn read_status(st: &AppState, test_id: &str) -> Result<Option<TestStatus>,
     let Some((device_id, plan_name, state, result, created, started, ended)) = row else {
         return Ok(None);
     };
-    let state: TestControlState = serde_json::from_value(serde_json::Value::String(state)).map_err(|_| AppError::Internal)?;
+    let state: TestControlState =
+        serde_json::from_value(serde_json::Value::String(state)).map_err(|_| AppError::Internal)?;
     let result = match result {
-        Some(r) => Some(serde_json::from_value(serde_json::Value::String(r)).map_err(|_| AppError::Internal)?),
+        Some(r) => Some(
+            serde_json::from_value(serde_json::Value::String(r)).map_err(|_| AppError::Internal)?,
+        ),
         None => None,
     };
     Ok(Some(TestStatus {

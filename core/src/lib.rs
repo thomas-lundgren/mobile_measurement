@@ -119,10 +119,7 @@ impl CoreState {
             *st = FlowStats::default();
         }
 
-        let local_addr = format!(
-            "0.0.0.0:{}",
-            flow.local_port.unwrap_or(0)
-        );
+        let local_addr = format!("0.0.0.0:{}", flow.local_port.unwrap_or(0));
         let socket = UdpSocket::bind(&local_addr)?;
         socket.set_nonblocking(false)?;
         socket.set_read_timeout(Some(Duration::from_millis(100)))?;
@@ -317,10 +314,7 @@ pub extern "system" fn Java_spike_RustBridge_init(
     let state = match CoreState::new(config) {
         Ok(s) => s,
         Err(e) => {
-            let _ = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("init failed: {}", e),
-            );
+            let _ = env.throw_new("java/lang/RuntimeException", format!("init failed: {}", e));
             return 0;
         }
     };
@@ -360,7 +354,10 @@ pub extern "system" fn Java_spike_RustBridge_startFlow(
     };
 
     if let Err(e) = state.start_flow(flow) {
-        let _ = env.throw_new("java/lang/RuntimeException", format!("startFlow failed: {}", e));
+        let _ = env.throw_new(
+            "java/lang/RuntimeException",
+            format!("startFlow failed: {}", e),
+        );
     }
 }
 

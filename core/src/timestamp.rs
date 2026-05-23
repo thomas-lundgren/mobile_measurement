@@ -61,6 +61,10 @@ mod tests {
         // Between 2024-01-01 and 2035-01-01 in nanoseconds since epoch
         let min = 1_704_067_200_000_000_000u64;
         let max = 2_051_222_400_000_000_000u64;
-        assert!(utc >= min && utc <= max, "utc_ns out of expected range: {}", utc);
+        assert!(
+            utc >= min && utc <= max,
+            "utc_ns out of expected range: {}",
+            utc
+        );
     }
 }
