@@ -1,0 +1,26 @@
+[package]
+name = "mp-data-generator"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "mp_data_generator"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mp-data-generator"
+path = "src/main.rs"
+
+[dependencies]
+mp-contracts = { path = "../contracts-rs" }
+fieldtest-core = { path = "../../core" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+axum = "0.8"
+ulid = "1"
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }

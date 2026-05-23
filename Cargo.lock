@@ -1585,6 +1585,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mp-data-generator"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "fieldtest-core",
+ "mp-contracts",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
 name = "mp-server-main"
 version = "0.1.0"
 dependencies = [

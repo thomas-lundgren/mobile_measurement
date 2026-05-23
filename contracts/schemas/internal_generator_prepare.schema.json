@@ -6,9 +6,11 @@
 
   "type": "object",
   "additionalProperties": false,
-  "required": ["test_id", "flow", "server_port", "node_log_dir"],
+  "required": ["test_id", "device_id", "session_id", "flow", "server_port", "node_log_dir"],
   "properties": {
     "test_id": { "type": "string", "pattern": "^tst_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "device_id": { "type": "string", "description": "Device under test; stamped as a join column in the server's packets.parquet." },
+    "session_id": { "type": "string", "description": "Logging session; join column." },
     "flow": {
       "$ref": "https://measurement-platform/contracts/schemas/test_plan.schema.json#/$defs/Flow",
       "description": "The single port-less flow this generator serves."

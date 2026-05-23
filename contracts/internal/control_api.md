@@ -55,7 +55,8 @@ tells the generator which port to bind.
 POST /internal/generators
 ```
 Body: [`internal_generator_prepare.schema.json`](../schemas/internal_generator_prepare.schema.json)
-— `{ test_id, flow (port-less Flow), server_port (allocated), node_log_dir }`.
+— `{ test_id, device_id, session_id, flow (port-less Flow), server_port (allocated), node_log_dir }`
+(device_id/session_id are stamped as join columns in the server's packets.parquet).
 The generator binds `server_port`, opens its logger sink, and proceeds
 INITIALIZING → READY (listening). Returns `{ generator_id }`.
 

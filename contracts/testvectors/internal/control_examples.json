@@ -23,6 +23,8 @@
       "schema": "internal_generator_prepare.schema.json",
       "message": {
         "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
+        "device_id": "dev_01HZ8PQRS0000000000000001",
+        "session_id": "ses_2026_05_23_001",
         "flow": { "flow_id": 1, "type": "probe", "rate_pps": 10 },
         "server_port": 41000,
         "node_log_dir": "/var/lib/mp/session_2026_05_23/test_001/server"
