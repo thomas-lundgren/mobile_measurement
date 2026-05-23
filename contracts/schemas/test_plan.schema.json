@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://measurement-platform/contracts/schemas/test_plan.schema.json",
   "title": "TestPlan",
-  "description": "A test plan is the runtime recipe for one test: a named, versioned set of flows with a wall-clock duration. The plan is embedded verbatim into header.json on both nodes so analysis can reconstruct what was run. Server-side, the same structure is the payload core of RUN_TEST (see run_test_command.schema.json).",
+  "description": "The port-less recipe for one test: a named, versioned set of flows with a wall-clock duration. This is what the operator authors (CreateTestRequest.plan) AND what is embedded verbatim into header.json. It is deliberately free of bindings: server-side ports (flow_bindings) and server_host are allocated by test-control and carried alongside the plan in RunTestPayload / header, NOT inside it. The Flow $defs here are the SINGLE source for flow shape across the whole contract.",
 
   "type": "object",
   "additionalProperties": false,
@@ -38,7 +38,7 @@
   "$defs": {
 
     "Flow": {
-      "description": "Discriminated by `type`. server_port is the port the UE connects to / sends to (invariant 5: UE always initiates). Allocated by test-control before RUN_TEST is sent (remediation 2.8).",
+      "description": "Discriminated by `type`. Port-less: the server port for each flow is allocated by test-control and lives in flow_bindings (see run_test_command.schema.json / header.schema.json), keyed by flow_id.",
       "oneOf": [
         { "$ref": "#/$defs/ProbeFlow" },
         { "$ref": "#/$defs/RealtimeUdpFlow" },
@@ -49,11 +49,10 @@
     "ProbeFlow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["flow_id", "type", "server_port", "rate_pps"],
+      "required": ["flow_id", "type", "rate_pps"],
       "properties": {
         "flow_id":  { "$ref": "#/$defs/FlowId" },
         "type":     { "const": "probe" },
-        "server_port": { "$ref": "#/$defs/Port" },
         "rate_pps": {
           "type": "integer", "minimum": 1, "maximum": 10000,
           "description": "Probe send rate. The mobile sends; the server echoes."
@@ -70,12 +69,11 @@
     "RealtimeUdpFlow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["flow_id", "type", "direction", "server_port", "rate_pps", "packet_size_bytes"],
+      "required": ["flow_id", "type", "direction", "rate_pps", "packet_size_bytes"],
       "properties": {
         "flow_id":  { "$ref": "#/$defs/FlowId" },
         "type":     { "const": "realtime_udp" },
         "direction": { "$ref": "#/$defs/UnidirectionalDirection" },
-        "server_port": { "$ref": "#/$defs/Port" },
         "rate_pps": { "type": "integer", "minimum": 1, "maximum": 10000 },
         "packet_size_bytes": {
           "type": "integer", "minimum": 30, "maximum": 1472,
@@ -88,12 +86,11 @@
     "BulkTcpFlow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["flow_id", "type", "direction", "server_port"],
+      "required": ["flow_id", "type", "direction"],
       "properties": {
         "flow_id":  { "$ref": "#/$defs/FlowId" },
         "type":     { "const": "bulk_tcp" },
         "direction": { "$ref": "#/$defs/UnidirectionalDirection" },
-        "server_port": { "$ref": "#/$defs/Port" },
         "target_bytes": {
           "type": "integer", "minimum": 1,
           "description": "Optional byte cap. If omitted, the flow runs until the plan duration elapses."
@@ -104,12 +101,23 @@
 
     "FlowId": {
       "type": "integer", "minimum": 1, "maximum": 65535,
-      "description": "Plan-scoped flow identifier. Unique within a TestPlan. Carried verbatim in the wire packet header (u32 on the wire — narrower here for schema sanity)."
+      "description": "Plan-scoped flow identifier. Unique within a TestPlan. Carried verbatim in the wire packet header (u32 on the wire — narrower here for schema sanity). flow_bindings entries reference this."
     },
 
     "Port": {
       "type": "integer", "minimum": 1024, "maximum": 65535,
-      "description": "Server-side TCP/UDP port the UE connects to / sends to. Allocated by test-control."
+      "description": "Server-side TCP/UDP port the UE connects to / sends to (invariant 5). Allocated by test-control."
+    },
+
+    "FlowBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow_id", "server_port"],
+      "properties": {
+        "flow_id":     { "$ref": "#/$defs/FlowId" },
+        "server_port": { "$ref": "#/$defs/Port" }
+      },
+      "description": "Server-allocated binding for one flow. Lives in RunTestPayload / header (not in the plan); referenced to the plan by flow_id. The single source for the binding shape."
     },
 
     "UnidirectionalDirection": {
@@ -125,7 +133,7 @@
       "version": 1,
       "duration_sec": 60,
       "flows": [
-        { "flow_id": 1, "type": "probe", "server_port": 41000, "rate_pps": 10, "packet_size_bytes": 22 }
+        { "flow_id": 1, "type": "probe", "rate_pps": 10, "packet_size_bytes": 22 }
       ]
     }
   ]

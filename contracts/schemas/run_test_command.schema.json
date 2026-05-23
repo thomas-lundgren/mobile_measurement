@@ -6,7 +6,7 @@
 
   "type": "object",
   "additionalProperties": false,
-  "required": ["test_id", "server_host", "test_plan"],
+  "required": ["test_id", "server_host", "test_plan", "flow_bindings"],
   "properties": {
     "test_id": {
       "type": "string",
@@ -17,10 +17,17 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 253,
-      "description": "Hostname or IP literal the UE connects to / sends to for every flow in this test. A single host per test; per-flow distinction is by port (see TestPlan.flows[].server_port)."
+      "description": "Hostname or IP literal the UE connects to / sends to for every flow in this test. A single host per test; per-flow distinction is by port (see flow_bindings)."
     },
     "test_plan": {
       "$ref": "https://measurement-platform/contracts/schemas/test_plan.schema.json"
+    },
+    "flow_bindings": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": { "$ref": "https://measurement-platform/contracts/schemas/test_plan.schema.json#/$defs/FlowBinding" },
+      "description": "Server-allocated port per flow, keyed by flow_id. test-control fills exactly one binding for every flow in test_plan.flows before sending RUN_TEST. The device joins binding.flow_id -> plan flow to learn where to connect/send."
     },
     "logging_config_override": {
       "$ref": "https://measurement-platform/contracts/schemas/logging_config.schema.json",

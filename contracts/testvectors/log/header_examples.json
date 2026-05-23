@@ -28,9 +28,12 @@
           "version": 1,
           "duration_sec": 60,
           "flows": [
-            { "flow_id": 1, "type": "probe", "server_port": 41000, "rate_pps": 10 }
+            { "flow_id": 1, "type": "probe", "rate_pps": 10 }
           ]
         },
+        "flow_bindings": [
+          { "flow_id": 1, "server_port": 41000 }
+        ],
         "logging_config": {
           "version": 1,
           "radio": {

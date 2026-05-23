@@ -1,6 +1,6 @@
 {
   "schema": "../../schemas/run_test_command.schema.json",
-  "description": "Canonical RUN_TEST payloads. Every implementation that parses RUN_TEST MUST validate each example against the schema and round-trip it through its own DTOs without loss.",
+  "description": "Canonical RUN_TEST payloads. test_plan is port-less; server-allocated ports live in flow_bindings, keyed by flow_id. Every implementation that parses RUN_TEST MUST validate each example and round-trip it without loss.",
   "examples": [
 
     {
@@ -13,14 +13,12 @@
           "version": 1,
           "duration_sec": 60,
           "flows": [
-            {
-              "flow_id": 1,
-              "type": "probe",
-              "server_port": 41000,
-              "rate_pps": 10
-            }
+            { "flow_id": 1, "type": "probe", "rate_pps": 10 }
           ]
-        }
+        },
+        "flow_bindings": [
+          { "flow_id": 1, "server_port": 41000 }
+        ]
       }
     },
 
@@ -34,29 +32,16 @@
           "version": 2,
           "duration_sec": 600,
           "flows": [
-            {
-              "flow_id": 1,
-              "type": "probe",
-              "server_port": 41000,
-              "rate_pps": 10,
-              "packet_size_bytes": 22
-            },
-            {
-              "flow_id": 2,
-              "type": "realtime_udp",
-              "direction": "FromServer",
-              "server_port": 41001,
-              "rate_pps": 50,
-              "packet_size_bytes": 200
-            },
-            {
-              "flow_id": 3,
-              "type": "bulk_tcp",
-              "direction": "ToServer",
-              "server_port": 41002
-            }
+            { "flow_id": 1, "type": "probe", "rate_pps": 10, "packet_size_bytes": 22 },
+            { "flow_id": 2, "type": "realtime_udp", "direction": "FromServer", "rate_pps": 50, "packet_size_bytes": 200 },
+            { "flow_id": 3, "type": "bulk_tcp", "direction": "ToServer" }
           ]
-        }
+        },
+        "flow_bindings": [
+          { "flow_id": 1, "server_port": 41000 },
+          { "flow_id": 2, "server_port": 41001 },
+          { "flow_id": 3, "server_port": 41002 }
+        ]
       },
       "notes": "Realistic commute-style plan: probe + downlink realtime + uplink bulk."
     },
@@ -71,24 +56,14 @@
           "version": 1,
           "duration_sec": 120,
           "flows": [
-            {
-              "flow_id": 1,
-              "type": "realtime_udp",
-              "direction": "FromServer",
-              "server_port": 41010,
-              "rate_pps": 50,
-              "packet_size_bytes": 200
-            },
-            {
-              "flow_id": 2,
-              "type": "realtime_udp",
-              "direction": "ToServer",
-              "server_port": 41011,
-              "rate_pps": 50,
-              "packet_size_bytes": 200
-            }
+            { "flow_id": 1, "type": "realtime_udp", "direction": "FromServer", "rate_pps": 50, "packet_size_bytes": 200 },
+            { "flow_id": 2, "type": "realtime_udp", "direction": "ToServer", "rate_pps": 50, "packet_size_bytes": 200 }
           ]
-        }
+        },
+        "flow_bindings": [
+          { "flow_id": 1, "server_port": 41010 },
+          { "flow_id": 2, "server_port": 41011 }
+        ]
       },
       "notes": "Demonstrates the bidirectional-as-two-flows pattern (remediation 2.3). Distinct flow_ids, distinct ports."
     }

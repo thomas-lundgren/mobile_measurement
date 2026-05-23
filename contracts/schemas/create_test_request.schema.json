@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://measurement-platform/contracts/schemas/create_test_request.schema.json",
   "title": "CreateTestRequest",
-  "description": "Operator (Controller) -> server-main body of POST /api/v1/tests. The operator authors WHAT to run; the server owns the bindings. Specifically, flows here OMIT server_port — test-control allocates one port per flow and assembles the full TestPlan + RunTestPayload before enqueuing RUN_TEST for the device. The flow $defs below mirror test_plan.schema.json minus server_port; if the test_plan flow fields change, change them here too (a future refactor may extract a shared port-less TestPlanTemplate).",
+  "description": "Operator (Controller) -> server-main body of POST /api/v1/tests. The operator authors WHAT to run as a port-less TestPlan; the server owns the bindings. test-control allocates one port per flow (flow_bindings) and a server_host, assembles the RunTestPayload, and enqueues RUN_TEST for the device. Because TestPlan is now port-less, `plan` is exactly a TestPlan — no separate flow definitions live here.",
 
   "type": "object",
   "additionalProperties": false,
@@ -13,69 +13,12 @@
       "description": "Target device (server-assigned id from enrollment). One device per request; multi-device fan-out is a Controller-side loop in MVP."
     },
     "plan": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "version", "duration_sec", "flows"],
-      "properties": {
-        "name":         { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9_]+$" },
-        "version":      { "type": "integer", "minimum": 1 },
-        "duration_sec": { "type": "integer", "minimum": 1, "maximum": 86400 },
-        "flows": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 16,
-          "items": { "$ref": "#/$defs/UnboundFlow" }
-        }
-      }
+      "$ref": "https://measurement-platform/contracts/schemas/test_plan.schema.json",
+      "description": "The port-less plan to run. Identical shape to what is embedded in header.json."
     },
     "logging_config_override": {
       "$ref": "https://measurement-platform/contracts/schemas/logging_config.schema.json",
       "description": "Optional per-test logging config; server still enforces effective ⊆ capability before sending."
-    }
-  },
-
-  "$defs": {
-    "UnboundFlow": {
-      "description": "A flow without server_port (server-allocated). Discriminated by `type`, mirroring test_plan.schema.json Flow.",
-      "oneOf": [
-        { "$ref": "#/$defs/UnboundProbeFlow" },
-        { "$ref": "#/$defs/UnboundRealtimeUdpFlow" },
-        { "$ref": "#/$defs/UnboundBulkTcpFlow" }
-      ]
-    },
-    "UnboundProbeFlow": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["flow_id", "type", "rate_pps"],
-      "properties": {
-        "flow_id":  { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "type":     { "const": "probe" },
-        "rate_pps": { "type": "integer", "minimum": 1, "maximum": 10000 },
-        "packet_size_bytes": { "type": "integer", "minimum": 22, "maximum": 1472, "default": 22 }
-      }
-    },
-    "UnboundRealtimeUdpFlow": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["flow_id", "type", "direction", "rate_pps", "packet_size_bytes"],
-      "properties": {
-        "flow_id":   { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "type":      { "const": "realtime_udp" },
-        "direction": { "type": "string", "enum": ["FromServer", "ToServer"] },
-        "rate_pps":  { "type": "integer", "minimum": 1, "maximum": 10000 },
-        "packet_size_bytes": { "type": "integer", "minimum": 30, "maximum": 1472 }
-      }
-    },
-    "UnboundBulkTcpFlow": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["flow_id", "type", "direction"],
-      "properties": {
-        "flow_id":   { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "type":      { "const": "bulk_tcp" },
-        "direction": { "type": "string", "enum": ["FromServer", "ToServer"] },
-        "target_bytes": { "type": "integer", "minimum": 1 }
-      }
     }
   }
 }
