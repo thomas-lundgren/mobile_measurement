@@ -16,6 +16,8 @@ pub enum AppError {
     Conflict,
     #[error("bad request: {0}")]
     BadRequest(String),
+    #[error("unprocessable: {0}")]
+    Unprocessable(String),
     #[error("internal error")]
     Internal,
 }
@@ -28,6 +30,7 @@ impl AppError {
             AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::Conflict => StatusCode::CONFLICT,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            AppError::Unprocessable(_) => StatusCode::UNPROCESSABLE_ENTITY,
             AppError::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

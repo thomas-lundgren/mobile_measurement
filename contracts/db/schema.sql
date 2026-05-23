@@ -183,6 +183,7 @@ CREATE TABLE uploads (
   state        TEXT NOT NULL DEFAULT 'PENDING' CHECK (state IN
                  ('PENDING','IN_PROGRESS','COMPLETE','FAILED')),
   test_result  TEXT CHECK (test_result IN ('COMPLETED','PARTIAL','FAILED','CANCELLED')),
+  manifest_json TEXT,  -- the expected file set (paths + sha256); checked at complete
   created_at   INTEGER NOT NULL,
   completed_at INTEGER,
   UNIQUE (test_id, node)

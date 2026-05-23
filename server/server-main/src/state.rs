@@ -1,6 +1,7 @@
-//! Shared application state (cheap to clone — pool + secret are Arc-backed).
+//! Shared application state (cheap to clone — Arc-backed).
 
 use sqlx::SqlitePool;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -10,6 +11,8 @@ pub struct AppState {
     pub jwt_secret: Arc<String>,
     /// Stable server identity, bound into the auth challenge blob.
     pub server_id: String,
+    /// Root under which uploaded test trees are assembled (session/test/...).
+    pub upload_root: Arc<PathBuf>,
 }
 
 impl AppState {
@@ -18,6 +21,12 @@ impl AppState {
             pool,
             jwt_secret: Arc::new(jwt_secret.into()),
             server_id: server_id.into(),
+            upload_root: Arc::new(std::env::temp_dir().join("mp-uploads")),
         }
+    }
+
+    pub fn with_upload_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.upload_root = Arc::new(root.into());
+        self
     }
 }

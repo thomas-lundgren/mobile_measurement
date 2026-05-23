@@ -9,6 +9,7 @@ pub mod device_status;
 pub mod internal;
 pub mod logging_config;
 pub mod test_plan;
+pub mod upload;
 
 pub use auth::*;
 pub use capability::*;
@@ -17,3 +18,4 @@ pub use device_status::*;
 pub use internal::*;
 pub use logging_config::*;
 pub use test_plan::*;
+pub use upload::*;
