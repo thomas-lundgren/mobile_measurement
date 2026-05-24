@@ -12,7 +12,7 @@ pub mod packet;
 pub mod timestamp;
 pub mod ue;
 
-use aux_log::{AuxContext, ClockRow, GpsRow};
+use aux_log::{AuxContext, ClockRow, GpsRow, RadioRow};
 use jni::objects::{JClass, JString};
 use jni::sys::{jint, jlong};
 use jni::JNIEnv;
@@ -28,6 +28,7 @@ struct Session {
     ctx: AuxContext,
     gps: Vec<GpsRow>,
     clock: Vec<ClockRow>,
+    radio: Vec<RadioRow>,
 }
 
 /// One native core handle per app session. Holds the running test's engine +
@@ -71,6 +72,7 @@ impl RustCore {
             ctx,
             gps: Vec::new(),
             clock: Vec::new(),
+            radio: Vec::new(),
         });
         Ok(())
     }
@@ -93,6 +95,18 @@ impl RustCore {
         match &mut *self.session.lock().unwrap() {
             Some(s) => {
                 s.clock.push(row);
+                Ok(())
+            }
+            None => Err("no active test".into()),
+        }
+    }
+
+    /// Buffer a radio metric row (JSON) for this test's `radio.parquet`.
+    pub fn push_radio(&self, json: &str) -> Result<(), String> {
+        let row: RadioRow = serde_json::from_str(json).map_err(|e| format!("bad radio: {e}"))?;
+        match &mut *self.session.lock().unwrap() {
+            Some(s) => {
+                s.radio.push(row);
                 Ok(())
             }
             None => Err("no active test".into()),
@@ -122,6 +136,9 @@ impl RustCore {
             }
             if !s.clock.is_empty() {
                 let _ = aux_log::write_clock(&mobile.join("clock.parquet"), &s.ctx, &s.clock);
+            }
+            if !s.radio.is_empty() {
+                let _ = aux_log::write_radio(&root.join("radio.parquet"), &s.ctx, &s.radio);
             }
         }
         summary
@@ -224,6 +241,16 @@ pub extern "system" fn Java_com_measurement_logger_RustCore_pushClock(
     row: JString,
 ) -> jint {
     push_row(&mut env, handle, &row, |c, j| c.push_clock(j))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_measurement_logger_RustCore_pushRadio(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    row: JString,
+) -> jint {
+    push_row(&mut env, handle, &row, |c, j| c.push_radio(j))
 }
 
 fn push_row(

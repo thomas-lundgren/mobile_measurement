@@ -26,6 +26,9 @@ public final class RustCore {
     /** Buffer a clock-calibration row (JSON) for clock.parquet. 0 on success. */
     public static native int pushClock(long handle, String rowJson);
 
+    /** Buffer a radio metric row (JSON) for radio.parquet. 0 on success. */
+    public static native int pushRadio(long handle, String rowJson);
+
     /** Live per-flow counters as a JSON array. */
     public static native String pollStatus(long handle);
 

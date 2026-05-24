@@ -52,6 +52,7 @@ public final class Harness {
         // Java shell feeds low-rate aux rows over JNI
         check(RustCore.pushGps(h, "{\"mono_ns\":1,\"utc_ns\":2,\"latitude\":59.33,\"longitude\":18.06,\"accuracy_m\":5.0}") == 0, "pushGps");
         check(RustCore.pushClock(h, "{\"mono_ns\":1,\"utc_ns\":2,\"source\":\"gps\",\"uncertainty_ns\":400}") == 0, "pushClock");
+        check(RustCore.pushRadio(h, "{\"mono_ns\":1,\"utc_ns\":2,\"pci\":301,\"rsrp\":-95,\"neighbor_cells\":[{\"pci\":302,\"rsrp\":-101}]}") == 0, "pushRadio");
 
         Thread.sleep(300);
         String status = RustCore.pollStatus(h);
@@ -67,6 +68,7 @@ public final class Harness {
         check(sealed.contains("packets"), "sealedFiles lists packets");
         check(sealed.contains("gps.parquet"), "sealedFiles lists gps");
         check(sealed.contains("clock.parquet"), "sealedFiles lists clock");
+        check(sealed.contains("radio.parquet"), "sealedFiles lists radio");
 
         RustCore.destroy(h);
         System.out.println("PASS: JNI boundary exercised end-to-end");
