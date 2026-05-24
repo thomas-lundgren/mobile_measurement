@@ -37,10 +37,11 @@ Design: `planning/phase2_detailed_design.md`. Built and verified on the host (no
 
 Two contract seams surfaced + resolved: `session_id` now travels in `RUN_TEST`; the upload manifest path regex accepts segmented `<table>_NNNN.parquet`.
 
-**Remaining (device-gated, needs Android SDK/Gradle + Pixel 9 Pro):**
-- **2d** Android app skeleton — foreground service, generated REST client (from `openapi.yaml`), Keystore P-256 signer, logger state machine.
-- **2e** radio/gps/clock Parquet writers + `pushRadio/pushGps/pushClock` JNI + the Telephony/Location samplers (the writers were deferred from 2c to pair with the samplers).
-- **2f** on-device bring-up: full multi-flow test on the Pixel 9 Pro, local logs, upload (exit criteria 3–4).
+- **2e (core)** gps/clock/radio Parquet writers (radio neighbor_cells = list<struct>) + `pushGps/pushClock/pushRadio` JNI; the desktop-JVM harness drives all of it. The core's full log surface is complete.
+- **2d + 2e (app)** `android/logger` — the real Logger (namespace `com.measurement.logger`): `RustCore` JNI bridge, Keystore P-256 signer (mp-auth-v1), OkHttp `ServerClient` (control plane + 3-phase upload), `LoggerService` foreground orchestration (onboard → poll → run RUN_TEST via the core → upload), Telephony `RadioSampler` + `LocationManager` `GpsSampler`, `MainActivity`. **Builds to a debug APK** (`android/build_apk.sh`: cargo-ndk core → assembleDebug) packaging `libfieldtest_core.so` (arm64, ~11 MB) — verified with the installed SDK/NDK here.
+
+**Remaining (needs the Pixel 9 Pro — can't run in CI/Linux):**
+- **2f** on-device bring-up: install the APK, run a full multi-flow test against the server, confirm local logs + upload (exit criteria 3–4). The APK is built and the JNI boundary is harness-validated on x86_64; this is the physical-device run.
 
 **Long-term direction:** The platform is designed to grow from a "test instrument" into a continuous network-quality probe that logs real app traffic and monitors latency to arbitrary destinations. See `planning/long_term_traffic_monitoring.md` for the growth roadmap. The MVP architecture (shared Rust core, segmented Parquet, dual clocks, server-configured logging) is intentionally built to support this without rewrite.
 
@@ -224,9 +225,9 @@ Deferred (optional polish, not blocking Phase 2):
 - Standalone `test-client` binary + `scripts/e2e_probe.sh` (the in-process integration test is the authoritative proof; a CLI client + shell wrapper is convenience for manual runs).
 - Per-connection real-time tuning (CPU pinning / SCHED_FIFO) — deferred to hardening.
 
-### Phase 2 — Android Logger MVP (2a–2c COMPLETE; 2d–2f device-gated; see Summary)
+### Phase 2 — Android Logger MVP (2a–2e COMPLETE; 2f on-device only; see Summary)
 
-Host-verifiable core done (UE engine, server interop, RustCore JNI + JVM harness). Remaining 2d–2f need the Android SDK/Gradle + Pixel 9 Pro.
+UE engine, server interop, RustCore JNI + aux writers, and the full Android Logger app (builds to an APK) are done. Only 2f — the physical Pixel 9 Pro run — remains.
 
 ### Phase 3 — Android Controller (not started)
 
