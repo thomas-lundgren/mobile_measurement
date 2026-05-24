@@ -46,4 +46,19 @@ impl TcClient {
         }
         resp.json().await.map_err(|e| e.to_string())
     }
+
+    /// Stop a test: test-control stops every generator (flushing their server-
+    /// node Parquet writers) and frees the allocated ports. Idempotent.
+    pub async fn stop_test(&self, test_id: &str) -> Result<(), String> {
+        let resp = self
+            .http
+            .post(format!("{}/internal/tests/{test_id}/stop", self.base))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("stop_test {}", resp.status()));
+        }
+        Ok(())
+    }
 }

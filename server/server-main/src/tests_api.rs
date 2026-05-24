@@ -243,9 +243,11 @@ pub async fn mark_running(pool: &sqlx::SqlitePool, test_id: &str) -> Result<(), 
 /// Finalize a test once its upload completes. The orchestration state lands on
 /// DONE for a successful/partial run and FAILED otherwise; the precise outcome
 /// is preserved in `result`, and `ended_at` is stamped. Guarded against
-/// re-finalizing (idempotent re-posts of `complete`).
+/// re-finalizing (idempotent re-posts of `complete`). Also tells test-control to
+/// stop the test, which flushes the server node's Parquet writers and frees
+/// ports — so the aggregated tree's `server/` files are complete for analysis.
 pub async fn finalize_from_upload(
-    pool: &sqlx::SqlitePool,
+    st: &AppState,
     test_id: &str,
     result: TestResult,
 ) -> Result<(), AppError> {
@@ -253,7 +255,7 @@ pub async fn finalize_from_upload(
         TestResult::Completed | TestResult::Partial => "DONE",
         TestResult::Failed | TestResult::Cancelled => "FAILED",
     };
-    sqlx::query(
+    let rows = sqlx::query(
         "UPDATE tests SET state = ?, result = ?, ended_at = ? \
          WHERE test_id = ? AND state NOT IN ('DONE', 'FAILED')",
     )
@@ -261,8 +263,19 @@ pub async fn finalize_from_upload(
     .bind(result.wire())
     .bind(now_utc_ns())
     .bind(test_id)
-    .execute(pool)
-    .await?;
+    .execute(&st.pool)
+    .await?
+    .rows_affected();
+
+    // Only on the first finalize, and only if test-control is wired, stop the
+    // generators (best-effort — a failure here must not fail the upload).
+    if rows > 0 {
+        if let Some(url) = st.test_control_url.as_ref() {
+            if let Err(e) = TcClient::new(url.clone()).stop_test(test_id).await {
+                tracing::warn!("stop_test on finalize: {e}");
+            }
+        }
+    }
     Ok(())
 }
 

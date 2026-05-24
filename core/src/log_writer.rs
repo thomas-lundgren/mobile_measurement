@@ -135,6 +135,10 @@ pub struct SegmentedPacketWriter {
     segment_rows: usize,
     schema: Arc<Schema>,
     ctx: LogContext,
+    /// Filename stem: segments are `<stem>_NNNN.parquet`. Defaults to "packets"
+    /// (one writer per node); the server runs one writer per flow and uses a
+    /// flow-scoped stem (`packets_fN`) so concurrent flows don't collide.
+    stem: String,
     rows: Vec<PacketRow>,
     segment_counter: usize,
     current: Option<(ArrowWriter<File>, PathBuf)>,
@@ -146,6 +150,15 @@ impl SegmentedPacketWriter {
         segment_rows: usize,
         ctx: LogContext,
     ) -> std::io::Result<Self> {
+        Self::with_stem(log_dir, segment_rows, ctx, "packets")
+    }
+
+    pub fn with_stem(
+        log_dir: impl AsRef<Path>,
+        segment_rows: usize,
+        ctx: LogContext,
+        stem: &str,
+    ) -> std::io::Result<Self> {
         let log_dir = log_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&log_dir)?;
         let mut w = Self {
@@ -153,6 +166,7 @@ impl SegmentedPacketWriter {
             segment_rows,
             schema: Arc::new(packets_schema()),
             ctx,
+            stem: stem.to_string(),
             rows: Vec::with_capacity(segment_rows),
             segment_counter: 0,
             current: None,
@@ -178,7 +192,7 @@ impl SegmentedPacketWriter {
     }
 
     fn start_new_segment(&mut self) -> std::io::Result<()> {
-        let filename = format!("packets_{:04}.parquet", self.segment_counter);
+        let filename = format!("{}_{:04}.parquet", self.stem, self.segment_counter);
         self.segment_counter += 1;
         let path = self.log_dir.join(&filename);
         let file = File::create(&path)?;
@@ -355,9 +369,10 @@ pub fn spawn_packet_writer(
     log_dir: impl AsRef<Path>,
     segment_rows: usize,
     ctx: LogContext,
+    stem: &str,
 ) -> std::io::Result<WriterHandle> {
     let dir = log_dir.as_ref().to_path_buf();
-    let mut writer = SegmentedPacketWriter::new(&dir, segment_rows, ctx)?;
+    let mut writer = SegmentedPacketWriter::with_stem(&dir, segment_rows, ctx, stem)?;
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = stop.clone();
     let handle = thread::spawn(move || {
@@ -452,6 +467,30 @@ mod tests {
     }
 
     #[test]
+    fn distinct_stems_do_not_collide_in_one_dir() {
+        // The server runs one writer per flow into the shared server/ dir; a
+        // flow-scoped stem keeps their segments from clobbering each other.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut a = SegmentedPacketWriter::with_stem(tmp.path(), 100, ctx(), "packets_f1").unwrap();
+        let mut b = SegmentedPacketWriter::with_stem(tmp.path(), 100, ctx(), "packets_f2").unwrap();
+        a.append(&PacketRow::probe(1, 0, Direction::Received, ts(0), 64))
+            .unwrap();
+        b.append(&PacketRow::probe(2, 0, Direction::Received, ts(1), 64))
+            .unwrap();
+        drop(a);
+        drop(b);
+
+        let names: Vec<String> = parquet_files(tmp.path())
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["packets_f1_0000.parquet", "packets_f2_0000.parquet"]
+        );
+    }
+
+    #[test]
     fn segments_and_full_schema() {
         let tmp = tempfile::tempdir().unwrap();
         let mut w = SegmentedPacketWriter::new(tmp.path(), 3, ctx()).unwrap();
@@ -507,7 +546,7 @@ mod tests {
     fn ring_to_writer_roundtrip() {
         let tmp = tempfile::tempdir().unwrap();
         let (mut sink, rx, _dropped) = packet_channel(1024);
-        let writer = spawn_packet_writer(rx, tmp.path(), 1000, ctx()).unwrap();
+        let writer = spawn_packet_writer(rx, tmp.path(), 1000, ctx(), "packets").unwrap();
         for i in 0..500u64 {
             assert!(sink.push(PacketRow::probe(2, i, Direction::Received, ts(i), 30)));
         }

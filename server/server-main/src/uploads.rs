@@ -235,7 +235,8 @@ pub async fn complete(
         .execute(&st.pool)
         .await?;
 
-    // Upload is the terminal signal: finalize the test (state + result + ended_at).
-    crate::tests_api::finalize_from_upload(&st.pool, &test_id, manifest.test_result).await?;
+    // Upload is the terminal signal: finalize the test (state + result + ended_at)
+    // and stop the server-side generators so their server/ Parquet is flushed.
+    crate::tests_api::finalize_from_upload(&st, &test_id, manifest.test_result).await?;
     Ok(StatusCode::NO_CONTENT)
 }

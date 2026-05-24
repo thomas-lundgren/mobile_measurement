@@ -10,7 +10,7 @@ Three host processes (Rust `target/debug/`), plus the Logger app on the phone:
 | Process | Bind | Notes |
 |---|---|---|
 | `mp-data-generator` | `MP_GENERATOR_BIND=127.0.0.1:9100` (internal API) | per-flow UDP/TCP sockets bind `0.0.0.0:<port>` → LAN-reachable |
-| `mp-test-control`   | `MP_TEST_CONTROL_BIND=127.0.0.1:9000` | `port_base=41000`; allocates flow ports upward |
+| `mp-test-control`   | `MP_TEST_CONTROL_BIND=127.0.0.1:9000` | `port_base=41000`; `MP_LOG_ROOT` **= server-main's `MP_UPLOAD_ROOT`** so the `server/` node files aggregate into the test tree (single host) |
 | `mp-server-main`    | `MP_BIND` (control plane) | needs `MP_TEST_CONTROL_URL`, `MP_SERVER_HOST`, `MP_UPLOAD_ROOT` |
 
 `MP_SERVER_HOST` is the host the UE is told to connect to for data flows (it
@@ -27,7 +27,7 @@ MP_GENERATOR_BIND=127.0.0.1:9100 ./target/debug/mp-data-generator &
 
 # test-control
 MP_TEST_CONTROL_BIND=127.0.0.1:9000 MP_GENERATOR_URL=http://127.0.0.1:9100 \
-  MP_LOG_ROOT=/tmp/mp-dev/logs ./target/debug/mp-test-control &
+  MP_LOG_ROOT=/tmp/mp-dev/uploads ./target/debug/mp-test-control &   # = MP_UPLOAD_ROOT (single-host aggregation)
 
 # server-main — LAN-bound (use 192.168.x.x for MP_SERVER_HOST so the phone can reach flows)
 MP_BIND=0.0.0.0:8080 MP_DATABASE_URL="$DB" \

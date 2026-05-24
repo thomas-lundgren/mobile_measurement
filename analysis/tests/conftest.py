@@ -30,6 +30,13 @@ def clocked_test_dir() -> Path:
     return FIXTURES / "test_clocked"
 
 
+@pytest.fixture
+def twonode_test_dir() -> Path:
+    """Real capture with both mobile/ and server/ recordings aggregated under one
+    test_id (flow-scoped server segments) — exercises uplink OWD."""
+    return FIXTURES / "test_twonode"
+
+
 def make_packets(rows: list[dict]) -> pd.DataFrame:
     return _normalize(pd.DataFrame(rows), schema.PACKETS)
 

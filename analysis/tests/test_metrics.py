@@ -69,6 +69,27 @@ def test_jitter_ipdv():
 
 # ---- real-capture smoke checks ----
 
+def test_two_node_capture_has_uplink_owd(twonode_test_dir):
+    """The server node's RECEIVED rows (uplink flow) populate uplink OWD, which a
+    mobile-only capture cannot. Both nodes present, both directions resolved."""
+    from fieldtest_analysis import clock
+
+    td = load_test(twonode_test_dir)
+    assert td.nodes == ["mobile", "server"]
+    # flow-scoped server segments concatenated without collision
+    assert "server" in td.packets["node"].unique()
+    est = clock.estimate_offset(td)
+    owd = metrics.realtime_owd(td, offset=est)
+    up = owd[owd["direction_owd"] == "uplink"]
+    dn = owd[owd["direction_owd"] == "downlink"]
+    assert len(up) > 0, "server RECEIVED rows give uplink OWD"
+    assert len(dn) > 0, "mobile RECEIVED rows give downlink OWD"
+    # corrected, both directions land at network scale
+    stats = metrics.owd_stats(td, offset=est)
+    assert abs(stats["uplink"]["corrected_ns"]["p50"]) < 100_000_000
+    assert abs(stats["downlink"]["corrected_ns"]["p50"]) < 100_000_000
+
+
 def test_real_udp_capture_metrics(udp_test_dir):
     td = load_test(udp_test_dir)
     rtt = metrics.probe_rtt(td)

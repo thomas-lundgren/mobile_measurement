@@ -88,7 +88,16 @@ async fn prepare(
         node: "server".to_string(),
     };
     let (sink, rx, dropped) = packet_channel(RING_CAPACITY);
-    let writer = spawn_packet_writer(rx, &req.node_log_dir, SEGMENT_ROWS, ctx).map_err(internal)?;
+    // One writer per flow into the shared server/ dir → flow-scoped filename
+    // stem so concurrent flows don't collide on packets_NNNN.parquet.
+    let writer = spawn_packet_writer(
+        rx,
+        &req.node_log_dir,
+        SEGMENT_ROWS,
+        ctx,
+        &format!("packets_f{flow_id}"),
+    )
+    .map_err(internal)?;
 
     let state = Arc::new(Mutex::new(GeneratorState::Ready));
     let counters = Arc::new(Counters::default());

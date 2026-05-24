@@ -48,13 +48,12 @@ def _read_one(path: Path, columns: list[str]) -> pd.DataFrame | None:
 
 
 def _read_segmented(node_dir: Path, stem: str, columns: list[str]) -> pd.DataFrame | None:
-    """Read ``<stem>.parquet`` and/or ``<stem>_NNNN.parquet`` segments, concatenated."""
+    """Read all ``<stem>*.parquet`` segments, concatenated. Covers a single
+    ``<stem>.parquet``, node-wide ``<stem>_NNNN.parquet`` (mobile), and the
+    server's flow-scoped ``<stem>_fN_NNNN.parquet`` segments."""
     if not node_dir.is_dir():
         return None
-    parts = sorted(node_dir.glob(f"{stem}_[0-9]*.parquet"))
-    single = node_dir / f"{stem}.parquet"
-    if single.exists():
-        parts = [single, *parts]
+    parts = sorted(node_dir.glob(f"{stem}*.parquet"))
     if not parts:
         return None
     frames = [pq.read_table(p).to_pandas() for p in parts]
