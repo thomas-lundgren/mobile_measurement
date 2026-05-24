@@ -17,6 +17,8 @@ pub struct AppState {
     pub server_host: String,
     /// test-control internal API base URL (None until configured).
     pub test_control_url: Arc<Option<String>>,
+    /// UDP port of the low-overhead time-sync responder, advertised via /time.
+    pub time_udp_port: u16,
 }
 
 impl AppState {
@@ -32,7 +34,13 @@ impl AppState {
             upload_root: Arc::new(std::env::temp_dir().join("mp-uploads")),
             server_host: "127.0.0.1".to_string(),
             test_control_url: Arc::new(None),
+            time_udp_port: 8081,
         }
+    }
+
+    pub fn with_time_udp_port(mut self, port: u16) -> Self {
+        self.time_udp_port = port;
+        self
     }
 
     pub fn with_upload_root(mut self, root: impl Into<PathBuf>) -> Self {

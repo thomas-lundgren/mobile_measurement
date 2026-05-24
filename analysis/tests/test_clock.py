@@ -46,13 +46,20 @@ def test_offset_probe_symmetry_recovers_injected_offset():
 def test_clocked_capture_uses_disciplined_offset(clocked_test_dir):
     td = load_test(clocked_test_dir)
     assert not td.clock.empty  # device wrote clock.parquet
+    # this capture used the UDP time responder (tight bound)
+    assert (td.clock["source"] == "server_udp").all()
     est = clock.estimate_offset(td)
     # disciplined offset is preferred over the probe-RTT symmetry fallback
     assert est.method == "clock_parquet"
-    assert 1e9 < est.offset_ns < 2e9  # ~1.18 s phone-ahead measured on-device
+    assert 1e9 < est.offset_ns < 2e9  # ~1.19 s phone-ahead measured on-device
+    # the chosen sample is the minimum-uncertainty (min-RTT) one, and UDP keeps
+    # that well under the ~8 ms the HTTP fallback would give
+    min_unc = td.clock["uncertainty_ns"].astype("int64").min()
+    assert est.uncertainty_ns == min_unc
+    assert est.uncertainty_ns < 5_000_000  # < 5 ms
     stats = metrics.owd_stats(td, offset=est)
     corr_p50 = stats["downlink"]["corrected_ns"]["p50"]
-    assert abs(corr_p50) < 100_000_000  # network-scale, not the ~1.18 s raw
+    assert abs(corr_p50) < 100_000_000  # network-scale, not the ~1.19 s raw
 
 
 def test_real_capture_owd_becomes_network_scale(udp_test_dir):

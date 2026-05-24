@@ -79,6 +79,19 @@ public final class ServerClient {
         }
     }
 
+    /** Host portion of the base URL — the address of the UDP time responder. */
+    public String serverHost() {
+        return java.net.URI.create(base).getHost();
+    }
+
+    /** UDP port of the low-overhead time responder (0 if not advertised). */
+    public int timeUdpPort() throws Exception {
+        Request req = new Request.Builder().url(base + "/api/v1/time").get().build();
+        try (Response r = http.newCall(req).execute()) {
+            return new JSONObject(bodyString(r)).optInt("time_udp_port", 0);
+        }
+    }
+
     public void ackCommand(String session, String deviceId, long commandId) throws Exception {
         Request req = new Request.Builder()
                 .url(base + "/api/v1/devices/" + deviceId + "/command/" + commandId + "/ack")

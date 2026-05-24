@@ -8,8 +8,9 @@ undisciplined phones) into a real network delay.
 Offset sources, in priority order:
 
 1. **clock.parquet** (``estimated_offset_ns`` on both nodes) — a disciplined
-   offset measured on-device (NTP/GPS/chrony). Preferred when present; today the
-   Logger does not emit it yet.
+   offset the Logger measures on-device via a UDP NTP-style burst against the
+   server's time responder (HTTP single-timestamp fallback). The minimum-
+   uncertainty (min-RTT) sample is used. Preferred when present.
 2. **probe-RTT symmetry** — derived from data we already have. Probe RTT is
    measured on the mobile's monotonic clock (offset-free), so the one-way delay
    is ~RTT/2 under path symmetry; comparing that to the raw downlink OWD yields
@@ -48,11 +49,16 @@ def _from_clock_parquet(td: TestData) -> OffsetEstimate | None:
         return None
     have = {}
     for node in ("mobile", "server"):
-        sub = cl[(cl["node"] == node) & cl["estimated_offset_ns"].notna()]
-        if not sub.empty:
-            off = pd.to_numeric(sub["estimated_offset_ns"], errors="coerce").dropna()
-            unc = pd.to_numeric(sub["uncertainty_ns"], errors="coerce").dropna()
-            have[node] = (float(off.median()), float(unc.median()) if not unc.empty else 0.0)
+        sub = cl[(cl["node"] == node) & cl["estimated_offset_ns"].notna()].copy()
+        if sub.empty:
+            continue
+        sub["uncertainty_ns"] = pd.to_numeric(sub["uncertainty_ns"], errors="coerce")
+        # NTP best-practice: trust the lowest-RTT (lowest-uncertainty) sample —
+        # it carries the least queuing asymmetry — rather than averaging.
+        best = sub.sort_values("uncertainty_ns", na_position="last").iloc[0]
+        off = float(best["estimated_offset_ns"])
+        unc = float(best["uncertainty_ns"]) if pd.notna(best["uncertainty_ns"]) else 0.0
+        have[node] = (off, unc)
     # estimated_offset_ns is each node's local clock minus its reference; the
     # mobile-vs-server offset is their difference.
     if "mobile" in have and "server" in have:

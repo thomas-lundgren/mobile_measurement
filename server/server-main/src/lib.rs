@@ -11,6 +11,7 @@ pub mod resolve;
 pub mod state;
 pub mod tc_client;
 pub mod tests_api;
+pub mod time_sync;
 pub mod uploads;
 pub mod util;
 

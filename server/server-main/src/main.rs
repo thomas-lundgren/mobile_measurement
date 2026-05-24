@@ -26,6 +26,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(root) = std::env::var("MP_UPLOAD_ROOT") {
         state = state.with_upload_root(root);
     }
+    // Low-overhead UDP time-sync responder (device clock calibration).
+    let time_udp_port: u16 = std::env::var("MP_TIME_UDP_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8081);
+    state = state.with_time_udp_port(time_udp_port);
+    tokio::spawn(async move {
+        if let Err(e) = mp_server_main::time_sync::run(&format!("0.0.0.0:{time_udp_port}")).await {
+            tracing::error!("time-sync responder failed: {e}");
+        }
+    });
+
     let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
