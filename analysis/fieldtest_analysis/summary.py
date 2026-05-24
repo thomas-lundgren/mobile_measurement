@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from . import events, metrics
+from . import clock, events, metrics
 from .loader import TestData
 
 
@@ -55,11 +55,12 @@ def build_summary(td: TestData) -> dict:
     ev = events.derive_events(td)
     ev_counts = ev["type"].value_counts().to_dict() if not ev.empty else {}
     loss_df = metrics.loss(td)
+    offset = clock.estimate_offset(td)
     return {
         "test_id": td.test_id,
         "nodes": td.nodes,
         "rtt_ns": metrics.rtt_stats(td),
-        "owd_ns": metrics.owd_stats(td),
+        "owd_ns": metrics.owd_stats(td, offset=offset),
         "jitter": metrics.jitter_stats(td),
         "loss_per_flow": loss_df.to_dict(orient="records"),
         "radio": _radio_stats(td),

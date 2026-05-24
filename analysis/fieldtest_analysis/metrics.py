@@ -39,30 +39,17 @@ def probe_rtt(td: TestData) -> pd.DataFrame:
     return merged[keys + ["rtt_ns"]].reset_index(drop=True)
 
 
-def _nearest_uncertainty(clock: pd.DataFrame, node: str, at_utc: pd.Series) -> pd.Series:
-    """Clock uncertainty_ns for `node` at each utc in `at_utc` (nearest sample)."""
-    if clock.empty:
-        return pd.Series([pd.NA] * len(at_utc), index=at_utc.index, dtype="Int64")
-    cl = clock[(clock["node"] == node) & clock["uncertainty_ns"].notna()]
-    if cl.empty:
-        return pd.Series([pd.NA] * len(at_utc), index=at_utc.index, dtype="Int64")
-    left = pd.DataFrame({"utc_ns": at_utc.astype("int64")}).reset_index()
-    right = cl[["utc_ns", "uncertainty_ns"]].dropna(subset=["utc_ns"]).sort_values("utc_ns")
-    right["utc_ns"] = right["utc_ns"].astype("int64")
-    merged = pd.merge_asof(
-        left.sort_values("utc_ns"), right, on="utc_ns", direction="nearest"
-    )
-    return merged.set_index("index")["uncertainty_ns"].reindex(at_utc.index).astype("Int64")
-
-
-def realtime_owd(td: TestData) -> pd.DataFrame:
+def realtime_owd(td: TestData, offset=None) -> pd.DataFrame:
     """One-way delay for RECEIVED packets carrying a sender UTC stamp.
-    `owd_ns = utc_ns - sender_utc_ns`; direction is downlink when the mobile
-    received (server sent) and uplink when the server received. Uncertainty is
-    the sum of the receiver's and sender's nearest clock-uncertainty bounds
-    (NA when that node has no clock.parquet)."""
+
+    `owd_ns = utc_ns - sender_utc_ns` is the **raw** cross-clock delay (offset-
+    contaminated). When an `offset` (clock.OffsetEstimate, O = mobile - server)
+    is supplied, `owd_corrected_ns` removes it — downlink subtracts O, uplink
+    adds it — and `uncertainty_ns` carries the offset's bound. Direction is
+    downlink when the mobile received (server sent), else uplink."""
     pk = td.packets
-    cols = ["node", "flow_id", "sequence_number", "direction_owd", "owd_ns", "uncertainty_ns"]
+    cols = ["node", "flow_id", "sequence_number", "direction_owd",
+            "owd_ns", "owd_corrected_ns", "uncertainty_ns"]
     if pk.empty:
         return pd.DataFrame(columns=cols)
     recv = pk[(pk["direction"] == schema.DIR_RECEIVED) & pk["sender_utc_ns"].notna()].copy()
@@ -70,21 +57,15 @@ def realtime_owd(td: TestData) -> pd.DataFrame:
         return pd.DataFrame(columns=cols)
     recv["owd_ns"] = recv["utc_ns"].astype("Int64") - recv["sender_utc_ns"].astype("Int64")
     recv["direction_owd"] = np.where(recv["node"] == "mobile", "downlink", "uplink")
-    # sender node is the opposite of the receiver node
-    recv["sender_node"] = np.where(recv["node"] == "mobile", "server", "mobile")
 
-    recv_unc = _nearest_uncertainty(td.clock, "mobile", recv["utc_ns"])
-    parts = []
-    for sender_node, grp in recv.groupby("sender_node"):
-        r_unc = pd.concat(
-            [_nearest_uncertainty(td.clock, n, g["utc_ns"]) for n, g in grp.groupby("node")]
-        ).reindex(grp.index)
-        s_unc = _nearest_uncertainty(td.clock, sender_node, grp["sender_utc_ns"])
-        grp = grp.copy()
-        grp["uncertainty_ns"] = r_unc.add(s_unc, fill_value=pd.NA)
-        parts.append(grp)
-    recv = pd.concat(parts).sort_index()
-    _ = recv_unc  # receiver-side bound already folded in above
+    if offset is not None and getattr(offset, "available", False):
+        o = offset.offset_ns
+        raw = recv["owd_ns"].astype("float")
+        recv["owd_corrected_ns"] = np.where(recv["direction_owd"] == "downlink", raw - o, raw + o)
+        recv["uncertainty_ns"] = offset.uncertainty_ns
+    else:
+        recv["owd_corrected_ns"] = pd.NA
+        recv["uncertainty_ns"] = pd.NA
     return recv[cols].reset_index(drop=True)
 
 
@@ -144,14 +125,22 @@ def rtt_stats(td: TestData) -> dict:
     return _pct(probe_rtt(td)["rtt_ns"])
 
 
-def owd_stats(td: TestData) -> dict:
-    owd = realtime_owd(td)
-    out = {}
+def owd_stats(td: TestData, offset=None) -> dict:
+    """Per-direction OWD stats. With an `offset` (clock.OffsetEstimate), reports
+    the offset-corrected delay (real network delay) and the raw delay; without
+    one, only the raw (offset-contaminated) delay."""
+    owd = realtime_owd(td, offset=offset)
+    out = {
+        "offset_ns": offset.offset_ns if offset is not None else None,
+        "offset_method": offset.method if offset is not None else "none",
+        "offset_uncertainty_ns": offset.uncertainty_ns if offset is not None else None,
+    }
     for direction in ("uplink", "downlink"):
         sub = owd[owd["direction_owd"] == direction]
-        out[direction] = _pct(sub["owd_ns"])
-        unc = pd.to_numeric(sub["uncertainty_ns"], errors="coerce").dropna()
-        out[direction]["uncertainty_ns_max"] = float(unc.max()) if not unc.empty else None
+        out[direction] = {
+            "corrected_ns": _pct(sub["owd_corrected_ns"]),
+            "raw_ns": _pct(sub["owd_ns"]),
+        }
     return out
 
 

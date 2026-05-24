@@ -25,7 +25,7 @@ the mobile-only `gps.parquet` / `radio.parquet` at the root.
 | Metric | Source | Notes |
 |---|---|---|
 | **RTT** | probe echo: a node's `SENT`↔`RECEIVED` on `(flow_id, seq)` | monotonic clock — authoritative |
-| **OWD** (up/downlink) | `utc_ns - sender_utc_ns` at the receiver | cross-clock; carries an uncertainty bound from both nodes' `clock.parquet` |
+| **OWD** (up/downlink) | `utc_ns - sender_utc_ns` at the receiver, **offset-corrected** | cross-clock; offset removed via `clock.parquet` or probe-RTT symmetry (see below) |
 | **Jitter (IPDV)** | `actual_interval_ns - expected_interval_ns` | monotonic intervals |
 | **Loss** | sequence gaps (echo or one-directional) | send-only flows report NA (need the receiver) |
 | **Events** | `radio.parquet` deltas | HANDOVER, BAND_CHANGE, COVERAGE_GAP, NEIGHBOR_COUNT_CHANGE |
@@ -35,14 +35,22 @@ a Pixel indoors is frequently LTE-only with no NR serving cell.
 
 ## Design notes / known caveats
 
-- **OWD needs clock discipline.** On the current captures the raw downlink OWD
-  is ~1.15 s — that is the **UTC offset between the phone and the host**, not
-  network delay (the two clocks are unsynchronised). This is exactly why the
-  spec computes OWD only in post-processing *with* uncertainty bounds. Today the
-  Logger does not emit `clock.parquet`, so the bound reads `null`. Follow-up:
-  have the Logger write clock-calibration snapshots (RustCore already has the
-  writer) so OWD can be offset-corrected and bounded. RTT and jitter, which use
-  the monotonic clock, are unaffected and correct.
+- **OWD is offset-corrected** (`clock.py`). Raw cross-clock OWD is dominated by
+  the phone↔server UTC offset (~1.15 s on the current undisciplined captures —
+  *not* network delay). The offset `O = mobile_utc - server_utc` is estimated
+  and removed, so the summary reports both `raw_ns` and `corrected_ns` per
+  direction, plus the `offset_ns` / `offset_method` / `offset_uncertainty_ns`
+  used. Sources, preferred first:
+    1. **`clock.parquet`** `estimated_offset_ns` (a disciplined offset measured
+       on-device via NTP/GPS/chrony). The Logger does not emit this yet.
+    2. **probe-RTT symmetry** — probe RTT is offset-free (single monotonic
+       clock), so one-way ≈ RTT/2 under path symmetry; comparing that to raw
+       downlink OWD yields `O`. Absolute OWD then carries a ±RTT/2 bound (the
+       asymmetry we can't resolve without a disciplined clock); OWD *variation*
+       (jitter) is exact regardless.
+  On the committed `test_udp` fixture this turns a raw downlink p50 of ~1153 ms
+  into a corrected p50 of ~2.8 ms (≈ half the 5.6 ms probe RTT). RTT and jitter
+  use the monotonic clock and need no correction.
 - **Mobile-only today.** MVP uploads are mobile-only, so uplink OWD (server is
   the receiver) has no rows until the server node's `packets.parquet` is
   aggregated under the test. The metric is implemented and will populate then.
@@ -56,7 +64,8 @@ a Pixel indoors is frequently LTE-only with no NR serving cell.
 fieldtest_analysis/
   schema.py    canonical columns per table (mirrors contracts/parquet/*)
   loader.py    tolerant test-tree loader -> TestData
-  metrics.py   rtt / owd / jitter / loss
+  metrics.py   rtt / owd (raw + corrected) / jitter / loss
+  clock.py     clock-offset estimation (clock.parquet | probe-RTT symmetry)
   events.py    derived radio events
   summary.py   §12.8 summary assembly
   cli.py       fieldtest-analyze

@@ -32,31 +32,28 @@ def test_loss_echo_and_oneway():
     assert loss.loc[2, "lost"] == 2 and abs(loss.loc[2, "loss_ratio"] - 0.2) < 1e-9
 
 
-def test_owd_downlink_with_uncertainty():
-    recv = [
-        dict(node="mobile", flow_id=2, sequence_number=s, direction="RECEIVED",
-             mono_ns=s, utc_ns=1100 + s * 100, sender_utc_ns=1000 + s * 100)
-        for s in range(3)
-    ]
-    # mobile clock unc 10ns, server clock unc 20ns → combined 30ns
-    clock = make_clock([
-        dict(node="mobile", mono_ns=0, utc_ns=1100, uncertainty_ns=10),
-        dict(node="server", mono_ns=0, utc_ns=1000, uncertainty_ns=20),
-    ])
-    td = synthetic_test(packets=make_packets(recv), clock=clock)
-    owd = metrics.realtime_owd(td)
-    assert (owd["direction_owd"] == "downlink").all()
-    assert owd["owd_ns"].tolist() == [100, 100, 100]
-    assert owd["uncertainty_ns"].dropna().tolist() == [30, 30, 30]
-
-
-def test_owd_uncertainty_na_without_clock():
+def test_owd_raw_without_offset():
     recv = [dict(node="mobile", flow_id=2, sequence_number=0, direction="RECEIVED",
                  mono_ns=0, utc_ns=1100, sender_utc_ns=1000)]
     td = synthetic_test(packets=make_packets(recv))
     owd = metrics.realtime_owd(td)
-    assert owd["owd_ns"].tolist() == [100]
-    assert owd["uncertainty_ns"].isna().all()
+    assert owd["direction_owd"].tolist() == ["downlink"]
+    assert owd["owd_ns"].tolist() == [100]  # raw cross-clock delay
+    assert owd["owd_corrected_ns"].isna().all()  # no offset → no correction
+
+
+def test_owd_corrected_with_offset():
+    from fieldtest_analysis.clock import OffsetEstimate
+
+    recv = [dict(node="mobile", flow_id=2, sequence_number=s, direction="RECEIVED",
+                 mono_ns=s, utc_ns=1_000_000_200 + s, sender_utc_ns=100 + s)
+            for s in range(3)]  # raw downlink owd = 1_000_000_100 (offset + 100ns)
+    td = synthetic_test(packets=make_packets(recv))
+    # O = mobile - server = 1e9; corrected downlink = raw - O = 100ns real delay
+    off = OffsetEstimate(offset_ns=1_000_000_000, uncertainty_ns=2500, method="probe_rtt_symmetry")
+    owd = metrics.realtime_owd(td, offset=off)
+    assert owd["owd_corrected_ns"].tolist() == [100.0, 100.0, 100.0]
+    assert owd["uncertainty_ns"].tolist() == [2500, 2500, 2500]
 
 
 def test_jitter_ipdv():
