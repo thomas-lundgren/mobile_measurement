@@ -878,6 +878,7 @@ components:
       description: Payload of the RUN_TEST command delivered to a device.
       required:
       - test_id
+      - session_id
       - server_host
       - test_plan
       - flow_bindings
@@ -892,6 +893,11 @@ components:
           - $ref: '#/components/schemas/LoggingConfig'
         server_host:
           type: string
+        session_id:
+          type: string
+          description: |-
+            Server-assigned logging session this test belongs to; the device stamps
+            it as the session_id join column.
         test_id:
           type: string
         test_plan:

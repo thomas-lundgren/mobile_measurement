@@ -23,6 +23,9 @@ pub struct CreateTestRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct RunTestPayload {
     pub test_id: String,
+    /// Server-assigned logging session this test belongs to; the device stamps
+    /// it as the session_id join column.
+    pub session_id: String,
     pub server_host: String,
     pub test_plan: TestPlan,
     pub flow_bindings: Vec<FlowBinding>,

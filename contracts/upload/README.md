@@ -24,8 +24,12 @@ session_<date>/test_NNN/
     summary.json
 ```
 
-The mobile uploads exactly these files. The server already holds its own
-`server/` recordings for the same `test_id`; on completion it drops the
+The mobile uploads exactly these files. The Parquet tables are written
+**segmented** (`<table>_NNNN.parquet`, see `../parquet/README.md`) — e.g.
+`mobile/packets_0000.parquet`, `mobile/packets_0001.parquet`, … — so each
+segment is its own manifest entry and its own PUT. (The bare `<table>.parquet`
+form is also accepted for a single-file table.) The server already holds its
+own `server/` recordings for the same `test_id`; on completion it drops the
 mobile's files into the same `test_id` directory to assemble the full tree
 (spec §13). The server never uploads — it is the destination.
 

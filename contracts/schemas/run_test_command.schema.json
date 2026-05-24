@@ -6,12 +6,16 @@
 
   "type": "object",
   "additionalProperties": false,
-  "required": ["test_id", "server_host", "test_plan", "flow_bindings"],
+  "required": ["test_id", "session_id", "server_host", "test_plan", "flow_bindings"],
   "properties": {
     "test_id": {
       "type": "string",
       "pattern": "^tst_[0-9A-HJKMNP-TV-Z]{26}$",
       "description": "ULID-prefixed test identifier. Server-assigned. Recorded in header.json and joined onto every Parquet row."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Server-assigned logging session this test belongs to. The device stamps it as the session_id join column so its Parquet matches the server's for the same test."
     },
     "server_host": {
       "type": "string",

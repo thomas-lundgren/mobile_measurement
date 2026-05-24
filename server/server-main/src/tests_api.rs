@@ -150,6 +150,7 @@ pub async fn create_test(
 
     let payload = RunTestPayload {
         test_id: test_id.clone(),
+        session_id: session_id.clone(),
         server_host: st.server_host.clone(),
         test_plan: req.plan.clone(),
         flow_bindings: bindings,

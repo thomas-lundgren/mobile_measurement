@@ -39,8 +39,8 @@
       "properties": {
         "path": {
           "type": "string",
-          "pattern": "^(header\\.json|gps\\.parquet|radio\\.parquet|mobile/(packets|events|clock)\\.parquet|mobile/summary\\.json)$",
-          "description": "Test-relative path. Enumerated to the known mobile-side log layout (CLAUDE.md); the server rejects unlisted paths."
+          "pattern": "^(header\\.json|mobile/summary\\.json|(gps|radio)(_[0-9]{4,})?\\.parquet|mobile/(packets|events|clock)(_[0-9]{4,})?\\.parquet)$",
+          "description": "Test-relative path. The known mobile-side log layout (CLAUDE.md). Parquet tables are written SEGMENTED (`<table>_NNNN.parquet`, see parquet/README.md), so each segment is its own manifest entry; the bare `<table>.parquet` form is also accepted. The server rejects unlisted paths."
         },
         "size_bytes": {
           "type": "integer", "minimum": 0,

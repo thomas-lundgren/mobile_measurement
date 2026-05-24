@@ -134,9 +134,9 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
     UeTestConfig {
         test_id: p.test_id.clone(),
         device_id: device_id.into(),
-        // Device-local session id (the mobile groups its own tests). test_id is
-        // the cross-node key; see the note in the test summary.
-        session_id: "ses_mobile_local".into(),
+        // session_id now travels in RUN_TEST → the mobile stamps the same
+        // session_id join column as the server (gap 1 resolved).
+        session_id: p.session_id.clone(),
         server_host: p.server_host.clone(),
         log_dir: log_dir.into(),
         segment_rows: 1000,
