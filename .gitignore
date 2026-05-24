@@ -37,3 +37,6 @@ spikes/**/*.log
 
 # Built native libs (rebuilt via cargo-ndk)
 **/jniLibs/**/*.so
+
+# Harness scheduling state
+.claude/scheduled_tasks.lock
