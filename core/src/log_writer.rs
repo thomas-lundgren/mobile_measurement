@@ -382,6 +382,43 @@ pub fn spawn_packet_writer(
     })
 }
 
+/// Spawn a writer that drains **several** SPSC rings into one segmented file
+/// (the fan-in case: many flows → one node `packets.parquet`, each ring still
+/// strictly single-producer/single-consumer). See `contracts/internal/logger_sink.md`.
+pub fn spawn_packet_writer_multi(
+    mut rxs: Vec<Consumer<PacketRow>>,
+    log_dir: impl AsRef<Path>,
+    segment_rows: usize,
+    ctx: LogContext,
+) -> std::io::Result<WriterHandle> {
+    let dir = log_dir.as_ref().to_path_buf();
+    let mut writer = SegmentedPacketWriter::new(&dir, segment_rows, ctx)?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_thread = stop.clone();
+    let handle = thread::spawn(move || {
+        loop {
+            let mut drained = false;
+            for rx in rxs.iter_mut() {
+                while let Ok(row) = rx.pop() {
+                    let _ = writer.append(&row);
+                    drained = true;
+                }
+            }
+            if stop_thread.load(Ordering::Acquire) && rxs.iter().all(|r| r.is_empty()) {
+                break;
+            }
+            if !drained {
+                thread::sleep(Duration::from_millis(2));
+            }
+        }
+        let _ = writer.flush();
+    });
+    Ok(WriterHandle {
+        stop,
+        handle: Some(handle),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,6 +2,7 @@ pub mod auth;
 pub mod log_writer;
 pub mod packet;
 pub mod timestamp;
+pub mod ue;
 
 use jni::objects::JString;
 use jni::strings::JavaStr;
