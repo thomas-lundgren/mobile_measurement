@@ -1,0 +1,25 @@
+[project]
+name = "fieldtest-analysis"
+version = "0.1.0"
+description = "Analysis toolchain for the 5G field-test platform: tolerant log loaders, OWD/RTT/jitter/loss metrics, derived radio events, and per-test summaries."
+requires-python = ">=3.10"
+dependencies = [
+    "pyarrow>=14",
+    "pandas>=2",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+plots = ["matplotlib>=3.7"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+fieldtest-analyze = "fieldtest_analysis.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fieldtest_analysis*"]
