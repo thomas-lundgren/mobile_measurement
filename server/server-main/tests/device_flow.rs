@@ -247,3 +247,13 @@ async fn status_upserts() {
     assert_eq!(state_val, "RUNNING_TEST");
     assert_eq!(batt, 79);
 }
+
+#[tokio::test]
+async fn server_time_is_unauthenticated_and_monotonicish() {
+    let st = state().await;
+    // no bearer — clock sync must work before/independent of a session
+    let (s, body) = send(&st, "GET", "/api/v1/time", None, None).await;
+    assert_eq!(s, StatusCode::OK);
+    let t = body["server_utc_ns"].as_i64().unwrap();
+    assert!(t > 1_700_000_000_000_000_000, "plausible UTC nanoseconds");
+}

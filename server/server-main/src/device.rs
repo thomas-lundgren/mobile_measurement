@@ -25,6 +25,15 @@ pub fn routes() -> Router<AppState> {
             post(ack_command),
         )
         .route("/api/v1/devices/{device_id}/status", post(post_status))
+        .route("/api/v1/time", get(server_time))
+}
+
+/// Unauthenticated server-clock reading for device-side time sync. The UE pairs
+/// its own send/recv timestamps around this call (SNTP-over-HTTP) to estimate
+/// its offset from the server clock, which it records in `clock.parquet` so OWD
+/// can be offset-corrected (invariant 2; spec §11.3).
+pub async fn server_time() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "server_utc_ns": now_utc_ns() }))
 }
 
 /// Authenticate, and if the route carries a `{device_id}`, require it to match.

@@ -43,6 +43,18 @@ def test_offset_probe_symmetry_recovers_injected_offset():
     assert corrected.abs().max() < 20_000
 
 
+def test_clocked_capture_uses_disciplined_offset(clocked_test_dir):
+    td = load_test(clocked_test_dir)
+    assert not td.clock.empty  # device wrote clock.parquet
+    est = clock.estimate_offset(td)
+    # disciplined offset is preferred over the probe-RTT symmetry fallback
+    assert est.method == "clock_parquet"
+    assert 1e9 < est.offset_ns < 2e9  # ~1.18 s phone-ahead measured on-device
+    stats = metrics.owd_stats(td, offset=est)
+    corr_p50 = stats["downlink"]["corrected_ns"]["p50"]
+    assert abs(corr_p50) < 100_000_000  # network-scale, not the ~1.18 s raw
+
+
 def test_real_capture_owd_becomes_network_scale(udp_test_dir):
     td = load_test(udp_test_dir)
     est = clock.estimate_offset(td)

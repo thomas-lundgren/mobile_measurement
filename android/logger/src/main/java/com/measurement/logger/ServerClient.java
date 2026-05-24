@@ -70,6 +70,15 @@ public final class ServerClient {
         }
     }
 
+    /** Server UTC (ns) for clock sync. Unauthenticated; the caller brackets this
+     *  with its own send/recv timestamps to estimate offset + RTT. */
+    public long serverTimeNs() throws Exception {
+        Request req = new Request.Builder().url(base + "/api/v1/time").get().build();
+        try (Response r = http.newCall(req).execute()) {
+            return new JSONObject(bodyString(r)).getLong("server_utc_ns");
+        }
+    }
+
     public void ackCommand(String session, String deviceId, long commandId) throws Exception {
         Request req = new Request.Builder()
                 .url(base + "/api/v1/devices/" + deviceId + "/command/" + commandId + "/ack")

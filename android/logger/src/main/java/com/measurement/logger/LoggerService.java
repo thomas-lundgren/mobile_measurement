@@ -159,8 +159,10 @@ public final class LoggerService extends Service {
         }
         GpsSampler gps = new GpsSampler(this, h);
         RadioSampler radio = new RadioSampler(this, h);
+        ClockSampler clock = new ClockSampler(client, h);
         gps.start();
         radio.start();
+        clock.start();
 
         setState("RUNNING_TEST " + testId);
         int durationSec = payload.getJSONObject("test_plan").optInt("duration_sec", 30);
@@ -170,6 +172,7 @@ public final class LoggerService extends Service {
 
         gps.stop();
         radio.stop();
+        clock.stop();
         RustCore.stopTest(h);
         JSONArray sealed = new JSONArray(RustCore.sealedFiles(h));
         RustCore.destroy(h);
