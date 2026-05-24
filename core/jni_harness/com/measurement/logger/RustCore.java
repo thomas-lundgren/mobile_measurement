@@ -20,6 +20,12 @@ public final class RustCore {
     /** Start a test from a UeTestConfig JSON blob. Returns 0 on success. */
     public static native int startTest(long handle, String configJson);
 
+    /** Buffer a GPS row (JSON) for this test's gps.parquet. 0 on success. */
+    public static native int pushGps(long handle, String rowJson);
+
+    /** Buffer a clock-calibration row (JSON) for clock.parquet. 0 on success. */
+    public static native int pushClock(long handle, String rowJson);
+
     /** Live per-flow counters as a JSON array. */
     public static native String pollStatus(long handle);
 

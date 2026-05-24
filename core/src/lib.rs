@@ -6,23 +6,39 @@
 //! RustCore_*` functions are thin JNI shims over it.
 
 pub mod auth;
+pub mod aux_log;
 pub mod log_writer;
 pub mod packet;
 pub mod timestamp;
 pub mod ue;
 
+use aux_log::{AuxContext, ClockRow, GpsRow};
 use jni::objects::{JClass, JString};
 use jni::sys::{jint, jlong};
 use jni::JNIEnv;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use timestamp::Timestamp;
 use ue::{UeEngine, UeTestConfig};
 
-/// One native core handle per app session. Holds the running test's engine.
+/// Per-test session state: where logs go + buffered low-rate aux rows
+/// (gps/clock) pushed from the Java shell. packets are written live by the
+/// engine; aux tables are buffered and sealed at stop.
+struct Session {
+    ctx: AuxContext,
+    gps: Vec<GpsRow>,
+    clock: Vec<ClockRow>,
+}
+
+/// One native core handle per app session. Holds the running test's engine +
+/// its aux-log session.
 #[derive(Default)]
 pub struct RustCore {
     engine: Mutex<Option<UeEngine>>,
-    log_dir: Mutex<Option<String>>,
+    session: Mutex<Option<Session>>,
+    /// (mobile_dir, root_dir) of the most recent test — kept past stop so the
+    /// upload manager can still list sealed files.
+    dirs: Mutex<Option<(PathBuf, PathBuf)>>,
 }
 
 impl RustCore {
@@ -37,11 +53,50 @@ impl RustCore {
         self.stop_test();
         let cfg: UeTestConfig =
             serde_json::from_str(config_json).map_err(|e| format!("bad config: {e}"))?;
-        let log_dir = cfg.log_dir.clone();
+        let mobile_dir = PathBuf::from(&cfg.log_dir);
+        let root_dir = mobile_dir
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| mobile_dir.clone());
+        let ctx = AuxContext {
+            device_id: cfg.device_id.clone(),
+            session_id: cfg.session_id.clone(),
+            test_id: cfg.test_id.clone(),
+            node: "mobile".to_string(),
+        };
         let engine = UeEngine::start(cfg).map_err(|e| format!("start failed: {e}"))?;
         *self.engine.lock().unwrap() = Some(engine);
-        *self.log_dir.lock().unwrap() = Some(log_dir);
+        *self.dirs.lock().unwrap() = Some((mobile_dir, root_dir));
+        *self.session.lock().unwrap() = Some(Session {
+            ctx,
+            gps: Vec::new(),
+            clock: Vec::new(),
+        });
         Ok(())
+    }
+
+    /// Buffer a GPS row (JSON) for this test's `gps.parquet`.
+    pub fn push_gps(&self, json: &str) -> Result<(), String> {
+        let row: GpsRow = serde_json::from_str(json).map_err(|e| format!("bad gps: {e}"))?;
+        match &mut *self.session.lock().unwrap() {
+            Some(s) => {
+                s.gps.push(row);
+                Ok(())
+            }
+            None => Err("no active test".into()),
+        }
+    }
+
+    /// Buffer a clock-calibration row (JSON) for this test's `clock.parquet`.
+    pub fn push_clock(&self, json: &str) -> Result<(), String> {
+        let row: ClockRow = serde_json::from_str(json).map_err(|e| format!("bad clock: {e}"))?;
+        match &mut *self.session.lock().unwrap() {
+            Some(s) => {
+                s.clock.push(row);
+                Ok(())
+            }
+            None => Err("no active test".into()),
+        }
     }
 
     /// Live per-flow counters as JSON (`[FlowSummary]`); `[]` if no test runs.
@@ -52,29 +107,46 @@ impl RustCore {
         }
     }
 
-    /// Stop the test, seal Parquet, return per-flow summaries as JSON. Safe to
-    /// call with no test running (returns `[]`).
+    /// Stop the test, seal Parquet (packets via the engine; gps/clock here),
+    /// return per-flow summaries as JSON. Safe to call when idle (`[]`).
     pub fn stop_test(&self) -> String {
-        let engine = self.engine.lock().unwrap().take();
-        match engine {
+        let summary = match self.engine.lock().unwrap().take() {
             Some(e) => serde_json::to_string(&e.stop()).unwrap_or_else(|_| "[]".into()),
             None => "[]".into(),
+        };
+        let sess = self.session.lock().unwrap().take();
+        let dirs = self.dirs.lock().unwrap().clone();
+        if let (Some(s), Some((mobile, root))) = (sess, dirs) {
+            if !s.gps.is_empty() {
+                let _ = aux_log::write_gps(&root.join("gps.parquet"), &s.ctx, &s.gps);
+            }
+            if !s.clock.is_empty() {
+                let _ = aux_log::write_clock(&mobile.join("clock.parquet"), &s.ctx, &s.clock);
+            }
         }
+        summary
     }
 
-    /// JSON array of sealed `*.parquet` paths the upload manager may read.
+    /// JSON array of sealed log files the upload manager may read. Scans by
+    /// known filename so it never picks up unrelated files.
     pub fn sealed_files(&self) -> String {
-        let dir = self.log_dir.lock().unwrap().clone();
+        let dirs = self.dirs.lock().unwrap().clone();
         let mut files: Vec<String> = Vec::new();
-        if let Some(d) = dir {
-            if let Ok(rd) = std::fs::read_dir(&d) {
+        if let Some((mobile, root)) = dirs {
+            if let Ok(rd) = std::fs::read_dir(&mobile) {
                 for e in rd.flatten() {
-                    let p = e.path();
-                    if p.extension().map(|x| x == "parquet").unwrap_or(false) {
-                        if let Some(s) = p.to_str() {
-                            files.push(s.to_string());
-                        }
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if (name.starts_with("packets") || name == "clock.parquet")
+                        && name.ends_with(".parquet")
+                    {
+                        files.push(e.path().to_string_lossy().to_string());
                     }
+                }
+            }
+            for f in ["gps.parquet", "radio.parquet"] {
+                let p = root.join(f);
+                if p.exists() {
+                    files.push(p.to_string_lossy().to_string());
                 }
             }
         }
@@ -126,6 +198,48 @@ pub extern "system" fn Java_com_measurement_logger_RustCore_startTest(
         None => return -1,
     };
     match unsafe { core(handle) }.start_test(&cfg) {
+        Ok(()) => 0,
+        Err(e) => {
+            let _ = env.throw_new("java/lang/RuntimeException", e);
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_measurement_logger_RustCore_pushGps(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    row: JString,
+) -> jint {
+    push_row(&mut env, handle, &row, |c, j| c.push_gps(j))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_measurement_logger_RustCore_pushClock(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    row: JString,
+) -> jint {
+    push_row(&mut env, handle, &row, |c, j| c.push_clock(j))
+}
+
+fn push_row(
+    env: &mut JNIEnv,
+    handle: jlong,
+    row: &JString,
+    f: impl FnOnce(&RustCore, &str) -> Result<(), String>,
+) -> jint {
+    if handle == 0 {
+        return -1;
+    }
+    let json = match jstr(env, row) {
+        Some(s) => s,
+        None => return -1,
+    };
+    match f(unsafe { core(handle) }, &json) {
         Ok(()) => 0,
         Err(e) => {
             let _ = env.throw_new("java/lang/RuntimeException", e);

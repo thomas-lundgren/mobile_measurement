@@ -32,7 +32,8 @@ public final class Harness {
         echo.setDaemon(true);
         echo.start();
 
-        String logDir = Files.createTempDirectory("mp-harness").toString();
+        // log_dir is the test's mobile/ dir, so gps/radio land at the test root
+        String logDir = Files.createTempDirectory("mp-harness").resolve("mobile").toString();
         String cfg = "{"
                 + "\"test_id\":\"tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5\","
                 + "\"device_id\":\"dev_x\",\"session_id\":\"ses_x\","
@@ -48,6 +49,10 @@ public final class Harness {
         int rc = RustCore.startTest(h, cfg);
         check(rc == 0, "startTest rc=0 (got " + rc + ")");
 
+        // Java shell feeds low-rate aux rows over JNI
+        check(RustCore.pushGps(h, "{\"mono_ns\":1,\"utc_ns\":2,\"latitude\":59.33,\"longitude\":18.06,\"accuracy_m\":5.0}") == 0, "pushGps");
+        check(RustCore.pushClock(h, "{\"mono_ns\":1,\"utc_ns\":2,\"source\":\"gps\",\"uncertainty_ns\":400}") == 0, "pushClock");
+
         Thread.sleep(300);
         String status = RustCore.pollStatus(h);
         System.out.println("status=" + status);
@@ -59,7 +64,9 @@ public final class Harness {
 
         String sealed = RustCore.sealedFiles(h);
         System.out.println("sealed=" + sealed);
-        check(sealed.contains(".parquet"), "sealedFiles lists parquet");
+        check(sealed.contains("packets"), "sealedFiles lists packets");
+        check(sealed.contains("gps.parquet"), "sealedFiles lists gps");
+        check(sealed.contains("clock.parquet"), "sealedFiles lists clock");
 
         RustCore.destroy(h);
         System.out.println("PASS: JNI boundary exercised end-to-end");
