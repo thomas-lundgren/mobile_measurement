@@ -1,416 +1,198 @@
+//! fieldtest-core — the shared engine (server + Android via JNI).
+//!
+//! `RustCore` is the Logger's native handle: it drives the UE traffic engine
+//! (`ue`) from JSON config and exposes status / sealed-file listing. The logic
+//! is pure Rust (unit-testable without a JVM); the `Java_com_measurement_logger_
+//! RustCore_*` functions are thin JNI shims over it.
+
 pub mod auth;
 pub mod log_writer;
 pub mod packet;
 pub mod timestamp;
 pub mod ue;
 
-use jni::objects::JString;
-use jni::strings::JavaStr;
-use jni::sys::jlong;
+use jni::objects::{JClass, JString};
+use jni::sys::{jint, jlong};
 use jni::JNIEnv;
-use log_writer::{Direction, PacketRow, SegmentedPacketWriter};
-use packet::ProbePacket;
-use serde::{Deserialize, Serialize};
-use std::net::UdpSocket;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::sync::Mutex;
 use timestamp::Timestamp;
+use ue::{UeEngine, UeTestConfig};
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct CoreConfig {
-    pub node_id: String,
-    pub log_dir: String,
-    #[serde(default = "default_segment_rows")]
-    pub segment_rows: usize,
-    // Join-column context for the packets log (constant per file). Defaulted
-    // for the spike; the data-generator/Logger supplies real values (1f/2).
-    #[serde(default = "default_unknown")]
-    pub device_id: String,
-    #[serde(default = "default_unknown")]
-    pub session_id: String,
-    #[serde(default = "default_unknown")]
-    pub test_id: String,
-    #[serde(default = "default_node")]
-    pub node: String,
+/// One native core handle per app session. Holds the running test's engine.
+#[derive(Default)]
+pub struct RustCore {
+    engine: Mutex<Option<UeEngine>>,
+    log_dir: Mutex<Option<String>>,
 }
 
-fn default_unknown() -> String {
-    "unknown".to_string()
-}
-fn default_node() -> String {
-    "mobile".to_string()
-}
-
-fn default_segment_rows() -> usize {
-    1000
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct FlowConfig {
-    pub flow_id: u32,
-    pub server_host: String,
-    pub server_port: u16,
-    pub local_port: Option<u16>,
-    #[serde(default = "default_rate_pps")]
-    pub rate_pps: u32,
-    #[serde(default = "default_packet_size")]
-    pub packet_size: usize,
-    #[serde(default = "default_duration_sec")]
-    pub duration_sec: u64,
-}
-
-fn default_rate_pps() -> u32 {
-    10
-}
-fn default_packet_size() -> usize {
-    64
-}
-fn default_duration_sec() -> u64 {
-    60
-}
-
-#[derive(Debug, Default, Serialize, Clone)]
-pub struct FlowStats {
-    pub packets_sent: u64,
-    pub packets_received: u64,
-    pub bytes_sent: u64,
-    pub bytes_received: u64,
-    pub last_seq_sent: u64,
-    pub last_seq_recv: u64,
-    pub errors: Vec<String>,
-}
-
-pub struct CoreState {
-    _config: CoreConfig,
-    writer: Mutex<Option<SegmentedPacketWriter>>,
-    stop_flag: Arc<AtomicBool>,
-    stats: Arc<Mutex<FlowStats>>,
-    flow_handle: Mutex<Option<JoinHandle<()>>>,
-    next_seq: AtomicU64,
-}
-
-impl CoreState {
-    pub fn new(config: CoreConfig) -> std::io::Result<Self> {
-        let ctx = log_writer::LogContext {
-            device_id: config.device_id.clone(),
-            session_id: config.session_id.clone(),
-            test_id: config.test_id.clone(),
-            node: config.node.clone(),
-        };
-        let writer = SegmentedPacketWriter::new(&config.log_dir, config.segment_rows, ctx)?;
-        Ok(Self {
-            _config: config,
-            writer: Mutex::new(Some(writer)),
-            stop_flag: Arc::new(AtomicBool::new(false)),
-            stats: Arc::new(Mutex::new(FlowStats::default())),
-            flow_handle: Mutex::new(None),
-            next_seq: AtomicU64::new(1),
-        })
+impl RustCore {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn start_flow(&self, flow: FlowConfig) -> std::io::Result<()> {
-        // Ensure any prior flow is stopped.
-        self.stop();
-
-        self.stop_flag.store(false, Ordering::SeqCst);
-        {
-            let mut st = self.stats.lock().unwrap();
-            *st = FlowStats::default();
-        }
-
-        let local_addr = format!("0.0.0.0:{}", flow.local_port.unwrap_or(0));
-        let socket = UdpSocket::bind(&local_addr)?;
-        socket.set_nonblocking(false)?;
-        socket.set_read_timeout(Some(Duration::from_millis(100)))?;
-        let server_addr = format!("{}:{}", flow.server_host, flow.server_port);
-        socket.connect(&server_addr)?;
-
-        let period = Duration::from_secs_f64(1.0 / f64::from(flow.rate_pps.max(1)));
-        let payload = vec![0u8; flow.packet_size];
-        let stop = Arc::clone(&self.stop_flag);
-        let stats = Arc::clone(&self.stats);
-        let writer = self.writer.lock().unwrap().take();
-        let writer = Mutex::new(writer);
-        let _next_seq = &self.next_seq;
-        let flow_id = flow.flow_id;
-        let duration = Duration::from_secs(flow.duration_sec);
-
-        let handle = thread::spawn(move || {
-            let start = std::time::Instant::now();
-            let mut local_seq: u64 = 1;
-            let mut recv_buf = [0u8; 2048];
-            let _payload_size = payload.len();
-
-            while !stop.load(Ordering::SeqCst) && start.elapsed() < duration {
-                let seq = local_seq;
-                local_seq += 1;
-
-                let ts = Timestamp::now();
-                let pkt = ProbePacket {
-                    flow_id,
-                    sequence_number: seq,
-                    send_mono_ns: ts.mono_ns,
-                };
-                let bytes = pkt.to_bytes();
-                if let Err(e) = socket.send(&bytes[..]) {
-                    let mut s = stats.lock().unwrap();
-                    s.errors.push(format!("send error: {}", e));
-                    continue;
-                }
-
-                {
-                    let mut s = stats.lock().unwrap();
-                    s.packets_sent += 1;
-                    s.bytes_sent += bytes.len() as u64;
-                    s.last_seq_sent = seq;
-                }
-
-                if let Ok(n) = socket.recv(&mut recv_buf) {
-                    if let Ok(echoed) = ProbePacket::decode(&recv_buf[..n]) {
-                        let recv_ts = Timestamp::now();
-                        {
-                            let mut s = stats.lock().unwrap();
-                            s.packets_received += 1;
-                            s.bytes_received += n as u64;
-                            s.last_seq_recv = echoed.sequence_number;
-                        }
-                        if let Ok(mut w) = writer.lock() {
-                            if let Some(ref mut wr) = *w {
-                                let _ = wr.append(&PacketRow::probe(
-                                    flow_id,
-                                    echoed.sequence_number,
-                                    Direction::Received,
-                                    recv_ts,
-                                    n as u32,
-                                ));
-                            }
-                        }
-                    }
-                }
-
-                if let Ok(mut w) = writer.lock() {
-                    if let Some(ref mut wr) = *w {
-                        let _ = wr.append(&PacketRow::probe(
-                            flow_id,
-                            seq,
-                            Direction::Sent,
-                            ts,
-                            bytes.len() as u32,
-                        ));
-                    }
-                }
-
-                let next_send = start + period.mul_f64(local_seq as f64);
-                let now = std::time::Instant::now();
-                if next_send > now {
-                    thread::sleep(next_send - now);
-                }
-            }
-
-            // Give a moment for late echoes.
-            let deadline = std::time::Instant::now() + Duration::from_millis(500);
-            while std::time::Instant::now() < deadline {
-                if let Ok(n) = socket.recv(&mut recv_buf) {
-                    if let Ok(echoed) = ProbePacket::decode(&recv_buf[..n]) {
-                        let recv_ts = Timestamp::now();
-                        {
-                            let mut s = stats.lock().unwrap();
-                            s.packets_received += 1;
-                            s.bytes_received += n as u64;
-                            s.last_seq_recv = echoed.sequence_number;
-                        }
-                        if let Ok(mut w) = writer.lock() {
-                            if let Some(ref mut wr) = *w {
-                                let _ = wr.append(&PacketRow::probe(
-                                    flow_id,
-                                    echoed.sequence_number,
-                                    Direction::Received,
-                                    recv_ts,
-                                    n as u32,
-                                ));
-                            }
-                        }
-                    }
-                } else {
-                    thread::sleep(Duration::from_millis(10));
-                }
-            }
-
-            // Flush and drop writer
-            if let Ok(mut w) = writer.lock() {
-                if let Some(mut wr) = w.take() {
-                    let _ = wr.flush();
-                    drop(wr);
-                }
-            }
-        });
-
-        *self.flow_handle.lock().unwrap() = Some(handle);
+    /// Start a test from a `UeTestConfig` JSON blob (the Java shell merges the
+    /// `RunTestPayload` + `flow_bindings` into this). Idempotently stops any
+    /// prior run first.
+    pub fn start_test(&self, config_json: &str) -> Result<(), String> {
+        self.stop_test();
+        let cfg: UeTestConfig =
+            serde_json::from_str(config_json).map_err(|e| format!("bad config: {e}"))?;
+        let log_dir = cfg.log_dir.clone();
+        let engine = UeEngine::start(cfg).map_err(|e| format!("start failed: {e}"))?;
+        *self.engine.lock().unwrap() = Some(engine);
+        *self.log_dir.lock().unwrap() = Some(log_dir);
         Ok(())
     }
 
-    pub fn stop(&self) {
-        self.stop_flag.store(true, Ordering::SeqCst);
-        if let Some(h) = self.flow_handle.lock().unwrap().take() {
-            let _ = h.join();
+    /// Live per-flow counters as JSON (`[FlowSummary]`); `[]` if no test runs.
+    pub fn poll_status(&self) -> String {
+        match &*self.engine.lock().unwrap() {
+            Some(e) => serde_json::to_string(&e.status()).unwrap_or_else(|_| "[]".into()),
+            None => "[]".into(),
         }
     }
 
-    pub fn poll_stats(&self) -> FlowStats {
-        self.stats.lock().unwrap().clone()
-    }
-}
-
-impl Drop for CoreState {
-    fn drop(&mut self) {
-        self.stop();
-        if let Ok(mut w) = self.writer.lock() {
-            drop(w.take());
+    /// Stop the test, seal Parquet, return per-flow summaries as JSON. Safe to
+    /// call with no test running (returns `[]`).
+    pub fn stop_test(&self) -> String {
+        let engine = self.engine.lock().unwrap().take();
+        match engine {
+            Some(e) => serde_json::to_string(&e.stop()).unwrap_or_else(|_| "[]".into()),
+            None => "[]".into(),
         }
     }
+
+    /// JSON array of sealed `*.parquet` paths the upload manager may read.
+    pub fn sealed_files(&self) -> String {
+        let dir = self.log_dir.lock().unwrap().clone();
+        let mut files: Vec<String> = Vec::new();
+        if let Some(d) = dir {
+            if let Ok(rd) = std::fs::read_dir(&d) {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if p.extension().map(|x| x == "parquet").unwrap_or(false) {
+                        if let Some(s) = p.to_str() {
+                            files.push(s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        files.sort();
+        serde_json::to_string(&files).unwrap_or_else(|_| "[]".into())
+    }
 }
 
-// ------------------------------------------------------------------
-// JNI exports
-// ------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// JNI shims — static natives on `com.measurement.logger.RustCore`. The handle
+// (a *RustCore) is passed explicitly as a jlong.
+// ---------------------------------------------------------------------------
 
-fn jstring_to_rust(env: &mut JNIEnv, js: &JString) -> Option<String> {
+fn jstr(env: &mut JNIEnv, js: &JString) -> Option<String> {
     if js.is_null() {
         return None;
     }
-    let s: JavaStr = env.get_string(js).ok()?;
-    Some(s.to_str().ok()?.to_owned())
+    env.get_string(js)
+        .ok()
+        .and_then(|s| s.to_str().ok().map(str::to_owned))
 }
 
-fn rust_to_jstring<'a>(env: &mut JNIEnv<'a>, s: &str) -> jni::objects::JString<'a> {
-    env.new_string(s).expect("JNI new_string failed")
+/// SAFETY: `handle` must be a live pointer returned by `coreNew` and not yet
+/// destroyed.
+unsafe fn core<'a>(handle: jlong) -> &'a RustCore {
+    &*(handle as *const RustCore)
 }
 
 #[no_mangle]
-pub extern "system" fn Java_spike_RustBridge_init(
-    mut env: JNIEnv,
-    _class: jni::objects::JClass,
-    config_json: JString,
+pub extern "system" fn Java_com_measurement_logger_RustCore_coreNew(
+    _env: JNIEnv,
+    _class: JClass,
 ) -> jlong {
-    let cfg_str = match jstring_to_rust(&mut env, &config_json) {
+    Box::into_raw(Box::new(RustCore::new())) as jlong
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_measurement_logger_RustCore_startTest(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    config: JString,
+) -> jint {
+    if handle == 0 {
+        return -1;
+    }
+    let cfg = match jstr(&mut env, &config) {
         Some(s) => s,
-        None => {
-            let _ = env.throw_new("java/lang/IllegalArgumentException", "null config");
-            return 0;
-        }
+        None => return -1,
     };
-    let config: CoreConfig = match serde_json::from_str(&cfg_str) {
-        Ok(c) => c,
+    match unsafe { core(handle) }.start_test(&cfg) {
+        Ok(()) => 0,
         Err(e) => {
-            let _ = env.throw_new(
-                "java/lang/IllegalArgumentException",
-                format!("bad config: {}", e),
-            );
-            return 0;
+            let _ = env.throw_new("java/lang/RuntimeException", e);
+            -1
         }
-    };
-
-    let state = match CoreState::new(config) {
-        Ok(s) => s,
-        Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("init failed: {}", e));
-            return 0;
-        }
-    };
-
-    let boxed = Box::new(state);
-    Box::into_raw(boxed) as jlong
+    }
 }
 
 #[no_mangle]
-pub extern "system" fn Java_spike_RustBridge_startFlow(
-    mut env: JNIEnv,
-    _class: jni::objects::JClass,
+pub extern "system" fn Java_com_measurement_logger_RustCore_pollStatus<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
     handle: jlong,
-    flow_json: JString,
-) {
-    if handle == 0 {
-        let _ = env.throw_new("java/lang/IllegalArgumentException", "null handle");
-        return;
-    }
-    let state = unsafe { &*(handle as *const CoreState) };
-    let flow_str = match jstring_to_rust(&mut env, &flow_json) {
-        Some(s) => s,
-        None => {
-            let _ = env.throw_new("java/lang/IllegalArgumentException", "null flow config");
-            return;
-        }
+) -> JString<'a> {
+    let s = if handle == 0 {
+        "[]".to_string()
+    } else {
+        unsafe { core(handle) }.poll_status()
     };
-    let flow: FlowConfig = match serde_json::from_str(&flow_str) {
-        Ok(f) => f,
-        Err(e) => {
-            let _ = env.throw_new(
-                "java/lang/IllegalArgumentException",
-                format!("bad flow config: {}", e),
-            );
-            return;
-        }
-    };
-
-    if let Err(e) = state.start_flow(flow) {
-        let _ = env.throw_new(
-            "java/lang/RuntimeException",
-            format!("startFlow failed: {}", e),
-        );
-    }
+    env.new_string(s).expect("JNI new_string")
 }
 
 #[no_mangle]
-pub extern "system" fn Java_spike_RustBridge_pollStatus<'a>(
-    mut env: JNIEnv<'a>,
-    _class: jni::objects::JClass<'a>,
+pub extern "system" fn Java_com_measurement_logger_RustCore_stopTest<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
     handle: jlong,
-) -> jni::objects::JString<'a> {
-    if handle == 0 {
-        let _ = env.throw_new("java/lang/IllegalArgumentException", "null handle");
-        return rust_to_jstring(&mut env, "{}");
-    }
-    let state = unsafe { &*(handle as *const CoreState) };
-    let stats = state.poll_stats();
-    let json = serde_json::to_string(&stats).unwrap_or_else(|_| "{}".to_string());
-    rust_to_jstring(&mut env, &json)
+) -> JString<'a> {
+    let s = if handle == 0 {
+        "[]".to_string()
+    } else {
+        unsafe { core(handle) }.stop_test()
+    };
+    env.new_string(s).expect("JNI new_string")
 }
 
 #[no_mangle]
-pub extern "system" fn Java_spike_RustBridge_stop(
-    mut env: JNIEnv,
-    _class: jni::objects::JClass,
+pub extern "system" fn Java_com_measurement_logger_RustCore_sealedFiles<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    handle: jlong,
+) -> JString<'a> {
+    let s = if handle == 0 {
+        "[]".to_string()
+    } else {
+        unsafe { core(handle) }.sealed_files()
+    };
+    env.new_string(s).expect("JNI new_string")
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_measurement_logger_RustCore_sampleClock<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+) -> JString<'a> {
+    let json = serde_json::to_string(&Timestamp::now()).unwrap_or_else(|_| "{}".into());
+    env.new_string(json).expect("JNI new_string")
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_measurement_logger_RustCore_destroy(
+    _env: JNIEnv,
+    _class: JClass,
     handle: jlong,
 ) {
-    if handle == 0 {
-        let _ = env.throw_new("java/lang/IllegalArgumentException", "null handle");
-        return;
+    if handle != 0 {
+        // SAFETY: reclaims the Box leaked in coreNew; called once.
+        let _ = unsafe { Box::from_raw(handle as *mut RustCore) };
     }
-    let state = unsafe { &*(handle as *const CoreState) };
-    state.stop();
-}
-
-#[no_mangle]
-pub extern "system" fn Java_spike_RustBridge_destroy(
-    mut env: JNIEnv,
-    _class: jni::objects::JClass,
-    handle: jlong,
-) {
-    if handle == 0 {
-        let _ = env.throw_new("java/lang/IllegalArgumentException", "null handle");
-        return;
-    }
-    let _ = unsafe { Box::from_raw(handle as *mut CoreState) };
-}
-
-#[no_mangle]
-pub extern "system" fn Java_spike_RustBridge_sampleClock<'a>(
-    mut env: JNIEnv<'a>,
-    _class: jni::objects::JClass<'a>,
-) -> jni::objects::JString<'a> {
-    let ts = Timestamp::now();
-    let json = serde_json::to_string(&ts).unwrap_or_else(|_| "{}".to_string());
-    rust_to_jstring(&mut env, &json)
 }
