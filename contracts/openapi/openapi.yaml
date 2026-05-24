@@ -66,6 +66,23 @@ paths:
                 $ref: '#/components/schemas/VerifyResponse'
         '401':
           description: ''
+  /api/v1/devices:
+    get:
+      tags:
+      - operator
+      summary: 'Operator dashboard: every device with its latest reported status.'
+      operationId: list_devices
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeviceSummary'
+        '401':
+          description: ''
   /api/v1/devices/enroll:
     post:
       tags:
@@ -177,6 +194,22 @@ paths:
         '401':
           description: ''
   /api/v1/tests:
+    get:
+      tags:
+      - operator
+      summary: Operator recent-tests list (newest first, capped).
+      operationId: list_tests
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TestSummary'
+        '401':
+          description: ''
     post:
       tags:
       - operator
@@ -205,6 +238,31 @@ paths:
       tags:
       - operator
       operationId: get_test
+      parameters:
+      - name: test_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestStatus'
+        '401':
+          description: ''
+        '404':
+          description: ''
+  /api/v1/tests/{test_id}/stop:
+    post:
+      tags:
+      - operator
+      summary: |-
+        Operator stop: drive the test terminal (CANCELLED) and stop its generators.
+        Idempotent — stopping an already-terminal test just returns its status.
+      operationId: stop_test
       parameters:
       - name: test_id
         in: path
@@ -456,6 +514,56 @@ components:
           oneOf:
           - type: 'null'
           - $ref: '#/components/schemas/Storage'
+    DeviceSummary:
+      type: object
+      description: |-
+        Operator dashboard row: a device plus its latest reported status (status
+        fields are null until the device first heartbeats). `GET /api/v1/devices`.
+      required:
+      - device_id
+      - platform
+      - status
+      - logging_config_version
+      - enrolled_at_utc_ns
+      properties:
+        battery_level_pct:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        current_test_id:
+          type:
+          - string
+          - 'null'
+        device_id:
+          type: string
+        device_label:
+          type:
+          - string
+          - 'null'
+        enrolled_at_utc_ns:
+          type: integer
+          format: int64
+        last_seen_utc_ns:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        logger_state:
+          type:
+          - string
+          - 'null'
+        logging_config_version:
+          type: integer
+          format: int64
+        model:
+          type:
+          - string
+          - 'null'
+        platform:
+          type: string
+        status:
+          type: string
     Direction:
       type: string
       description: Flow direction (`enums.yaml` directions). Bidirectional intentionally absent.
@@ -1002,6 +1110,36 @@ components:
           - integer
           - 'null'
           format: int64
+        state:
+          $ref: '#/components/schemas/TestControlState'
+        test_id:
+          type: string
+    TestSummary:
+      type: object
+      description: Compact test row for the operator's recent-tests list. `GET /api/v1/tests`.
+      required:
+      - test_id
+      - device_id
+      - plan_name
+      - state
+      - created_utc_ns
+      properties:
+        created_utc_ns:
+          type: integer
+          format: int64
+        device_id:
+          type: string
+        ended_utc_ns:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        plan_name:
+          type: string
+        result:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TestResult'
         state:
           $ref: '#/components/schemas/TestControlState'
         test_id:

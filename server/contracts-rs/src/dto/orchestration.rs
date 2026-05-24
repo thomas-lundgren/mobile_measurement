@@ -9,6 +9,43 @@ use crate::enums::{TestControlState, TestResult};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+/// Operator dashboard row: a device plus its latest reported status (status
+/// fields are null until the device first heartbeats). `GET /api/v1/devices`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct DeviceSummary {
+    pub device_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_label: Option<String>,
+    pub platform: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub status: String,
+    pub logging_config_version: i64,
+    pub enrolled_at_utc_ns: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logger_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_test_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub battery_level_pct: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen_utc_ns: Option<i64>,
+}
+
+/// Compact test row for the operator's recent-tests list. `GET /api/v1/tests`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct TestSummary {
+    pub test_id: String,
+    pub device_id: String,
+    pub plan_name: String,
+    pub state: TestControlState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<TestResult>,
+    pub created_utc_ns: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_utc_ns: Option<i64>,
+}
+
 /// Operator → server-main body of `POST /api/v1/tests`. `plan` is a port-less
 /// TestPlan; the server allocates ports.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]

@@ -10,7 +10,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use mp_contracts::{
-    CreateTestRequest, InternalStartTest, RunTestPayload, TestControlState, TestResult, TestStatus,
+    CreateTestRequest, DeviceSummary, InternalStartTest, RunTestPayload, TestControlState,
+    TestResult, TestStatus, TestSummary,
 };
 
 use crate::auth::authed_operator;
@@ -25,8 +26,10 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/tests", post(create_test))
+        .route("/api/v1/tests", post(create_test).get(list_tests))
         .route("/api/v1/tests/{test_id}", get(get_test))
+        .route("/api/v1/tests/{test_id}/stop", post(stop_test))
+        .route("/api/v1/devices", get(list_devices))
 }
 
 #[utoipa::path(
@@ -189,6 +192,147 @@ pub async fn get_test(
     Path(test_id): Path<String>,
 ) -> Result<Json<TestStatus>, AppError> {
     authed_operator(&st, &headers)?;
+    read_status(&st, &test_id)
+        .await?
+        .map(Json)
+        .ok_or(AppError::NotFound)
+}
+
+/// Operator dashboard: every device with its latest reported status.
+#[utoipa::path(
+    get, path = "/api/v1/devices", tag = "operator",
+    responses((status = 200, body = [DeviceSummary]), (status = 401))
+)]
+pub async fn list_devices(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<DeviceSummary>>, AppError> {
+    authed_operator(&st, &headers)?;
+    // devices LEFT JOIN their single latest status row.
+    type Row = (
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+        String,
+        i64,
+        i64,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        Option<i64>,
+    );
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT d.device_id, d.device_label, d.platform, d.model, d.status, \
+                d.logging_config_version, d.enrolled_at, \
+                s.logger_state, s.current_test_id, s.battery_level_pct, s.received_at \
+         FROM devices d LEFT JOIN device_status s ON s.device_id = d.device_id \
+         ORDER BY d.created_at",
+    )
+    .fetch_all(&st.pool)
+    .await?;
+    let out = rows
+        .into_iter()
+        .map(|r| DeviceSummary {
+            device_id: r.0,
+            device_label: r.1,
+            platform: r.2,
+            model: r.3,
+            status: r.4,
+            logging_config_version: r.5,
+            enrolled_at_utc_ns: r.6,
+            logger_state: r.7,
+            current_test_id: r.8,
+            battery_level_pct: r.9,
+            last_seen_utc_ns: r.10,
+        })
+        .collect();
+    Ok(Json(out))
+}
+
+/// Operator recent-tests list (newest first, capped).
+#[utoipa::path(
+    get, path = "/api/v1/tests", tag = "operator",
+    responses((status = 200, body = [TestSummary]), (status = 401))
+)]
+pub async fn list_tests(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<TestSummary>>, AppError> {
+    authed_operator(&st, &headers)?;
+    type Row = (
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        i64,
+        Option<i64>,
+    );
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT test_id, device_id, plan_name, state, result, created_at, ended_at \
+         FROM tests ORDER BY created_at DESC LIMIT 200",
+    )
+    .fetch_all(&st.pool)
+    .await?;
+    let out = rows
+        .into_iter()
+        .map(
+            |(test_id, device_id, plan_name, state, result, created, ended)| {
+                Ok(TestSummary {
+                    test_id,
+                    device_id,
+                    plan_name,
+                    state: serde_json::from_value(serde_json::Value::String(state))
+                        .map_err(|_| AppError::Internal)?,
+                    result: match result {
+                        Some(r) => Some(
+                            serde_json::from_value(serde_json::Value::String(r))
+                                .map_err(|_| AppError::Internal)?,
+                        ),
+                        None => None,
+                    },
+                    created_utc_ns: created,
+                    ended_utc_ns: ended,
+                })
+            },
+        )
+        .collect::<Result<Vec<_>, AppError>>()?;
+    Ok(Json(out))
+}
+
+/// Operator stop: drive the test terminal (CANCELLED) and stop its generators.
+/// Idempotent — stopping an already-terminal test just returns its status.
+#[utoipa::path(
+    post, path = "/api/v1/tests/{test_id}/stop", tag = "operator",
+    params(("test_id" = String, Path)),
+    responses((status = 200, body = TestStatus), (status = 401), (status = 404))
+)]
+pub async fn stop_test(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Path(test_id): Path<String>,
+) -> Result<Json<TestStatus>, AppError> {
+    authed_operator(&st, &headers)?;
+    if read_status(&st, &test_id).await?.is_none() {
+        return Err(AppError::NotFound);
+    }
+    let rows = sqlx::query(
+        "UPDATE tests SET state = 'DONE', result = 'CANCELLED', ended_at = ? \
+         WHERE test_id = ? AND state NOT IN ('DONE', 'FAILED')",
+    )
+    .bind(now_utc_ns())
+    .bind(&test_id)
+    .execute(&st.pool)
+    .await?
+    .rows_affected();
+    if rows > 0 {
+        if let Some(url) = st.test_control_url.as_ref() {
+            if let Err(e) = TcClient::new(url.clone()).stop_test(&test_id).await {
+                tracing::warn!("stop_test (operator) on {test_id}: {e}");
+            }
+        }
+    }
     read_status(&st, &test_id)
         .await?
         .map(Json)
