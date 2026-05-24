@@ -40,6 +40,22 @@ public final class MainActivity extends AppCompatActivity {
         ((Button) findViewById(R.id.stopBtn)).setOnClickListener(v ->
                 stopService(new Intent(this, LoggerService.class)));
 
+        // Dev/automation: `adb shell am start -n .../.MainActivity -e server URL -e token TOK`
+        // prefills the fields and auto-starts the service (FGS start is allowed from
+        // a foreground Activity). Normal UI use is unaffected.
+        String extraServer = getIntent().getStringExtra(LoggerService.EXTRA_SERVER);
+        String extraToken = getIntent().getStringExtra(LoggerService.EXTRA_TOKEN);
+        if (extraServer != null && !extraServer.isEmpty()) {
+            serverUrl.setText(extraServer);
+            if (extraToken != null) {
+                enrollToken.setText(extraToken);
+            }
+            Intent i = new Intent(this, LoggerService.class)
+                    .putExtra(LoggerService.EXTRA_SERVER, extraServer)
+                    .putExtra(LoggerService.EXTRA_TOKEN, extraToken == null ? "" : extraToken);
+            androidx.core.content.ContextCompat.startForegroundService(this, i);
+        }
+
         // poll the service state into the text view
         ui.post(new Runnable() {
             @Override

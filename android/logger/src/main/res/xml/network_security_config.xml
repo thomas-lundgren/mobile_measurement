@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The measurement server runs plain HTTP (TLS is a Phase-5 hardening concern,
+     per the architecture spec). During development the phone and server share a
+     LAN, so cleartext is permitted to any host here. Phase-5 hardening will flip
+     base-config to cleartextTrafficPermitted="false" and scope HTTPS per-domain. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
