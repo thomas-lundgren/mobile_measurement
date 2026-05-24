@@ -234,5 +234,8 @@ pub async fn complete(
         .bind(&upload_id)
         .execute(&st.pool)
         .await?;
+
+    // Upload is the terminal signal: finalize the test (state + result + ended_at).
+    crate::tests_api::finalize_from_upload(&st.pool, &test_id, manifest.test_result).await?;
     Ok(StatusCode::NO_CONTENT)
 }

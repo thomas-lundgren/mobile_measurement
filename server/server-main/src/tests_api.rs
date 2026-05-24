@@ -227,6 +227,45 @@ async fn set_state(
     Ok(())
 }
 
+/// Advance a test to RUNNING when the device first reports it executing the test.
+/// Guarded to only fire from WAITING_FOR_CLIENT, so a late status update can't
+/// resurrect an already-terminal (DONE/FAILED) test.
+pub async fn mark_running(pool: &sqlx::SqlitePool, test_id: &str) -> Result<(), AppError> {
+    sqlx::query(
+        "UPDATE tests SET state = 'RUNNING' WHERE test_id = ? AND state = 'WAITING_FOR_CLIENT'",
+    )
+    .bind(test_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Finalize a test once its upload completes. The orchestration state lands on
+/// DONE for a successful/partial run and FAILED otherwise; the precise outcome
+/// is preserved in `result`, and `ended_at` is stamped. Guarded against
+/// re-finalizing (idempotent re-posts of `complete`).
+pub async fn finalize_from_upload(
+    pool: &sqlx::SqlitePool,
+    test_id: &str,
+    result: TestResult,
+) -> Result<(), AppError> {
+    let state = match result {
+        TestResult::Completed | TestResult::Partial => "DONE",
+        TestResult::Failed | TestResult::Cancelled => "FAILED",
+    };
+    sqlx::query(
+        "UPDATE tests SET state = ?, result = ?, ended_at = ? \
+         WHERE test_id = ? AND state NOT IN ('DONE', 'FAILED')",
+    )
+    .bind(state)
+    .bind(result.wire())
+    .bind(now_utc_ns())
+    .bind(test_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// (device_id, plan_name, state, result, created_at, started_at, ended_at)
 type TestRow = (
     String,

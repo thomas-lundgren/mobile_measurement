@@ -152,5 +152,13 @@ pub async fn post_status(
         received_at: now_utc_ns(),
     };
     registry::upsert_device_status(&st.pool, &update).await?;
+
+    // Advance the test's orchestration state the first time the device reports
+    // it actively running that test (WAITING_FOR_CLIENT -> RUNNING).
+    if matches!(status.logger_state, mp_contracts::LoggerState::RunningTest) {
+        if let Some(test_id) = &status.current_test_id {
+            crate::tests_api::mark_running(&st.pool, test_id).await?;
+        }
+    }
     Ok(StatusCode::NO_CONTENT)
 }

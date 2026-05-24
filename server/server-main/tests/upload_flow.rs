@@ -126,7 +126,7 @@ async fn make_test(st: &AppState, device_id: &str, test_id: &str) {
         .unwrap();
     sqlx::query(
         "INSERT INTO tests(test_id, session_id, device_id, plan_name, plan_version, plan_json, server_host, logging_config_json, logging_config_version, state, created_at) \
-         VALUES (?, 'ses_up', ?, 'p', 1, '{}', 'h', '{}', 1, 'DONE', 0)",
+         VALUES (?, 'ses_up', ?, 'p', 1, '{}', 'h', '{}', 1, 'WAITING_FOR_CLIENT', 0)",
     )
     .bind(test_id).bind(device_id).execute(&st.pool).await.unwrap();
 }
@@ -217,6 +217,18 @@ async fn full_upload_then_complete() {
         .await
         .unwrap();
     assert_eq!(st_str, "COMPLETE");
+
+    // completing the upload finalizes the test: WAITING_FOR_CLIENT -> DONE,
+    // result COMPLETED, ended_at stamped.
+    let (test_state, result, ended): (String, Option<String>, Option<i64>) =
+        sqlx::query_as("SELECT state, result, ended_at FROM tests WHERE test_id = ?")
+            .bind(test_id)
+            .fetch_one(&st.pool)
+            .await
+            .unwrap();
+    assert_eq!(test_state, "DONE");
+    assert_eq!(result.as_deref(), Some("COMPLETED"));
+    assert!(ended.is_some(), "ended_at stamped on finalize");
 }
 
 #[tokio::test]
