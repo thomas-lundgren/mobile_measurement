@@ -53,8 +53,8 @@ Controller (Android) ──▶ server-main ──▶ test-control ──▶ data
 | **Step 0 — JNI viability spike** | Prove shared Rust core over JNI: sockets, dual clock, segmented Parquet, crash survival, APK size — Stage A (desktop JVM) + Stage B (Pixel 9 Pro) | ✅ Complete — all checks green on physical device |
 | **Phase 0 — Foundations & contracts** | `contracts/` single source of truth for every cross-component boundary | ✅ Complete |
 | **Phase 1 — Server skeleton + protocol loopback** | `server-main` (axum/utoipa/sqlx), `test-control` (state machines, port alloc, READY gating), `data-generator` (probe→realtime→bulk), full probe e2e test | ✅ Complete |
-| **Phase 2 — Android Logger MVP** | Foreground service, registration, command poller, logger state machine, logging-first store + upload manager, traffic engine via JNI core, radio/GPS sampling | ⬜ Next |
-| **Phase 3 — Android Controller MVP** | Auth, generated API client, device list, start/stop test, upload control, dashboard | ⬜ Blocked on P1 |
+| **Phase 2 — Android Logger MVP** | Foreground service, registration, command poller, logger state machine, logging-first store + upload manager, traffic engine via JNI core, radio/GPS sampling | 🔶 In progress — host part done (2a UE engine, 2b server interop, 2c RustCore JNI + JVM harness); 2d–2f need Android SDK + Pixel |
+| **Phase 3 — Android Controller MVP** | Auth, generated API client, device list, start/stop test, upload control, dashboard | ⬜ Can start (Kotlin client from openapi.yaml) |
 | **Phase 4 — Analysis toolchain** | Tolerant loaders, OWD-with-uncertainty, RTT/jitter/loss, plots, derived handover/coverage events | ⬜ Runs parallel to P2 |
 | **Phase 5 — Hardening & field readiness** | Failure handling, multi-device fleet, dynamic config, clock-uncertainty validation, battery/storage, chaos tests | ⬜ Final |
 

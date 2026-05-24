@@ -1,10 +1,12 @@
 # 5G Field Test Platform — Current Status
 
-> As of 2026-05-23
+> As of 2026-05-24
 
 ## Summary
 
-Stage A + Stage B spikes complete, **Phase-0 contracts complete**, and **Phase 1 (server + protocol loopback) complete**: the full server-side control plane and all three traffic types run end to end on localhost, proven by an in-process integration test, with no Android needed. `cargo test --workspace` green (23 test suites). The Rust server is real; the Android apps (Phase 2/3) and analysis toolchain (Phase 4) are not yet built.
+Stage A + Stage B spikes complete, **Phase-0 contracts complete**, **Phase 1 (server + protocol loopback) complete**, and **Phase 2 host-verifiable portion complete (2a–2c)**: the shared Rust `core` now runs all three traffic types as the UE and is interop-proven against the live server; the real `RustCore` JNI surface is built and validated through a desktop-JVM harness. `cargo test --workspace` green (26 test suites) + the JVM JNI harness passes. The Rust server + the mobile core engine are real; the Android *app* (2d–2f), Controller (Phase 3), and analysis toolchain (Phase 4) are not yet built.
+
+The remaining Phase-2 work (2d–2f) needs the Android SDK/Gradle + a Pixel 9 Pro, which this CI/Linux environment can't run — so it's the natural handoff point to device work.
 
 The working tree is a **git repository** (initialized 2026-05-22; `.gitignore` covers Rust `target/`, Python `venv/`, Gradle/Android caches, throwaway keystores, spike runtime artifacts, and built `jniLibs` `.so`). Note: a full debug `target/` reaches ~19 GB — `cargo clean` between large work blocks keeps disk in check.
 
@@ -24,6 +26,21 @@ Cargo workspace: `core` (shared engine/codec/logger/auth), `server/contracts-rs`
 - **1j** realtime UDP (both directions, OWD/jitter inputs) + bulk TCP (both directions) generators.
 
 Transport is **plain HTTP on loopback** in dev (TLS deferred to Phase-5 hardening, per the Phase-1 design). Auth JWT = HS256.
+
+### Phase 2 — Android Logger MVP: host-verifiable portion COMPLETE (2026-05-24)
+
+Design: `planning/phase2_detailed_design.md`. Built and verified on the host (no device required):
+
+- **2a** `core/src/ue.rs` — the UE-side traffic engine (mirror of the server data-generator from the initiating side): probe, realtime UDP (both directions, keepalive/NAT-punch + OWD inputs), bulk TCP (both directions). One SPSC ring per flow → one `mobile/packets.parquet` via `spawn_packet_writer_multi`. Lean serde config (no `mp-contracts` dep → small `.so`).
+- **2b** `server/server-main/tests/ue_interop.rs` — **exit criterion 2**: the `core` UE engine drives a 5-flow test against the REAL server-main + test-control + data-generator and both sides log; the device-independent conformance gate the APK must pass.
+- **2c** `RustCore` JNI surface (`com.measurement.logger.RustCore`: coreNew/startTest/pollStatus/stopTest/sealedFiles/sampleClock/destroy) over a pure-Rust handle API; legacy spike `RustBridge` removed. `core/jni_harness/` desktop-JVM harness loads the real `.so` and drives a probe through the JNI boundary — **passes on host JDK 17**.
+
+Two contract seams surfaced + resolved: `session_id` now travels in `RUN_TEST`; the upload manifest path regex accepts segmented `<table>_NNNN.parquet`.
+
+**Remaining (device-gated, needs Android SDK/Gradle + Pixel 9 Pro):**
+- **2d** Android app skeleton — foreground service, generated REST client (from `openapi.yaml`), Keystore P-256 signer, logger state machine.
+- **2e** radio/gps/clock Parquet writers + `pushRadio/pushGps/pushClock` JNI + the Telephony/Location samplers (the writers were deferred from 2c to pair with the samplers).
+- **2f** on-device bring-up: full multi-flow test on the Pixel 9 Pro, local logs, upload (exit criteria 3–4).
 
 **Long-term direction:** The platform is designed to grow from a "test instrument" into a continuous network-quality probe that logs real app traffic and monitors latency to arbitrary destinations. See `planning/long_term_traffic_monitoring.md` for the growth roadmap. The MVP architecture (shared Rust core, segmented Parquet, dual clocks, server-configured logging) is intentionally built to support this without rewrite.
 
@@ -207,11 +224,9 @@ Deferred (optional polish, not blocking Phase 2):
 - Standalone `test-client` binary + `scripts/e2e_probe.sh` (the in-process integration test is the authoritative proof; a CLI client + shell wrapper is convenience for manual runs).
 - Per-connection real-time tuning (CPU pinning / SCHED_FIFO) — deferred to hardening.
 
-### Phase 2 — Android Logger MVP (not started)
+### Phase 2 — Android Logger MVP (2a–2c COMPLETE; 2d–2f device-gated; see Summary)
 
-Real Android logger app (not the throwaway spike). Depends on:
-- Phase 0 contracts
-- Stage B green on physical Pixel
+Host-verifiable core done (UE engine, server interop, RustCore JNI + JVM harness). Remaining 2d–2f need the Android SDK/Gradle + Pixel 9 Pro.
 
 ### Phase 3 — Android Controller (not started)
 
@@ -234,12 +249,12 @@ Real Android logger app (not the throwaway spike). Depends on:
 
 ## Next Recommended Steps
 
-Spikes, Phase 0, and Phase 1 are complete. The server is the reference implementation the mobile must match. Options, in priority order:
+Spikes, Phase 0, Phase 1, and the host-verifiable part of Phase 2 (2a–2c) are complete. Options, in priority order:
 
-1. **Phase 2 — Android Logger MVP.** Integrate the shared Rust `core` via JNI (sockets + dual clock + packet codec + SPSC logger sink), wrap it in the Java foreground service + control/REST client, and interop-test against the Phase-1 server. The synthetic-client integration test (`e2e_probe.rs`) + the generated OpenAPI are the conformance targets. Exit: a Pixel 9 Pro runs a full test, logs locally, uploads.
-2. **Phase 4 — Analysis toolchain (Python)** can start in parallel: tolerant Parquet loaders against the `parquet/*.yaml` schemas; OWD-with-uncertainty, RTT/jitter/loss; uses real uploaded sessions from the server.
-3. **Phase 3 — Android Controller** (operator UI) — generate a Kotlin client from `contracts/openapi/openapi.yaml`.
-4. **Phase-1 polish** (deferred): `test-client` bin + `e2e_probe.sh`; clippy `-D warnings` gate.
+1. **Phase 2 finish — on the device (2d–2f).** Needs Android SDK/Gradle + a Pixel 9 Pro. 2d: app skeleton (foreground service, REST client generated from `openapi.yaml`, Keystore P-256 signer, logger state machine). 2e: radio/gps/clock Parquet writers + `push*` JNI + Telephony/Location samplers. 2f: on-device full test → local logs → upload. Conformance targets already in place: `ue_interop.rs` + `core/jni_harness` + the generated OpenAPI.
+2. **Phase 4 — Analysis toolchain (Python)** can run in parallel here (no device): tolerant Parquet loaders against `parquet/*.yaml`; OWD-with-uncertainty, RTT/jitter/loss; against real uploaded sessions.
+3. **Phase 3 — Android Controller** — Kotlin client from `contracts/openapi/openapi.yaml`.
+4. **Deferred polish:** `test-client` bin + `e2e_probe.sh`; real-time CPU pinning (Phase-5).
 
 ---
 
