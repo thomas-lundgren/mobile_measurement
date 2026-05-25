@@ -167,10 +167,20 @@ public final class LoggerService extends Service {
         return client.verify(c.getString("challenge_id"), sig).getString("session_token");
     }
 
+    /** Refuse to start below this much free space — logging-first means a full
+     *  disk is the one failure that actually breaks measurement. */
+    private static final long MIN_FREE_BYTES = 200L * 1024 * 1024;
+
     private void runTest(ServerClient client, String session, String deviceId, JSONObject cmd) throws Exception {
         JSONObject payload = cmd.getJSONObject("payload");
         String testId = payload.getString("test_id");
         String sessionId = payload.getString("session_id");
+
+        if (freeBytes() < MIN_FREE_BYTES) {
+            setState("ERROR: low storage, refusing " + testId);
+            client.ackCommand(session, deviceId, cmd.getLong("command_id"));
+            return;
+        }
 
         File testRoot = new File(getFilesDir(), sessionId + "/" + testId);
         File mobileDir = new File(testRoot, "mobile");
@@ -294,11 +304,54 @@ public final class LoggerService extends Service {
                     .put("logger_state", STATE.startsWith("RUNNING_TEST") ? "RUNNING_TEST" : "IDLE")
                     .put("logging_config_version", loggingConfigVersion)
                     .put("sampled_at", new JSONObject().put("mono_ns", t[0]).put("utc_ns", t[1]));
+            JSONObject batt = battery();
+            if (batt != null) {
+                status.put("battery", batt);
+            }
+            JSONObject stor = storage();
+            if (stor != null) {
+                status.put("storage", stor);
+            }
             if (currentTestId != null) {
                 status.put("current_test_id", currentTestId);
             }
             client.postStatus(session, deviceId, status);
         } catch (Exception ignored) {
+        }
+    }
+
+    /** Battery level (0–100) + charging, or null if unavailable. */
+    private JSONObject battery() {
+        try {
+            android.os.BatteryManager bm =
+                    (android.os.BatteryManager) getSystemService(Context.BATTERY_SERVICE);
+            int level = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY);
+            if (level < 0 || level > 100) {
+                return null;
+            }
+            return new JSONObject().put("level_pct", level).put("charging", bm.isCharging());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Free/total bytes of the log volume, or null if unavailable. */
+    private JSONObject storage() {
+        try {
+            android.os.StatFs sf = new android.os.StatFs(getFilesDir().getAbsolutePath());
+            return new JSONObject()
+                    .put("free_bytes", sf.getAvailableBytes())
+                    .put("total_bytes", sf.getTotalBytes());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private long freeBytes() {
+        try {
+            return new android.os.StatFs(getFilesDir().getAbsolutePath()).getAvailableBytes();
+        } catch (Exception e) {
+            return Long.MAX_VALUE; // can't tell → don't block the test
         }
     }
 
