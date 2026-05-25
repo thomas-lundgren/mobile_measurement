@@ -192,6 +192,16 @@ adb shell am start -n com.measurement.logger/.MainActivity \
 - **Telemetry:** reports battery + free storage in its heartbeat.
 - **Low-storage guard:** refuses to start a test below ~200 MB free.
 
+> **Expected: the Logger stops itself after ~6 hours.** Android 14+ time-limits a
+> `dataSync` foreground service to roughly **6 hours of cumulative runtime per
+> 24 h**. When the budget is reached the Logger stops cleanly (state:
+> *"foreground-service time limit reached — restart to resume"*) — this is normal,
+> not a crash. **Just restart it** (re-open the app / tap start, or re-issue the
+> `adb am start`) to continue; the device stays enrolled, so no token is needed.
+> Plan long field sessions around this (e.g. restart between drives, or script a
+> periodic relaunch). See §9 for how to lift the limit if continuous 24/7
+> operation ever becomes a requirement.
+
 ---
 
 ## 4. Android Controller setup
@@ -348,6 +358,7 @@ Point the analysis CLI at `<MP_UPLOAD_ROOT>/<session_id>/<test_id>` (§5).
 | Device data flows fail but control plane works | Open the generator port range (41000+) on the firewall; confirm `MP_SERVER_HOST` is device-reachable. |
 | Logger: `RECONNECTING…` | Server unreachable/restarting; it backs off and recovers automatically. |
 | Logger: `low storage, refusing` | Free space below ~200 MB; clear old logs. |
+| Logger stopped after several hours (`…time limit reached…`) | Expected — the Android `dataSync` FGS ~6 h/24 h cap. Restart the Logger to resume (still enrolled, no token needed). See §3.5 and §9. |
 | Uplink OWD empty in analysis | The `server/` recordings weren't aggregated — set `MP_LOG_ROOT` = `MP_UPLOAD_ROOT` (single host). |
 | Operator login fails after restart | A new `MP_JWT_SECRET` invalidates old JWTs — log in again. |
 
@@ -359,3 +370,24 @@ Terminate TLS in front of `server-main` (or add native TLS), put the generator
 behind appropriate NAT/firewall rules, rotate `MP_JWT_SECRET` and enrollment
 tokens, and move `MP_DATABASE_URL` + `MP_UPLOAD_ROOT` to durable storage. See
 [`../STATUS.md`](../STATUS.md) for the current state of hardening (Phase 5).
+
+### Continuous 24/7 Logger operation (lifting the ~6 h limit)
+
+The Logger uses a `dataSync` foreground service, which Android 14+ caps at ~6 h
+per 24 h (§3.5). The current, accepted behavior is **stop cleanly and restart**.
+If uninterrupted multi-hour/continuous logging ever becomes a requirement, the
+fix is to change the foreground-service type from `dataSync` to **`specialUse`**,
+which is not time-limited:
+
+1. `android/logger/src/main/AndroidManifest.xml`: change the permission
+   `FOREGROUND_SERVICE_DATA_SYNC` → `FOREGROUND_SERVICE_SPECIAL_USE`, set the
+   service `android:foregroundServiceType="specialUse"`, and add a
+   `<property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+   android:value="…justification…"/>` child on the `<service>`.
+2. `LoggerService`: pass `ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE` to
+   `startForeground` (the `onTimeout` handler can stay as a safety net).
+3. **Google Play caveat:** `specialUse` requires a written justification and
+   review for Play-distributed apps. For sideloaded/MDM-managed field devices
+   (the current deployment model) it works without review.
+
+`location` is **not** a workaround — that type is also time-limited on Android 15.
