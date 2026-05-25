@@ -139,6 +139,8 @@ generated-client drift gate. Mirror it locally with `ci/check.sh`.
 
 ## Documentation
 
+- [`docs/OPERATORS_GUIDE.md`](docs/OPERATORS_GUIDE.md) — set up, configure, and operate every part of the system (server, Logger, Controller, analysis).
+- [`planning/device_bringup.md`](planning/device_bringup.md) — copy-paste single-host end-to-end bring-up.
 - [`planning/5_g_field_test_platform_architecture_spec.md`](planning/5_g_field_test_platform_architecture_spec.md) — authoritative architecture & functional spec (packet formats, log schemas, OWD math, endpoints).
 - [`planning/development_plan.md`](planning/development_plan.md) — build sequencing + per-invariant enforcement.
 - [`planning/development_guide.md`](planning/development_guide.md) — keeping the polyglot codebase consistent (contracts, codegen, golden vectors).
