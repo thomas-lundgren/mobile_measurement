@@ -18,6 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="fieldtest-analyze")
     ap.add_argument("test_dir", help="aggregated test directory (contains mobile/ and/or server/)")
     ap.add_argument("-o", "--output", help="write summary JSON here (default: stdout)")
+    ap.add_argument("--plots", metavar="DIR", help="also write the standard plots (PNG) to DIR")
     args = ap.parse_args(argv)
 
     td = load_test(args.test_dir)
@@ -28,6 +29,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {args.output}", file=sys.stderr)
     else:
         print(text)
+
+    if args.plots:
+        from .plots import write_all
+
+        for p in write_all(td, args.plots):
+            print(f"wrote {p}", file=sys.stderr)
     return 0
 
 

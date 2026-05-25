@@ -35,8 +35,9 @@ def probe_rtt(td: TestData) -> pd.DataFrame:
     keys = ["node", "flow_id", "sequence_number"]
     merged = sent.merge(recv, on=keys, suffixes=("_sent", "_recv"))
     merged["rtt_ns"] = merged["mono_ns_recv"].astype("Int64") - merged["mono_ns_sent"].astype("Int64")
+    merged["mono_ns"] = merged["mono_ns_recv"]  # echo-receive time, for plotting
     merged = merged[merged["rtt_ns"] >= 0]
-    return merged[keys + ["rtt_ns"]].reset_index(drop=True)
+    return merged[keys + ["rtt_ns", "mono_ns"]].reset_index(drop=True)
 
 
 def realtime_owd(td: TestData, offset=None) -> pd.DataFrame:
@@ -48,8 +49,11 @@ def realtime_owd(td: TestData, offset=None) -> pd.DataFrame:
     adds it — and `uncertainty_ns` carries the offset's bound. Direction is
     downlink when the mobile received (server sent), else uplink."""
     pk = td.packets
+    # utc_ns (not mono_ns) is the cross-node-comparable time axis: uplink rows
+    # come from the server node, downlink from the mobile, and their monotonic
+    # clocks share no epoch.
     cols = ["node", "flow_id", "sequence_number", "direction_owd",
-            "owd_ns", "owd_corrected_ns", "uncertainty_ns"]
+            "owd_ns", "owd_corrected_ns", "uncertainty_ns", "mono_ns", "utc_ns"]
     if pk.empty:
         return pd.DataFrame(columns=cols)
     recv = pk[(pk["direction"] == schema.DIR_RECEIVED) & pk["sender_utc_ns"].notna()].copy()
@@ -73,7 +77,7 @@ def jitter(td: TestData) -> pd.DataFrame:
     """Inter-arrival deviation (IPDV) for RECEIVED realtime packets:
     `ipdv_ns = actual_interval_ns - expected_interval_ns`."""
     pk = td.packets
-    cols = ["node", "flow_id", "actual_interval_ns", "expected_interval_ns", "ipdv_ns"]
+    cols = ["node", "flow_id", "actual_interval_ns", "expected_interval_ns", "ipdv_ns", "mono_ns"]
     if pk.empty:
         return pd.DataFrame(columns=cols)
     rt = pk[(pk["direction"] == schema.DIR_RECEIVED) & pk["actual_interval_ns"].notna()].copy()
