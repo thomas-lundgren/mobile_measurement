@@ -27,7 +27,9 @@ echo "==> cargo test --workspace"
 cargo test --workspace
 
 echo "==> contract examples + packet vectors"
-python3 ci/validate_contracts.py
+[ -d venv ] || python3 -m venv venv
+./venv/bin/pip install -q jsonschema referencing pyyaml
+./venv/bin/python ci/validate_contracts.py
 
 echo "==> analysis: pytest"
 (
