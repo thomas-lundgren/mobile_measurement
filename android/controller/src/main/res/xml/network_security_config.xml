@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dev: the server is plain HTTP on the LAN (TLS is Phase 5). Permit cleartext;
+     Phase-5 hardening flips this to HTTPS-only. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

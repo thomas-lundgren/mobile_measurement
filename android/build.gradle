@@ -1,4 +1,5 @@
-// Top-level build file. The Logger app; the Controller (Phase 3) joins here later.
+// Top-level build file. Logger (Java) + Controller (Kotlin) apps.
 plugins {
     id 'com.android.application' version '8.4.2' apply false
+    id 'org.jetbrains.kotlin.android' version '1.9.23' apply false
 }
