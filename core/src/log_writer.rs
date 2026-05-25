@@ -490,6 +490,37 @@ mod tests {
         );
     }
 
+    fn count_rows(path: &Path) -> usize {
+        let file = File::open(path).unwrap();
+        let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+            .unwrap()
+            .build()
+            .unwrap();
+        reader.map(|b| b.unwrap().num_rows()).sum()
+    }
+
+    #[test]
+    fn flushed_segments_survive_a_crash() {
+        // Logging-first (invariant 1): a crash loses at most the open segment.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut w = SegmentedPacketWriter::new(tmp.path(), 100, ctx()).unwrap();
+        for i in 0..250u64 {
+            w.append(&PacketRow::probe(1, i, Direction::Received, ts(i), 64))
+                .unwrap();
+        }
+        // Simulate a crash: drop WITHOUT flush() — the open segment and the
+        // buffered (un-flushed) rows are lost; everything already flushed stays.
+        drop(w);
+
+        let s0 = count_rows(&tmp.path().join("packets_0000.parquet"));
+        let s1 = count_rows(&tmp.path().join("packets_0001.parquet"));
+        assert_eq!(s0, 100);
+        assert_eq!(s1, 100);
+        // 200 of 250 rows survived (two finalized segments); the rest is the
+        // acceptable "at most one open segment" loss.
+        assert_eq!(s0 + s1, 200);
+    }
+
     #[test]
     fn segments_and_full_schema() {
         let tmp = tempfile::tempdir().unwrap();

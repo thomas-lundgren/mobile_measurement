@@ -43,6 +43,48 @@ def test_offset_probe_symmetry_recovers_injected_offset():
     assert corrected.abs().max() < 20_000
 
 
+def test_offset_uncertainty_nonneg_and_additive():
+    """clock.parquet offset bound = sum of both nodes' bounds — never negative,
+    never smaller than either component (uncertainty only grows when combining)."""
+    cl = make_clock([
+        dict(node="mobile", mono_ns=0, utc_ns=0, estimated_offset_ns=1000, uncertainty_ns=30),
+        dict(node="server", mono_ns=0, utc_ns=0, estimated_offset_ns=0, uncertainty_ns=20),
+    ])
+    est = clock.estimate_offset(synthetic_test(clock=cl))
+    assert est.uncertainty_ns == 50
+    assert est.uncertainty_ns >= 30 and est.uncertainty_ns >= 20 >= 0
+
+
+def test_offset_uncertainty_monotonic_in_clock_bound():
+    """A looser clock → a looser offset bound (monotone), never the reverse."""
+    def unc(mobile_bound):
+        cl = make_clock([
+            dict(node="mobile", mono_ns=0, utc_ns=0, estimated_offset_ns=1000, uncertainty_ns=mobile_bound),
+            dict(node="server", mono_ns=0, utc_ns=0, estimated_offset_ns=0, uncertainty_ns=20),
+        ])
+        return clock.estimate_offset(synthetic_test(clock=cl)).uncertainty_ns
+
+    assert unc(10) < unc(50) < unc(200)
+
+
+def test_symmetry_uncertainty_nonneg():
+    """probe-RTT symmetry bound is RTT/2 ≥ 0, even for a degenerate RTT."""
+    sent = [dict(node="mobile", flow_id=1, sequence_number=s, direction="SENT", mono_ns=s, utc_ns=0) for s in range(5)]
+    recv = [dict(node="mobile", flow_id=1, sequence_number=s, direction="RECEIVED", mono_ns=s, utc_ns=0) for s in range(5)]
+    dl = [dict(node="mobile", flow_id=2, sequence_number=s, direction="RECEIVED", mono_ns=s, utc_ns=100, sender_utc_ns=0) for s in range(5)]
+    est = clock.estimate_offset(synthetic_test(packets=make_packets(sent + recv + dl)))
+    assert est.method == "probe_rtt_symmetry"
+    assert est.uncertainty_ns >= 0
+
+
+def test_owd_uncertainty_never_negative(twonode_test_dir):
+    td = load_test(twonode_test_dir)
+    est = clock.estimate_offset(td)
+    assert est.uncertainty_ns >= 0
+    u = metrics.realtime_owd(td, offset=est)["uncertainty_ns"].dropna()
+    assert not u.empty and (u >= 0).all()
+
+
 def test_clocked_capture_uses_disciplined_offset(clocked_test_dir):
     td = load_test(clocked_test_dir)
     assert not td.clock.empty  # device wrote clock.parquet
