@@ -11,7 +11,7 @@ macro_rules! wire_enum {
         $(#[$meta])*
         #[derive(
             Debug, Clone, Copy, PartialEq, Eq, Hash,
-            serde::Serialize, serde::Deserialize, utoipa::ToSchema
+            serde::Serialize, serde::Deserialize
         )]
         pub enum $name {
             $( #[serde(rename = $wire)] $variant ),+
@@ -26,6 +26,22 @@ macro_rules! wire_enum {
                 match self { $( $name::$variant => $wire ),+ }
             }
         }
+
+        // Hand-written OpenAPI schema. The `#[derive(ToSchema)]` would emit the
+        // Rust *variant* identifiers, ignoring `#[serde(rename)]` — so generated
+        // clients couldn't (de)serialize the actual lowercase/SCREAMING wire
+        // values. Emit the real wire strings (the same ones `wire()` returns).
+        impl utoipa::PartialSchema for $name {
+            fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+                utoipa::openapi::RefOr::T(utoipa::openapi::schema::Schema::Object(
+                    utoipa::openapi::schema::ObjectBuilder::new()
+                        .schema_type(utoipa::openapi::schema::Type::String)
+                        .enum_values(Some([ $( $wire ),+ ]))
+                        .build(),
+                ))
+            }
+        }
+        impl utoipa::ToSchema for $name {}
     };
 }
 

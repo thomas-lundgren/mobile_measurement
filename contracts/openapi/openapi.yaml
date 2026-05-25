@@ -434,14 +434,13 @@ components:
           format: int64
     Command:
       type: string
-      description: Server → device commands (`enums.yaml` commands).
       enum:
-      - RunTest
-      - StopTest
-      - SetLoggingConfig
-      - RequestStatus
-      - RequestUpload
-      - RebootLogger
+      - RUN_TEST
+      - STOP_TEST
+      - SET_LOGGING_CONFIG
+      - REQUEST_STATUS
+      - REQUEST_UPLOAD
+      - REBOOT_LOGGER
     CreateTestRequest:
       type: object
       description: |-
@@ -566,7 +565,6 @@ components:
           type: string
     Direction:
       type: string
-      description: Flow direction (`enums.yaml` directions). Bidirectional intentionally absent.
       enum:
       - FromServer
       - ToServer
@@ -755,18 +753,17 @@ components:
           - 'null'
     LoggerState:
       type: string
-      description: Logger app state (`enums.yaml` logger_states).
       enum:
-      - Initializing
-      - Registering
-      - Idle
-      - WaitingForTest
-      - Preparing
-      - RunningTest
-      - Cooldown
-      - UploadPending
-      - Uploading
-      - Error
+      - INITIALIZING
+      - REGISTERING
+      - IDLE
+      - WAITING_FOR_TEST
+      - PREPARING
+      - RUNNING_TEST
+      - COOLDOWN
+      - UPLOAD_PENDING
+      - UPLOADING
+      - ERROR
     LoggingConfig:
       type: object
       description: What a device WILL log. Server enforces `effective ⊆ capability`.
@@ -864,17 +861,15 @@ components:
           type: boolean
     OperatorRole:
       type: string
-      description: Operator JWT role claim (`enums.yaml` operator_roles).
       enum:
-      - Viewer
-      - Operator
-      - Admin
+      - viewer
+      - operator
+      - admin
     Platform:
       type: string
-      description: Device platform (`enums.yaml` platforms).
       enum:
-      - Android
-      - Ios
+      - android
+      - ios
     QosCapability:
       type: object
       properties:
@@ -1036,16 +1031,15 @@ components:
           format: int64
     TestControlState:
       type: string
-      description: test-control per-device state (`enums.yaml` test_control_states).
       enum:
-      - Idle
-      - Prepare
-      - WaitingForGenerator
-      - WaitingForClient
-      - Running
-      - Stopping
-      - Done
-      - Failed
+      - IDLE
+      - PREPARE
+      - WAITING_FOR_GENERATOR
+      - WAITING_FOR_CLIENT
+      - RUNNING
+      - STOPPING
+      - DONE
+      - FAILED
     TestPlan:
       type: object
       description: |-
@@ -1073,12 +1067,11 @@ components:
           minimum: 0
     TestResult:
       type: string
-      description: Terminal test result (`enums.yaml` test_results).
       enum:
-      - Completed
-      - Partial
-      - Failed
-      - Cancelled
+      - COMPLETED
+      - PARTIAL
+      - FAILED
+      - CANCELLED
     TestStatus:
       type: object
       description: Controller-facing test status.
