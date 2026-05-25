@@ -49,3 +49,31 @@ jobs:
       - run: pip install jsonschema referencing pyyaml
       - name: validate JSON Schema examples + packet vectors
         run: python ci/validate_contracts.py
+
+  analysis:
+    name: analysis (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install + test
+        working-directory: analysis
+        run: |
+          python -m pip install -e ".[dev,plots]"
+          python -m pytest -q
+
+  client-drift:
+    name: generated client in sync with OpenAPI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      # Regenerate the Controller client from contracts/openapi/openapi.yaml and
+      # fail on any diff (generate_client.sh fetches the generator jar).
+      - name: check client drift
+        run: ci/check_client_drift.sh
