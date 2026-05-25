@@ -46,6 +46,7 @@ public final class LoggerService extends Service {
     private volatile boolean running;
     private Thread worker;
     private int loggingConfigVersion = 1;
+    private JSONObject loggingConfig; // latest server-pushed config (SET_LOGGING_CONFIG)
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -126,8 +127,11 @@ public final class LoggerService extends Service {
         long lastStatus = 0;
         while (running) {
             JSONObject cmd = client.pollCommand(session, deviceId);
-            if (cmd != null && "RUN_TEST".equals(cmd.optString("command"))) {
+            String command = cmd != null ? cmd.optString("command") : "";
+            if ("RUN_TEST".equals(command)) {
                 runTest(client, session, deviceId, cmd);
+            } else if ("SET_LOGGING_CONFIG".equals(command)) {
+                applyLoggingConfig(client, session, deviceId, cmd);
             } else {
                 Thread.sleep(2000);
             }
@@ -136,6 +140,20 @@ public final class LoggerService extends Service {
                 lastStatus = System.currentTimeMillis();
             }
         }
+    }
+
+    /** Apply a server-pushed logging config: adopt its version and ack. The
+     *  effective config governs what later tests log (server-configured
+     *  logging, invariant 3). */
+    private void applyLoggingConfig(ServerClient client, String session, String deviceId, JSONObject cmd)
+            throws Exception {
+        JSONObject payload = cmd.optJSONObject("payload");
+        if (payload != null) {
+            loggingConfigVersion = payload.optInt("version", loggingConfigVersion);
+            loggingConfig = payload; // retained for the next test
+        }
+        client.ackCommand(session, deviceId, cmd.getLong("command_id"));
+        setState("CONFIG_UPDATED v" + loggingConfigVersion);
     }
 
     private String enrollIfNeeded(ServerClient client, SharedPreferences prefs, String token) throws Exception {

@@ -10,8 +10,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use mp_contracts::{
-    CreateTestRequest, DeviceSummary, InternalStartTest, RunTestPayload, TestControlState,
-    TestResult, TestStatus, TestSummary,
+    Command, CreateTestRequest, DeviceSummary, InternalStartTest, LoggingConfig, LoggingConfigAck,
+    RunTestPayload, TestControlState, TestResult, TestStatus, TestSummary,
 };
 
 use crate::auth::authed_operator;
@@ -30,6 +30,55 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/tests/{test_id}", get(get_test))
         .route("/api/v1/tests/{test_id}/stop", post(stop_test))
         .route("/api/v1/devices", get(list_devices))
+        .route(
+            "/api/v1/devices/{device_id}/logging-config",
+            post(set_device_logging_config),
+        )
+}
+
+/// Operator pushes a logging-config update to a device: bump its version,
+/// enqueue `SET_LOGGING_CONFIG`, and report the new version (the device applies
+/// it and starts reporting it on its next heartbeat). Spec invariant 3.
+#[utoipa::path(
+    post, path = "/api/v1/devices/{device_id}/logging-config", tag = "operator",
+    params(("device_id" = String, Path)),
+    request_body = LoggingConfig,
+    responses((status = 200, body = LoggingConfigAck), (status = 401), (status = 404))
+)]
+pub async fn set_device_logging_config(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Path(device_id): Path<String>,
+    Json(mut cfg): Json<LoggingConfig>,
+) -> Result<Json<LoggingConfigAck>, AppError> {
+    authed_operator(&st, &headers)?;
+    let current: Option<i64> = sqlx::query_scalar(
+        "SELECT logging_config_version FROM devices WHERE device_id = ? AND status = 'active'",
+    )
+    .bind(&device_id)
+    .fetch_optional(&st.pool)
+    .await?;
+    let new_version = current.ok_or(AppError::NotFound)? + 1;
+    cfg.version = new_version as u32; // server owns the version
+
+    sqlx::query("UPDATE devices SET logging_config_version = ? WHERE device_id = ?")
+        .bind(new_version)
+        .bind(&device_id)
+        .execute(&st.pool)
+        .await?;
+    let payload = serde_json::to_value(&cfg).map_err(|_| AppError::Internal)?;
+    commands::enqueue(
+        &st.pool,
+        &device_id,
+        Command::SetLoggingConfig,
+        Some(&payload),
+    )
+    .await?;
+
+    Ok(Json(LoggingConfigAck {
+        device_id,
+        logging_config_version: new_version,
+    }))
 }
 
 #[utoipa::path(

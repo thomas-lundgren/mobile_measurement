@@ -25,6 +25,7 @@ use utoipa::OpenApi;
         crate::tests_api::list_tests,
         crate::tests_api::stop_test,
         crate::tests_api::list_devices,
+        crate::tests_api::set_device_logging_config,
     ),
     components(schemas(
         // auth
@@ -35,7 +36,7 @@ use utoipa::OpenApi;
         TimestampSource, LoggingConfig, RadioLogging, QosLogging, MobilityLogging, GateableEvent,
         // test plan / orchestration
         TestPlan, Flow, FlowBinding, CreateTestRequest, RunTestPayload, TestStatus,
-        DeviceSummary, TestSummary,
+        DeviceSummary, TestSummary, LoggingConfigAck,
         // device status / command
         DeviceStatus, DualClock, Battery, Storage, RadioSnapshot, DeviceCommand,
         // upload

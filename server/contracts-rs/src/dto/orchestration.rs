@@ -32,6 +32,15 @@ pub struct DeviceSummary {
     pub last_seen_utc_ns: Option<i64>,
 }
 
+/// Result of pushing a logging-config update to a device
+/// (`POST /api/v1/devices/{id}/logging-config`): the new effective version that
+/// the device will report once it applies the `SET_LOGGING_CONFIG` command.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct LoggingConfigAck {
+    pub device_id: String,
+    pub logging_config_version: i64,
+}
+
 /// Compact test row for the operator's recent-tests list. `GET /api/v1/tests`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct TestSummary {

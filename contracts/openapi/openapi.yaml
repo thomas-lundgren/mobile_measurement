@@ -171,6 +171,38 @@ paths:
           description: ''
         '404':
           description: ''
+  /api/v1/devices/{device_id}/logging-config:
+    post:
+      tags:
+      - operator
+      summary: |-
+        Operator pushes a logging-config update to a device: bump its version,
+        enqueue `SET_LOGGING_CONFIG`, and report the new version (the device applies
+        it and starts reporting it on its next heartbeat). Spec invariant 3.
+      operationId: set_device_logging_config
+      parameters:
+      - name: device_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoggingConfig'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoggingConfigAck'
+        '401':
+          description: ''
+        '404':
+          description: ''
   /api/v1/devices/{device_id}/status:
     post:
       tags:
@@ -798,6 +830,21 @@ components:
           format: int32
           description: Monotonic config version; drives SET_LOGGING_CONFIG drift detection.
           minimum: 0
+    LoggingConfigAck:
+      type: object
+      description: |-
+        Result of pushing a logging-config update to a device
+        (`POST /api/v1/devices/{id}/logging-config`): the new effective version that
+        the device will report once it applies the `SET_LOGGING_CONFIG` command.
+      required:
+      - device_id
+      - logging_config_version
+      properties:
+        device_id:
+          type: string
+        logging_config_version:
+          type: integer
+          format: int64
     LoginRequest:
       type: object
       required:

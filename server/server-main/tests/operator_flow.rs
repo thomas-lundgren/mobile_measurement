@@ -110,6 +110,49 @@ async fn devices_requires_auth_and_lists_status() {
 }
 
 #[tokio::test]
+async fn logging_config_push_bumps_version_and_enqueues() {
+    let st = state().await;
+    let jwt = operator_jwt(&st).await;
+    seed_device(&st).await; // logging_config_version = 1
+
+    // a valid LoggingConfig from the contract test vectors
+    let raw = include_str!("../../../contracts/testvectors/logging_config_examples.json");
+    let cfg = serde_json::from_str::<Value>(raw).unwrap()["examples"][0]["config"].clone();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/devices/dev_a/logging-config")
+        .header("authorization", format!("Bearer {jwt}"))
+        .header("content-type", "application/json")
+        .body(Body::from(cfg.to_string()))
+        .unwrap();
+    let resp = build_router(st.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["logging_config_version"], 2); // bumped 1 -> 2
+
+    // device row bumped + a SET_LOGGING_CONFIG command enqueued with that version
+    let dev_ver: i64 =
+        sqlx::query_scalar("SELECT logging_config_version FROM devices WHERE device_id='dev_a'")
+            .fetch_one(&st.pool)
+            .await
+            .unwrap();
+    assert_eq!(dev_ver, 2);
+    let (cmd, payload): (String, String) = sqlx::query_as(
+        "SELECT command, payload_json FROM commands WHERE device_id='dev_a' ORDER BY id DESC LIMIT 1",
+    )
+    .fetch_one(&st.pool)
+    .await
+    .unwrap();
+    assert_eq!(cmd, "SET_LOGGING_CONFIG");
+    assert_eq!(
+        serde_json::from_str::<Value>(&payload).unwrap()["version"],
+        2
+    );
+}
+
+#[tokio::test]
 async fn tests_list_and_stop() {
     let st = state().await;
     let jwt = operator_jwt(&st).await;
