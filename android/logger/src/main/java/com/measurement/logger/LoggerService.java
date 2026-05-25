@@ -77,37 +77,64 @@ public final class LoggerService extends Service {
         return null;
     }
 
+    private static final long BACKOFF_MIN_MS = 1000;
+    private static final long BACKOFF_MAX_MS = 30_000;
+
+    /**
+     * Reconnecting worker: connect → onboard → poll, retrying with exponential
+     * backoff so a transient error (server restart, coverage gap, session loss)
+     * just reconnects instead of killing the worker. Enrollment is idempotent
+     * (cached device_id); each reconnect re-authenticates for a fresh session.
+     * Logging-first is unaffected — an in-flight test keeps logging locally.
+     */
     private void run(String server, String token) {
-        try {
-            ServerClient client = new ServerClient(server);
-            SharedPreferences prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        ServerClient client = new ServerClient(server);
+        SharedPreferences prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        long backoff = BACKOFF_MIN_MS;
+        while (running) {
+            try {
+                setState("REGISTERING");
+                KeystoreSigner.ensureKey();
+                String deviceId = enrollIfNeeded(client, prefs, token);
+                String session = authenticate(client, deviceId);
+                JSONObject cfg = client.register(session, new JSONObject(CAPABILITY));
+                loggingConfigVersion = cfg.optInt("version", 1);
 
-            setState("REGISTERING");
-            KeystoreSigner.ensureKey();
-            String deviceId = enrollIfNeeded(client, prefs, token);
-
-            String session = authenticate(client, deviceId);
-            JSONObject cfg = client.register(session, new JSONObject(CAPABILITY));
-            loggingConfigVersion = cfg.optInt("version", 1);
-
-            setState("IDLE");
-            long lastStatus = 0;
-            while (running) {
-                JSONObject cmd = client.pollCommand(session, deviceId);
-                if (cmd != null && "RUN_TEST".equals(cmd.optString("command"))) {
-                    runTest(client, session, deviceId, cmd);
-                } else {
-                    Thread.sleep(2000);
+                setState("IDLE");
+                backoff = BACKOFF_MIN_MS; // connected → reset backoff
+                pollLoop(client, session, deviceId);
+            } catch (InterruptedException ignored) {
+                return; // stopping
+            } catch (Exception e) {
+                if (!running) {
+                    return;
                 }
-                if (System.currentTimeMillis() - lastStatus > 5000) {
-                    postStatus(client, session, deviceId, null);
-                    lastStatus = System.currentTimeMillis();
+                setState("RECONNECTING: " + e.getMessage());
+                try {
+                    Thread.sleep(backoff);
+                } catch (InterruptedException ie) {
+                    return;
                 }
+                backoff = Math.min(backoff * 2, BACKOFF_MAX_MS);
             }
-        } catch (InterruptedException ignored) {
-            // stopping
-        } catch (Exception e) {
-            setState("ERROR: " + e.getMessage());
+        }
+    }
+
+    /** Poll/status cadence. Any request exception propagates to the reconnect
+     *  loop (which re-authenticates after backoff). Returns only when stopping. */
+    private void pollLoop(ServerClient client, String session, String deviceId) throws Exception {
+        long lastStatus = 0;
+        while (running) {
+            JSONObject cmd = client.pollCommand(session, deviceId);
+            if (cmd != null && "RUN_TEST".equals(cmd.optString("command"))) {
+                runTest(client, session, deviceId, cmd);
+            } else {
+                Thread.sleep(2000);
+            }
+            if (System.currentTimeMillis() - lastStatus > 5000) {
+                postStatus(client, session, deviceId, null);
+                lastStatus = System.currentTimeMillis();
+            }
         }
     }
 
