@@ -1,26 +1,51 @@
 package com.measurement.controller
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.measurement.controller.client.api.OperatorApi
 import com.measurement.controller.client.api.OperatorAuthApi
+import com.measurement.controller.client.model.CreateTestRequest
 import com.measurement.controller.client.model.DeviceSummary
+import com.measurement.controller.client.model.Direction
+import com.measurement.controller.client.model.Flow
 import com.measurement.controller.client.model.LoginRequest
+import com.measurement.controller.client.model.TestPlan
 import com.measurement.controller.client.model.TestSummary
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 
 /**
- * Minimal operator console (Phase 3b). Logs in against server-main and lists the
- * fleet + recent tests via the generated OpenAPI client. No measurement, no core.
+ * Operator console (Phase 3b/3c). Logs in against server-main, lists the fleet +
+ * recent tests, starts preset tests on the selected device, and stops a running
+ * test — all via the OpenAPI-generated client. No measurement, no core.
  */
 class MainActivity : AppCompatActivity() {
 
     private var jwt: String? = null
     private var baseUrl: String = ""
+    private var deviceId: String? = null
+    private var lastTests: List<TestSummary> = emptyList()
+    @Volatile private var refreshing = false
+    private var authedClient: OkHttpClient? = null
+
+    private val ui = Handler(Looper.getMainLooper())
+    private val refresh = object : Runnable {
+        override fun run() {
+            jwt?.let { token -> runBg { refreshFleet(token) } } // network off the main thread
+            ui.postDelayed(this, 3000)
+        }
+    }
+
+    private lateinit var status: TextView
+    private lateinit var output: TextView
+    private lateinit var startProbe: Button
+    private lateinit var startBidir: Button
+    private lateinit var stopBtn: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,8 +54,11 @@ class MainActivity : AppCompatActivity() {
         val serverUrl = findViewById<EditText>(R.id.serverUrl)
         val username = findViewById<EditText>(R.id.username)
         val password = findViewById<EditText>(R.id.password)
-        val status = findViewById<TextView>(R.id.status)
-        val output = findViewById<TextView>(R.id.output)
+        status = findViewById(R.id.status)
+        output = findViewById(R.id.output)
+        startProbe = findViewById(R.id.startProbeBtn)
+        startBidir = findViewById(R.id.startBidirBtn)
+        stopBtn = findViewById(R.id.stopBtn)
         val refreshBtn = findViewById<Button>(R.id.refreshBtn)
 
         findViewById<Button>(R.id.loginBtn).setOnClickListener {
@@ -42,11 +70,11 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val resp = OperatorAuthApi(baseUrl).login(LoginRequest(password = pass, username = user))
                     jwt = resp.jwt
-                    val (devices, tests) = fetchFleet(resp.jwt)
                     ui {
-                        status.text = "Logged in as $user (${resp.role}) — ${devices.size} devices"
+                        status.text = "Logged in as $user (${resp.role.value})"
                         refreshBtn.isEnabled = true
-                        output.text = render(devices, tests)
+                        ui.removeCallbacks(refresh)
+                        ui.post(refresh) // start live polling
                     }
                 } catch (e: Exception) {
                     ui { status.text = "Login failed: ${e.message}" }
@@ -54,54 +82,121 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        refreshBtn.setOnClickListener {
-            val token = jwt ?: return@setOnClickListener
-            status.text = "Refreshing…"
-            runBg {
-                try {
-                    val (devices, tests) = fetchFleet(token)
-                    ui {
-                        status.text = "Refreshed — ${devices.size} devices"
-                        output.text = render(devices, tests)
-                    }
-                } catch (e: Exception) {
-                    ui { status.text = "Refresh failed: ${e.message}" }
-                }
+        refreshBtn.setOnClickListener { jwt?.let { runBg { refreshFleet(it) } } }
+        startProbe.setOnClickListener { startTest(probePlan(), "probe") }
+        startBidir.setOnClickListener { startTest(bidirPlan(), "bidir") }
+        stopBtn.setOnClickListener { stopActiveTest() }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        ui.removeCallbacks(refresh)
+    }
+
+    // ---- networking ----
+
+    /** One bearer-authed client, reused (the spec has no security scheme, so the
+     *  token is attached via an interceptor). */
+    private fun operatorApi(token: String): OperatorApi {
+        val client = authedClient ?: OkHttpClient.Builder()
+            .addInterceptor(Interceptor { chain ->
+                chain.proceed(
+                    chain.request().newBuilder().header("Authorization", "Bearer $token").build()
+                )
+            })
+            .build()
+            .also { authedClient = it }
+        return OperatorApi(baseUrl, client)
+    }
+
+    /** Fetch + render fleet/tests; runs on a background thread. Skips if a
+     *  refresh is already in flight so periodic + manual ticks don't overlap. */
+    private fun refreshFleet(token: String) {
+        if (refreshing) return
+        refreshing = true
+        try {
+            val op = operatorApi(token)
+            val devices = op.listDevices()
+            val tests = op.listTests()
+            ui {
+                if (deviceId == null) deviceId = devices.firstOrNull()?.deviceId
+                lastTests = tests
+                val canControl = deviceId != null
+                startProbe.isEnabled = canControl
+                startBidir.isEnabled = canControl
+                stopBtn.isEnabled = tests.any { it.endedUtcNs == null }
+                val active = tests.count { it.endedUtcNs == null }
+                status.text = "${devices.size} device(s) · ${tests.size} tests · $active active"
+                output.text = render(devices, tests)
+            }
+        } catch (e: Exception) {
+            ui { status.text = "Refresh failed: ${e.message ?: e.javaClass.simpleName}" }
+        } finally {
+            refreshing = false
+        }
+    }
+
+    private fun startTest(plan: TestPlan, label: String) {
+        val token = jwt ?: return
+        val dev = deviceId ?: run { status.text = "No device"; return }
+        status.text = "Starting $label on $dev…"
+        runBg {
+            try {
+                val t = operatorApi(token).createTest(CreateTestRequest(deviceId = dev, plan = plan))
+                ui { status.text = "Started ${t.planName} → ${t.state.value}"; refreshFleet(token) }
+            } catch (e: Exception) {
+                ui { status.text = "Start failed: ${e.message}" }
             }
         }
     }
 
-    /** Bearer-authed client for operator endpoints (the spec has no security
-     *  scheme, so the token is attached via an interceptor). */
-    private fun authedClient(token: String): OkHttpClient =
-        OkHttpClient.Builder()
-            .addInterceptor(Interceptor { chain ->
-                chain.proceed(
-                    chain.request().newBuilder()
-                        .header("Authorization", "Bearer $token")
-                        .build()
-                )
-            })
-            .build()
-
-    private fun fetchFleet(token: String): Pair<List<DeviceSummary>, List<TestSummary>> {
-        val client = authedClient(token)
-        val op = OperatorApi(baseUrl, client)
-        return op.listDevices() to op.listTests()
+    private fun stopActiveTest() {
+        val token = jwt ?: return
+        val active = lastTests.firstOrNull { it.endedUtcNs == null } ?: run {
+            status.text = "No active test"; return
+        }
+        status.text = "Stopping ${active.planName}…"
+        runBg {
+            try {
+                val t = operatorApi(token).stopTest(active.testId)
+                ui { status.text = "Stopped → ${t.state.value}/${t.result?.value}"; refreshFleet(token) }
+            } catch (e: Exception) {
+                ui { status.text = "Stop failed: ${e.message}" }
+            }
+        }
     }
+
+    // ---- preset plans (flattened Flow: fill all fields; server reads per type) ----
+
+    private fun probePlan() = TestPlan(
+        durationSec = 15, name = "ctrl-probe", version = 1,
+        flows = listOf(
+            Flow(flowId = 1, type = Flow.Type.probe, ratePps = 50, packetSizeBytes = 22, direction = Direction.ToServer)
+        )
+    )
+
+    private fun bidirPlan() = TestPlan(
+        durationSec = 15, name = "ctrl-bidir", version = 1,
+        flows = listOf(
+            Flow(flowId = 1, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.ToServer),
+            Flow(flowId = 2, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.FromServer),
+            Flow(flowId = 3, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.ToServer, targetBytes = 2_000_000)
+        )
+    )
+
+    // ---- rendering ----
 
     private fun render(devices: List<DeviceSummary>, tests: List<TestSummary>): String {
         val sb = StringBuilder()
         sb.append("DEVICES (${devices.size})\n")
         for (d in devices) {
-            sb.append("• ${d.model ?: d.platform}  [${d.status}]\n")
-            sb.append("    ${d.deviceId}\n")
-            sb.append("    state=${d.loggerState ?: "—"}  batt=${d.batteryLevelPct ?: "—"}\n")
+            val sel = if (d.deviceId == deviceId) "▶ " else "  "
+            sb.append("$sel${d.model ?: d.platform}  [${d.status}]  state=${d.loggerState ?: "—"}\n")
         }
         sb.append("\nRECENT TESTS (${tests.size})\n")
         for (t in tests.take(15)) {
-            sb.append("• ${t.planName}  ${t.state}${t.result?.let { " / $it" } ?: ""}\n")
-            sb.append("    ${t.testId}\n")
+            val live = if (t.endedUtcNs == null) "● " else "  "
+            sb.append("$live${t.planName}  ${t.state.value}${t.result?.let { " / ${it.value}" } ?: ""}\n")
         }
         return sb.toString()
     }
