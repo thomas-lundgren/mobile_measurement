@@ -50,17 +50,64 @@ public final class LoggerService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        startForeground(1, notification("starting"));
+        // A dataSync FGS can't always (re)start — e.g. right after the system
+        // timed it out. Guard so we stop cleanly instead of crash-looping.
+        try {
+            startForeground(1, notification("starting"));
+        } catch (Exception e) {
+            setState("STOPPED: cannot start foreground (" + e.getClass().getSimpleName() + ")");
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        // START_STICKY restarts deliver a null intent — resume from the last
+        // server/token rather than crashing or silently stopping.
+        SharedPreferences prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String server = intent != null ? intent.getStringExtra(EXTRA_SERVER) : null;
         String token = intent != null ? intent.getStringExtra(EXTRA_TOKEN) : null;
+        if (server != null) {
+            prefs.edit().putString("server", server).putString("token", token).apply();
+        } else {
+            server = prefs.getString("server", null);
+            token = prefs.getString("token", null);
+        }
         if (server == null) {
             stopSelf();
             return START_NOT_STICKY;
         }
+        if (worker != null && worker.isAlive()) {
+            return START_STICKY; // already running (duplicate start / resume)
+        }
         running = true;
-        worker = new Thread(() -> run(server, token), "logger-worker");
+        final String s = server;
+        final String t = token;
+        worker = new Thread(() -> run(s, t), "logger-worker");
         worker.start();
         return START_STICKY;
+    }
+
+    // Android 14+ time-limits a dataSync foreground service; when the budget is
+    // spent the system calls onTimeout and the service MUST stop promptly, else
+    // it throws ForegroundServiceDidNotStopInTimeException and is killed (which
+    // then crash-loops the sticky restart). Stop cleanly instead.
+    @Override
+    public void onTimeout(int startId) {
+        stopForDataSyncTimeout();
+    }
+
+    @Override
+    public void onTimeout(int startId, int fgsType) {
+        stopForDataSyncTimeout();
+    }
+
+    private void stopForDataSyncTimeout() {
+        setState("STOPPED: foreground-service time limit reached — restart to resume");
+        running = false;
+        if (worker != null) {
+            worker.interrupt();
+        }
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf();
     }
 
     @Override
