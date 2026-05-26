@@ -1,8 +1,12 @@
 package com.measurement.controller
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -51,7 +55,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val serverUrl = findViewById<EditText>(R.id.serverUrl)
+        val serverUrl = findViewById<AutoCompleteTextView>(R.id.serverUrl)
         val username = findViewById<EditText>(R.id.username)
         val password = findViewById<EditText>(R.id.password)
         status = findViewById(R.id.status)
@@ -61,8 +65,24 @@ class MainActivity : AppCompatActivity() {
         stopBtn = findViewById(R.id.stopBtn)
         val refreshBtn = findViewById<Button>(R.id.refreshBtn)
 
+        // server-URL history: persisted in SharedPreferences (newline-joined,
+        // most-recently-used first); the dropdown shows it on focus/click and
+        // any typed URL that gets used is remembered (see rememberUrl).
+        val prefs = getSharedPreferences("mp_controller", Context.MODE_PRIVATE)
+        val urls = loadUrls(prefs).toMutableList()
+        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, urls)
+        serverUrl.setAdapter(adapter)
+        serverUrl.threshold = 0
+        serverUrl.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus && urls.isNotEmpty()) serverUrl.showDropDown()
+        }
+        serverUrl.setOnClickListener { if (urls.isNotEmpty()) serverUrl.showDropDown() }
+        if (urls.isNotEmpty() && serverUrl.text.isEmpty()) serverUrl.setText(urls[0])
+
         findViewById<Button>(R.id.loginBtn).setOnClickListener {
             baseUrl = serverUrl.text.toString().trim().trimEnd('/')
+            if (baseUrl.isEmpty()) { status.text = "Enter a server URL"; return@setOnClickListener }
+            rememberUrl(prefs, urls, adapter, baseUrl)
             val user = username.text.toString().trim()
             val pass = password.text.toString()
             status.text = "Logging in…"
@@ -203,4 +223,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun runBg(block: () -> Unit) = Thread(block).start()
     private fun ui(block: () -> Unit) = runOnUiThread(block)
+
+    // ---- server-URL history (persisted in SharedPreferences) ----
+
+    private fun loadUrls(prefs: SharedPreferences): List<String> =
+        prefs.getString("server_urls", "")!!.split('\n').filter { it.isNotEmpty() }
+
+    /** Move-to-top + de-dup + cap at 10; persist immediately. */
+    private fun rememberUrl(
+        prefs: SharedPreferences,
+        urls: MutableList<String>,
+        adapter: ArrayAdapter<String>,
+        url: String
+    ) {
+        urls.remove(url)
+        urls.add(0, url)
+        while (urls.size > 10) urls.removeAt(urls.size - 1)
+        prefs.edit().putString("server_urls", urls.joinToString("\n")).apply()
+        adapter.notifyDataSetChanged()
+    }
 }

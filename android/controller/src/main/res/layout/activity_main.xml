@@ -3,15 +3,24 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:padding="16dp"
+    android:fitsSystemWindows="true">
 
-    <EditText
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/app_name"
+        android:textStyle="bold"
+        android:textSize="18sp"
+        android:paddingBottom="8dp" />
+
+    <AutoCompleteTextView
         android:id="@+id/serverUrl"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Server URL"
-        android:inputType="textUri"
-        android:text="http://192.168.1.65:8080" />
+        android:hint="server URL (tap to pick)"
+        android:completionThreshold="0"
+        android:inputType="textUri" />
 
     <EditText
         android:id="@+id/username"
