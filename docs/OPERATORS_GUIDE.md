@@ -167,10 +167,15 @@ Also: open the same three rules in the host firewall on the server itself
 a local firewall can still drop it. Do **not** forward the internal control
 APIs (`9000` test-control, `9100` data-generator) — they're loopback-only.
 
-**Ubiquiti EdgeRouter (EdgeOS):** `scripts/edgerouter_port_forward.sh`
-applies these rules over SSH (with hairpin NAT enabled). See the script header
-for required env vars (`ROUTER`, `SERVER_IP`) and overrides; `--dry-run` prints
-the EdgeOS commands without applying them.
+**Ubiquiti EdgeRouter (EdgeOS):** `scripts/edgerouter_port_forward.sh` applies
+the necessary NAT **and** WAN firewall rules over SSH (direct `service nat`
+DNAT + `firewall name WAN_IN` accept rules — EdgeOS's `port-forward` shortcut
+silently fails when its `lan-interface` references a missing interface, so we
+bypass it). The script auto-detects the WAN interface (from the default route)
+and the LAN interface (from `SERVER_IP`'s subnet); override with `WAN_IF` /
+`LAN_IF` if needed. Required env vars: `ROUTER`, `SERVER_IP`. `--dry-run`
+reads the live config, prints the per-rule diff and the change plan, and
+exits without applying. Re-runs are idempotent (a no-op when already in sync).
 
 For the broader "any peer can be the reachable side" design (UE↔UE topologies,
 endpoint registry), see
