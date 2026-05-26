@@ -28,6 +28,10 @@
 # `--dry-run` still SSHes (read-only) to compute the real diff against the
 # router, then prints the plan instead of applying. `INTERACTIVE_SSH=1` drops
 # BatchMode so an SSH password prompt can succeed.
+#
+# Tip: for repeated runs, set up SSH key auth once (`ssh-copy-id $ROUTER`) to
+# avoid password prompts. This script also multiplexes the SSH connection
+# (ControlMaster) so the read + apply share one authenticated session.
 
 set -euo pipefail
 
@@ -92,9 +96,18 @@ validate_port_or_range "$DATA_RANGE"
 
 # ----- SSH options -------------------------------------------------------
 # Default: fail fast (no host-key / password prompts). INTERACTIVE_SSH=1 drops
-# BatchMode so a password prompt can succeed in ad-hoc use.
-SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes)
-[[ -n "${INTERACTIVE_SSH:-}" ]] && SSH_OPTS=(-o ConnectTimeout=10)
+# BatchMode so a password prompt can succeed in ad-hoc use. Multiplex
+# (ControlMaster) so the read + apply share one authenticated session — only
+# one password prompt per run, and consecutive runs within 60 s reuse it too.
+SSH_SOCKET="${TMPDIR:-/tmp}/.mp-er-ssh-$$"
+SSH_MUX=(-o "ControlMaster=auto" -o "ControlPath=$SSH_SOCKET" -o "ControlPersist=60")
+SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes "${SSH_MUX[@]}")
+[[ -n "${INTERACTIVE_SSH:-}" ]] && SSH_OPTS=(-o ConnectTimeout=10 "${SSH_MUX[@]}")
+# Close the master cleanly + remove the socket on exit (any reason).
+trap '
+    ssh -O exit -o ControlPath="$SSH_SOCKET" "$ROUTER" >/dev/null 2>&1 || true
+    rm -f "$SSH_SOCKET"
+' EXIT
 
 # ----- desired state -----------------------------------------------------
 
