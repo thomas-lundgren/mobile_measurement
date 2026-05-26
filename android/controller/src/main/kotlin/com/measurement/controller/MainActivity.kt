@@ -163,7 +163,8 @@ class MainActivity : AppCompatActivity() {
         runBg {
             try {
                 val t = operatorApi(token).createTest(CreateTestRequest(deviceId = dev, plan = plan))
-                ui { status.text = "Started ${t.planName} → ${t.state.value}"; refreshFleet(token) }
+                ui { status.text = "Started ${t.planName} → ${t.state.value}" }
+                refreshFleet(token) // already on the bg thread of startTest
             } catch (e: Exception) {
                 ui { status.text = "Start failed: ${e.message}" }
             }
@@ -179,7 +180,8 @@ class MainActivity : AppCompatActivity() {
         runBg {
             try {
                 val t = operatorApi(token).stopTest(active.testId)
-                ui { status.text = "Stopped → ${t.state.value}/${t.result?.value}"; refreshFleet(token) }
+                ui { status.text = "Stopped → ${t.state.value}/${t.result?.value}" }
+                refreshFleet(token) // already on the bg thread of stopActiveTest
             } catch (e: Exception) {
                 ui { status.text = "Stop failed: ${e.message}" }
             }
