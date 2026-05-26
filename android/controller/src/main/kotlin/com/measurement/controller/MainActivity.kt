@@ -139,7 +139,11 @@ class MainActivity : AppCompatActivity() {
             val devices = op.listDevices()
             val tests = op.listTests()
             ui {
-                if (deviceId == null) deviceId = devices.firstOrNull()?.deviceId
+                // Pick the most-recently-heartbeating device (live one), not
+                // simply the first enrolled — the latter can be a stale ghost.
+                if (deviceId == null) {
+                    deviceId = devices.maxByOrNull { it.lastSeenUtcNs ?: 0L }?.deviceId
+                }
                 lastTests = tests
                 val canControl = deviceId != null
                 startProbe.isEnabled = canControl
