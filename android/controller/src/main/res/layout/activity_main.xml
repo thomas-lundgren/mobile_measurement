@@ -57,6 +57,7 @@
             android:text="Refresh" />
     </LinearLayout>
 
+    <!-- 6 preset tests in a 3×2 grid, then a full-width Stop -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -64,27 +65,53 @@
 
         <Button
             android:id="@+id/startProbeBtn"
-            android:layout_width="0dp"
-            android:layout_weight="1"
+            android:layout_width="0dp" android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:enabled="false"
-            android:text="Start probe" />
+            android:enabled="false" android:text="Probe" />
 
         <Button
-            android:id="@+id/startBidirBtn"
-            android:layout_width="0dp"
-            android:layout_weight="1"
+            android:id="@+id/startRtUpBtn"
+            android:layout_width="0dp" android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:enabled="false"
-            android:text="Start bidir" />
+            android:enabled="false" android:text="RT up" />
 
         <Button
-            android:id="@+id/stopBtn"
-            android:layout_width="wrap_content"
+            android:id="@+id/startRtDownBtn"
+            android:layout_width="0dp" android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:enabled="false"
-            android:text="Stop" />
+            android:enabled="false" android:text="RT down" />
     </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/startBulkUpBtn"
+            android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:enabled="false" android:text="Bulk up" />
+
+        <Button
+            android:id="@+id/startBulkDownBtn"
+            android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:enabled="false" android:text="Bulk down" />
+
+        <Button
+            android:id="@+id/startFullBtn"
+            android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:enabled="false" android:text="Full" />
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/stopBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:enabled="false"
+        android:text="Stop active test" />
 
     <TextView
         android:id="@+id/status"

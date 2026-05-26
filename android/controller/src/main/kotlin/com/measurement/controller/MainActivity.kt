@@ -48,8 +48,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var output: TextView
     private lateinit var startProbe: Button
-    private lateinit var startBidir: Button
+    private lateinit var startRtUp: Button
+    private lateinit var startRtDown: Button
+    private lateinit var startBulkUp: Button
+    private lateinit var startBulkDown: Button
+    private lateinit var startFull: Button
     private lateinit var stopBtn: Button
+    private val startButtons get() =
+        listOf(startProbe, startRtUp, startRtDown, startBulkUp, startBulkDown, startFull)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,7 +67,11 @@ class MainActivity : AppCompatActivity() {
         status = findViewById(R.id.status)
         output = findViewById(R.id.output)
         startProbe = findViewById(R.id.startProbeBtn)
-        startBidir = findViewById(R.id.startBidirBtn)
+        startRtUp = findViewById(R.id.startRtUpBtn)
+        startRtDown = findViewById(R.id.startRtDownBtn)
+        startBulkUp = findViewById(R.id.startBulkUpBtn)
+        startBulkDown = findViewById(R.id.startBulkDownBtn)
+        startFull = findViewById(R.id.startFullBtn)
         stopBtn = findViewById(R.id.stopBtn)
         val refreshBtn = findViewById<Button>(R.id.refreshBtn)
 
@@ -103,8 +113,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         refreshBtn.setOnClickListener { jwt?.let { runBg { refreshFleet(it) } } }
-        startProbe.setOnClickListener { startTest(probePlan(), "probe") }
-        startBidir.setOnClickListener { startTest(bidirPlan(), "bidir") }
+        startProbe.setOnClickListener   { startTest(probePlan(),     "probe") }
+        startRtUp.setOnClickListener    { startTest(rtUpPlan(),      "rt-up") }
+        startRtDown.setOnClickListener  { startTest(rtDownPlan(),    "rt-down") }
+        startBulkUp.setOnClickListener  { startTest(bulkUpPlan(),    "bulk-up") }
+        startBulkDown.setOnClickListener{ startTest(bulkDownPlan(),  "bulk-down") }
+        startFull.setOnClickListener    { startTest(fullPlan(),      "full") }
         stopBtn.setOnClickListener { stopActiveTest() }
     }
 
@@ -146,8 +160,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 lastTests = tests
                 val canControl = deviceId != null
-                startProbe.isEnabled = canControl
-                startBidir.isEnabled = canControl
+                startButtons.forEach { it.isEnabled = canControl }
                 stopBtn.isEnabled = tests.any { it.endedUtcNs == null }
                 val active = tests.count { it.endedUtcNs == null }
                 status.text = "${devices.size} device(s) · ${tests.size} tests · $active active"
@@ -194,19 +207,55 @@ class MainActivity : AppCompatActivity() {
 
     // ---- preset plans (flattened Flow: fill all fields; server reads per type) ----
 
+    // Direction in `probe` flows is ignored by the server (it's an echo), but
+    // the generated client requires the field. `ratePps`/`packetSizeBytes` are
+    // ignored by the server for `bulk_tcp` for the same flat-Flow reason.
+
     private fun probePlan() = TestPlan(
-        durationSec = 15, name = "ctrl-probe", version = 1,
+        durationSec = 30, name = "ctrl-probe", version = 1,
         flows = listOf(
             Flow(flowId = 1, type = Flow.Type.probe, ratePps = 50, packetSizeBytes = 22, direction = Direction.ToServer)
         )
     )
 
-    private fun bidirPlan() = TestPlan(
-        durationSec = 15, name = "ctrl-bidir", version = 1,
+    private fun rtUpPlan() = TestPlan(
+        durationSec = 30, name = "ctrl-rt-up", version = 1,
         flows = listOf(
-            Flow(flowId = 1, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.ToServer),
-            Flow(flowId = 2, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.FromServer),
-            Flow(flowId = 3, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.ToServer, targetBytes = 2_000_000)
+            Flow(flowId = 1, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.ToServer)
+        )
+    )
+
+    private fun rtDownPlan() = TestPlan(
+        durationSec = 30, name = "ctrl-rt-down", version = 1,
+        flows = listOf(
+            Flow(flowId = 1, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.FromServer)
+        )
+    )
+
+    private fun bulkUpPlan() = TestPlan(
+        durationSec = 30, name = "ctrl-bulk-up", version = 1,
+        flows = listOf(
+            Flow(flowId = 1, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.ToServer, targetBytes = 5_000_000)
+        )
+    )
+
+    private fun bulkDownPlan() = TestPlan(
+        durationSec = 30, name = "ctrl-bulk-down", version = 1,
+        flows = listOf(
+            Flow(flowId = 1, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.FromServer, targetBytes = 5_000_000)
+        )
+    )
+
+    /** Everything: RTT (probe), OWD both ways (realtime UDP), throughput both
+     *  ways (bulk TCP). One comprehensive 30-second snapshot. */
+    private fun fullPlan() = TestPlan(
+        durationSec = 30, name = "ctrl-full", version = 1,
+        flows = listOf(
+            Flow(flowId = 1, type = Flow.Type.probe, ratePps = 50, packetSizeBytes = 22, direction = Direction.ToServer),
+            Flow(flowId = 2, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.ToServer),
+            Flow(flowId = 3, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.FromServer),
+            Flow(flowId = 4, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.ToServer, targetBytes = 3_000_000),
+            Flow(flowId = 5, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.FromServer, targetBytes = 3_000_000)
         )
     )
 
