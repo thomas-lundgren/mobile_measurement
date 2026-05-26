@@ -172,9 +172,11 @@ for n in 1 2 3; do
     [[ "$cur_s" == "$des_s" ]] && continue   # in sync — leave it alone
 
     echo "--- rule $n out of sync (diff: - current, + desired) ---"
+    # `diff` exits 1 when files differ; with `set -e` + `pipefail` that would
+    # abort the script before printing rules 2/3. `|| true` keeps us alive.
     diff -u --label "rule $n current" --label "rule $n desired" \
         <(printf '%s\n' "$cur_s") <(printf '%s\n' "$des_s") \
-        | sed -n '4,$p' | sed 's/^/    /'
+        | sed -n '4,$p' | sed 's/^/    /' || true
 
     # Delete existing rule (only if it actually exists) then recreate it whole
     # — this enforces "we own rules 1–3" without surprises from stale fields.
