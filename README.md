@@ -144,6 +144,7 @@ generated-client drift gate. Mirror it locally with `ci/check.sh`.
 - [`planning/5_g_field_test_platform_architecture_spec.md`](planning/5_g_field_test_platform_architecture_spec.md) — authoritative architecture & functional spec (packet formats, log schemas, OWD math, endpoints).
 - [`planning/development_plan.md`](planning/development_plan.md) — build sequencing + per-invariant enforcement.
 - [`planning/development_guide.md`](planning/development_guide.md) — keeping the polyglot codebase consistent (contracts, codegen, golden vectors).
+- [`planning/peer_topology_extension.md`](planning/peer_topology_extension.md) — proposed extension: generalised peer-endpoint registry (any node as a peer, UE↔UE topologies) + deployment behind a home router (NAT/port forwarding).
 - [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md) — agent-oriented guides.
 - [`ROADMAP.md`](ROADMAP.md) · [`STATUS.md`](STATUS.md) — phase plan & progress.
 
