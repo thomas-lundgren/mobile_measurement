@@ -35,7 +35,7 @@ set -euo pipefail
 
 ROUTER="${ROUTER:-}"
 SERVER_IP="${SERVER_IP:-}"
-WAN_IF="${WAN_IF:-eth0}"
+WAN_IF="${WAN_IF:-eth5}"
 LAN_IF="${LAN_IF:-switch0}"
 DATA_RANGE="${DATA_RANGE:-41000-41100}"
 DRY_RUN=0
@@ -44,7 +44,7 @@ usage() {
     cat <<USAGE >&2
 Usage:
   ROUTER=user@router SERVER_IP=<server LAN IP> \\
-    [WAN_IF=eth0] [LAN_IF=switch0] [DATA_RANGE=41000-41100] \\
+    [WAN_IF=eth5] [LAN_IF=switch0] [DATA_RANGE=41000-41100] \\
     [INTERACTIVE_SSH=1] \\
     $0 [--dry-run]
 
@@ -139,9 +139,12 @@ EOF
 # ----- fetch current state ----------------------------------------------
 
 echo "==> reading current port-forward config from $ROUTER"
+# `show configuration commands` is an alias loaded only in interactive vbash —
+# a plain `ssh user@router '<cmd>'` runs a non-interactive shell that doesn't
+# know it. `vbash -ic` loads the interactive profile so the alias resolves.
 CURRENT=$(
     ssh "${SSH_OPTS[@]}" "$ROUTER" \
-        'show configuration commands | grep "^set port-forward" || true'
+        "vbash -ic 'show configuration commands | grep \"^set port-forward\" || true'"
 ) || die "ssh to $ROUTER failed (use INTERACTIVE_SSH=1 if a password prompt is needed)"
 
 # ----- diff: top-level (leaf-replace) -----------------------------------
