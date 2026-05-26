@@ -137,6 +137,45 @@ LAN only, set a strong `MP_JWT_SECRET`, and don't expose `8080` to untrusted
 networks. Device identity is a non-exportable P-256 key (Android Keystore);
 operator identity is a username/password → JWT.
 
+### 2.5 Server behind a home router (NAT / port forwarding)
+
+If the server sits behind a home router and devices connect from the internet,
+forward these to the server's LAN IP:
+
+| External | Protocol | → Internal (server) | Purpose |
+|---|---|---|---|
+| `8080` | TCP | `:8080` | control-plane REST (enroll/auth/poll/status/upload + `GET /api/v1/time`) |
+| `8081` | UDP | `:8081` | UDP time-sync responder (clock calibration) |
+| `41000–41100` | TCP + UDP | `:41000–41100` | per-flow data ports (UE always sends the first packet here) |
+
+Two server-side knobs go with the forwarding:
+
+- `MP_BIND=0.0.0.0:8080` — listen on all interfaces (not loopback only).
+- `MP_SERVER_HOST=<public IPv4 or DDNS hostname>` — the address `RUN_TEST` tells
+  the mobile to dial for data flows + UDP time sync. Must be reachable from the
+  internet; **not** the LAN IP. Use a DDNS name on dynamic residential IPs.
+
+> **Same-LAN caveat (hairpin NAT).** If you test with a phone on the *same*
+> Wi-Fi as the server while it's pointed at the public IP/DDNS, many home
+> routers won't loop that traffic back ("NAT hairpinning" / "NAT loopback"
+> isn't enabled). Two options: either **point that phone at the server's LAN
+> IP** for same-network tests (often the simplest), or **enable hairpin NAT**
+> on the router. The EdgeRouter script below turns hairpin on by default.
+
+Also: open the same three rules in the host firewall on the server itself
+(`ufw`/`iptables`/`firewalld`) — port-forwarding gets traffic to the host, but
+a local firewall can still drop it. Do **not** forward the internal control
+APIs (`9000` test-control, `9100` data-generator) — they're loopback-only.
+
+**Ubiquiti EdgeRouter (EdgeOS):** `scripts/edgerouter_port_forward.sh`
+applies these rules over SSH (with hairpin NAT enabled). See the script header
+for required env vars (`ROUTER`, `SERVER_IP`) and overrides; `--dry-run` prints
+the EdgeOS commands without applying them.
+
+For the broader "any peer can be the reachable side" design (UE↔UE topologies,
+endpoint registry), see
+[`../planning/peer_topology_extension.md`](../planning/peer_topology_extension.md).
+
 ---
 
 ## 3. Android Logger setup
