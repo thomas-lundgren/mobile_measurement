@@ -73,13 +73,19 @@ def plot_owd(td: TestData):
 
 def plot_jitter(td: TestData):
     j = metrics.jitter(td)
-    t0 = _t0(td)
-    if j.empty or t0 is None:
+    if j.empty:
         return None
+    # x-axis in UTC: a multi-flow plan may have ToServer flows received on the
+    # server and FromServer flows received on the mobile; their mono clocks
+    # share no epoch, so a mono-based axis splits them by thousands of seconds.
+    t0u = int(pd.to_numeric(j["utc_ns"], errors="coerce").dropna().min())
     fig, ax = plt.subplots(figsize=(9, 3.5))
-    for flow_id, sub in j.groupby("flow_id"):
-        ax.plot(_rel_s(sub["mono_ns"], t0), sub["ipdv_ns"].astype("float") / NS_PER_MS,
-                ".", ms=3, label=f"flow {int(flow_id)}")
+    # Label = flow id + the *direction in which the packets arrived*: received
+    # on the mobile = downlink (server sent); received on the server = uplink.
+    for (flow_id, node), sub in j.groupby(["flow_id", "node"]):
+        direction = "downlink" if node == "mobile" else "uplink"
+        ax.plot(_rel_s(sub["utc_ns"], t0u), sub["ipdv_ns"].astype("float") / NS_PER_MS,
+                ".", ms=3, label=f"flow {int(flow_id)} {direction}")
     ax.axhline(0, color="k", lw=0.6)
     ax.set(xlabel="time (s)", ylabel="IPDV: actual − expected (ms)",
            title="Inter-arrival jitter over time")

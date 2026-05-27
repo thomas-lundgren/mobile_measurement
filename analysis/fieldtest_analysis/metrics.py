@@ -77,7 +77,12 @@ def jitter(td: TestData) -> pd.DataFrame:
     """Inter-arrival deviation (IPDV) for RECEIVED realtime packets:
     `ipdv_ns = actual_interval_ns - expected_interval_ns`."""
     pk = td.packets
-    cols = ["node", "flow_id", "actual_interval_ns", "expected_interval_ns", "ipdv_ns", "mono_ns"]
+    # utc_ns is needed alongside mono_ns: when both ToServer (recv on server)
+    # and FromServer (recv on mobile) rows are present, their mono clocks share
+    # no epoch, so the cross-node time axis must use utc_ns (same reasoning as
+    # realtime_owd).
+    cols = ["node", "flow_id", "actual_interval_ns", "expected_interval_ns",
+            "ipdv_ns", "mono_ns", "utc_ns"]
     if pk.empty:
         return pd.DataFrame(columns=cols)
     rt = pk[(pk["direction"] == schema.DIR_RECEIVED) & pk["actual_interval_ns"].notna()].copy()
