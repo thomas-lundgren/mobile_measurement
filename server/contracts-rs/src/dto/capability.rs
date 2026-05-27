@@ -12,6 +12,9 @@ pub struct Capability {
     pub qos: QosCapability,
     pub mobility: MobilityCapability,
     pub timestamp_sources: Vec<TimestampSource>,
+    /// Device can probe first-hop gateways and operator-pinned targets (Logger and Monitor).
+    #[serde(default)]
+    pub supports_ping: bool,
     /// Present only on MP Monitor enrollments; absent on MP Logger enrollments.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub monitor: Option<MonitorCapability>,

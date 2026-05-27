@@ -218,6 +218,42 @@ fn monitor_device_status_round_trip() {
 }
 
 #[test]
+fn capability_supports_ping_round_trip() {
+    // Logger capability with supports_ping
+    let logger_cap = mp_contracts::Capability {
+        radio: mp_contracts::RadioCapability {
+            serving_cell: vec![],
+            neighbor_cells: false, lte_fallback: false, cqi: false, mcs: false,
+            bler: false, harq: false, drx: false, bwp: false, mimo_layers: false,
+            tx_power: false,
+        },
+        qos: mp_contracts::QosCapability { qi_5: false, qfi: false, slice_info: false },
+        mobility: mp_contracts::MobilityCapability {
+            explicit_ho_events: false, rrc_state: false, beam_switch: false,
+        },
+        timestamp_sources: vec![mp_contracts::TimestampSource::Mono, mp_contracts::TimestampSource::Utc],
+        supports_ping: true,
+        monitor: None,
+    };
+    let round: mp_contracts::Capability =
+        serde_json::from_value(serde_json::to_value(&logger_cap).unwrap()).unwrap();
+    assert_eq!(logger_cap, round);
+
+    // Old Logger enrollment without supports_ping still deserializes (default false)
+    let old_cap = serde_json::json!({
+        "radio": { "serving_cell": ["rsrp"], "neighbor_cells": false, "lte_fallback": false,
+                   "cqi": false, "mcs": false, "bler": false, "harq": false,
+                   "drx": false, "bwp": false, "mimo_layers": false, "tx_power": false },
+        "qos": { "5qi": false, "qfi": false, "slice_info": false },
+        "mobility": { "explicit_ho_events": false, "rrc_state": false, "beam_switch": false },
+        "timestamp_sources": ["mono", "utc"]
+    });
+    let parsed: mp_contracts::Capability = serde_json::from_value(old_cap).unwrap();
+    assert!(!parsed.supports_ping);
+    assert!(parsed.monitor.is_none());
+}
+
+#[test]
 fn app_list_round_trip() {
     let list = mp_contracts::AppList {
         device_id: "dev_01KSHHPW83SJPQCVR6HVZH0SAQ".to_string(),

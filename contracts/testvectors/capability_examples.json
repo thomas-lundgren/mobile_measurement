@@ -28,7 +28,43 @@
           "rrc_state": false,
           "beam_switch": false
         },
-        "timestamp_sources": ["mono", "utc", "gps"]
+        "timestamp_sources": ["mono", "utc", "gps"],
+        "supports_ping": true
+      }
+    },
+    {
+      "name": "pixel_9_pro_monitor",
+      "notes": "Same Pixel, enrolled as MP Monitor. Adds monitor capabilities on top of Logger baseline.",
+      "capability": {
+        "radio": {
+          "serving_cell": ["pci", "nci", "tac", "nrarfcn", "rsrp", "rsrq", "sinr"],
+          "neighbor_cells": true,
+          "lte_fallback": true,
+          "cqi": false,
+          "mcs": false,
+          "bler": false,
+          "harq": false,
+          "drx": false,
+          "bwp": false,
+          "mimo_layers": false,
+          "tx_power": false
+        },
+        "qos": {
+          "5qi": false,
+          "qfi": false,
+          "slice_info": false
+        },
+        "mobility": {
+          "explicit_ho_events": false,
+          "rrc_state": false,
+          "beam_switch": false
+        },
+        "timestamp_sources": ["mono", "utc", "gps"],
+        "supports_ping": true,
+        "monitor": {
+          "supports_vpn_capture": true,
+          "can_list_apps": true
+        }
       }
     },
     {

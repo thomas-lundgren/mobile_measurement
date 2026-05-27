@@ -37,7 +37,7 @@
     },
     "ping": {
       "$ref": "#/$defs/PingConfig",
-      "description": "Monitor only: background latency probing. Absent or null disables probing."
+      "description": "Logger and Monitor: latency probing to first-hop gateways and operator-pinned targets. Logger ignores follow_apps (no traffic capture). Absent or null disables probing."
     }
   },
 
@@ -134,7 +134,7 @@
         "follow_apps": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Package names whose observed peers feed the auto ping-target pool (top-N by bytes_up).",
+          "description": "Monitor only: package names whose observed peers (from traffic.parquet) feed the auto ping-target pool (top-N by bytes_up). Logger ignores this field — Logger has no traffic capture.",
           "default": []
         },
         "auto_target_count": {

@@ -73,7 +73,7 @@
 
     "link_state": {
       "$ref": "#/$defs/LinkState",
-      "description": "Monitor only: current default-route gateway per interface. Absent on Logger heartbeats."
+      "description": "Current default-route gateway per interface. Present on Logger and Monitor heartbeats when supports_ping is true."
     },
 
     "monitor_state": {

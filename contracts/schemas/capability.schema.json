@@ -18,6 +18,10 @@
       "minItems": 1,
       "description": "Available clock sources on this device. mono and utc are universally present; gps presence depends on hardware/permissions."
     },
+    "supports_ping": {
+      "type": "boolean", "default": false,
+      "description": "Device can run ICMP/UDP/TCP-SYN latency probes (first-hop gateway + operator-pinned targets). Present on both Logger and Monitor enrollments."
+    },
     "monitor": {
       "$ref": "#/$defs/MonitorCapability",
       "description": "Present only on MP Monitor enrollments; absent on MP Logger enrollments."
@@ -83,10 +87,6 @@
         "supports_vpn_capture": {
           "type": "boolean", "default": false,
           "description": "Device can create a VpnService tunnel for passive traffic capture."
-        },
-        "supports_background_ping": {
-          "type": "boolean", "default": false,
-          "description": "Device can run ICMP/UDP/TCP-SYN background latency probes."
         },
         "can_list_apps": {
           "type": "boolean", "default": false,

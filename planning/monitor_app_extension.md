@@ -17,7 +17,7 @@ on controlled traffic tests). Both apps can coexist on one physical device.
 | Driven by | `RUN_TEST` | `SET_LOGGING_CONFIG` (capture + ping sub-objects) |
 | Lifecycle | Per-test (finite) | Always-on FGS |
 | Traffic | Generates + receives controlled flows | Observes only (VPN); emits only background pings |
-| New log tables | — | `traffic.parquet`, `pings.parquet` |
+| New log tables | `pings.parquet` (when ping enabled) | `traffic.parquet`, `pings.parquet` |
 | Upload path | Test-scoped | Session-scoped (`session_<date>/monitor_<device_id>/`) |
 | Server | same `server-main` | same `server-main` |
 | Protocol | unchanged | additive extension only |
@@ -106,14 +106,16 @@ The scheduler tries in order: `icmp` → `udp` (port 33434) → `tcp_syn` (port 
 If all fail within budget → single row written with `probe_kind = "unreachable"`;
 target marked inactive. `probe_kind` is recorded in every `pings.parquet` row.
 
-## Protocol additions (additive — no Logger changes)
+## Protocol additions
+
+Logger gains `supports_ping` capability and `logging_config.ping` support. Everything else is Monitor-only.
 
 | Surface | Addition |
 |---|---|
 | `EnrollRequest` | `role`, `hardware_id` |
-| `Capability` | `monitor` sub-object (`MonitorCapability`) |
-| `LoggingConfig` | `capture` (CaptureConfig), `ping` (PingConfig) |
-| `DeviceStatus` | `link_state` (LinkState), `monitor_state` (MonitorState) |
+| `Capability` | `supports_ping` (Logger + Monitor); `monitor` sub-object (`MonitorCapability`) |
+| `LoggingConfig` | `capture` (CaptureConfig, Monitor only), `ping` (PingConfig, Logger + Monitor) |
+| `DeviceStatus` | `link_state` (Logger + Monitor when `supports_ping`), `monitor_state` (Monitor only) |
 | `DeviceSummary` | `role`, `hardware_id` |
 | Commands | `LIST_APPS` |
 | Event types | `FIRST_HOP_CHANGE`, `MONITOR_CONFIG_APPLIED`, `VPN_SCOPE_CHANGE`, `QUOTA_REACHED` |

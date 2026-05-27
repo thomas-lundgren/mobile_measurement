@@ -49,8 +49,6 @@ pub struct MonitorCapability {
     #[serde(default)]
     pub supports_vpn_capture: bool,
     #[serde(default)]
-    pub supports_background_ping: bool,
-    #[serde(default)]
     pub can_list_apps: bool,
 }
 
