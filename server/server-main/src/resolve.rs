@@ -52,6 +52,8 @@ pub fn resolve_effective_config(capability: &Capability, version: u32) -> Loggin
         ],
         gps: capability.timestamp_sources.contains(&TimestampSource::Gps),
         clock_calibration_interval_sec: 30,
+        capture: None,
+        ping: None,
     }
 }
 

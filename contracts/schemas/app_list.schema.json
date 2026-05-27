@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/app_list.schema.json",
+  "title": "AppList",
+  "description": "Installed-application inventory reported by MP Monitor via POST /api/v1/devices/{id}/apps. Triggered on enrollment and on ACTION_PACKAGE_ADDED / ACTION_PACKAGE_REMOVED broadcasts, or on receipt of a LIST_APPS command. The server caches the latest version; the Controller reads it to populate the app-picker UI.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["device_id", "inventory_version", "collected_utc_ns", "apps"],
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "pattern": "^dev_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "inventory_version": {
+      "type": "integer", "minimum": 0,
+      "description": "Monotonically increments on every change. The device reports this in its heartbeat (monitor_state.apps_inventory_version) so the server can detect stale caches."
+    },
+    "collected_utc_ns": {
+      "type": "integer", "minimum": 0,
+      "description": "UTC nanoseconds when this snapshot was collected on the device."
+    },
+    "apps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/AppInfo" }
+    }
+  },
+
+  "$defs": {
+    "AppInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package_name", "app_label", "uid"],
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "Unique Android package name (e.g. com.spotify.music). Key for all per-app config."
+        },
+        "app_label": {
+          "type": "string",
+          "description": "Human-readable label from PackageManager (e.g. Spotify). Display-only; may be ambiguous across packages."
+        },
+        "uid": {
+          "type": "integer",
+          "description": "Android UID. Used internally for VpnService addAllowedApplication and getConnectionOwnerUid attribution; not logged in traffic.parquet."
+        },
+        "version_name": {
+          "type": ["string", "null"],
+          "description": "App version string (PackageInfo.versionName)."
+        },
+        "is_system": {
+          "type": "boolean", "default": false,
+          "description": "True for system apps (ApplicationInfo.FLAG_SYSTEM). Controller hides these by default."
+        },
+        "installed_utc_ns": {
+          "type": ["integer", "null"], "minimum": 0,
+          "description": "PackageInfo.firstInstallTime as UTC nanoseconds."
+        }
+      }
+    }
+  }
+}

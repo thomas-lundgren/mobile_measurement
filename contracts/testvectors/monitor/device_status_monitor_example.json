@@ -1,0 +1,51 @@
+{
+  "schema": "../../schemas/device_status.schema.json",
+  "description": "DeviceStatus heartbeat examples from an MP Monitor enrollment.",
+  "examples": [
+    {
+      "name": "monitor_active_allowlist",
+      "description": "Monitor running with allowlist scope; cellular active; two top peers; first-hop gateway known.",
+      "status": {
+        "logger_state": "IDLE",
+        "logging_config_version": 2,
+        "sampled_at": { "mono_ns": 184200000000, "utc_ns": 1748300100000000000 },
+        "battery": { "level_pct": 73, "charging": false },
+        "storage": { "free_bytes": 4294967296, "total_bytes": 10737418240 },
+        "pending_uploads": 0,
+        "radio": { "pci": 215, "nci": null, "rsrp": -85, "rsrq": -11, "sinr": 12 },
+        "link_state": {
+          "rmnet": {
+            "default_gw": "100.72.0.1",
+            "since_mono_ns": 181000000000
+          },
+          "wlan": null
+        },
+        "monitor_state": {
+          "active": true,
+          "scope": "allowlist",
+          "apps_inventory_version": 3,
+          "bytes_observed": 14728394,
+          "bytes_today": 14728394,
+          "quota_remaining_mb": 486,
+          "buckets_pending": 0,
+          "pings_sent": 312,
+          "pings_lost": 2,
+          "top_peers": [
+            { "peer_ip": "35.186.224.47", "app_label": "Spotify",  "bytes_60s": 182340 },
+            { "peer_ip": "216.58.211.14", "app_label": "YouTube",  "bytes_60s": 93120  }
+          ]
+        }
+      }
+    },
+    {
+      "name": "monitor_idle",
+      "description": "Monitor enrolled but not yet configured (capture and ping disabled). Logger heartbeat shape for comparison.",
+      "status": {
+        "logger_state": "IDLE",
+        "logging_config_version": 1,
+        "sampled_at": { "mono_ns": 10000000000, "utc_ns": 1748290000000000000 },
+        "monitor_state": { "active": false }
+      }
+    }
+  ]
+}

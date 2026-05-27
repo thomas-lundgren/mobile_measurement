@@ -1,0 +1,49 @@
+{
+  "schema": "../../schemas/app_list.schema.json",
+  "description": "AppList examples. Used in parity tests and as a reference for the Controller app-picker UI.",
+  "examples": [
+    {
+      "name": "pixel_9_pro_short_list",
+      "description": "A small, realistic inventory from a Pixel 9 Pro running a handful of user apps.",
+      "app_list": {
+        "device_id": "dev_01KSHHPW83SJPQCVR6HVZH0SAQ",
+        "inventory_version": 3,
+        "collected_utc_ns": 1748300000000000000,
+        "apps": [
+          {
+            "package_name": "com.spotify.music",
+            "app_label": "Spotify",
+            "uid": 10123,
+            "version_name": "8.9.2.475",
+            "is_system": false,
+            "installed_utc_ns": 1740000000000000000
+          },
+          {
+            "package_name": "com.google.android.youtube",
+            "app_label": "YouTube",
+            "uid": 10087,
+            "version_name": "19.12.35",
+            "is_system": false,
+            "installed_utc_ns": 1738000000000000000
+          },
+          {
+            "package_name": "com.android.chrome",
+            "app_label": "Chrome",
+            "uid": 10034,
+            "version_name": "124.0.6367.82",
+            "is_system": false,
+            "installed_utc_ns": 1735000000000000000
+          },
+          {
+            "package_name": "com.whatsapp",
+            "app_label": "WhatsApp",
+            "uid": 10155,
+            "version_name": "2.24.7.77",
+            "is_system": false,
+            "installed_utc_ns": 1739000000000000000
+          }
+        ]
+      }
+    }
+  ]
+}

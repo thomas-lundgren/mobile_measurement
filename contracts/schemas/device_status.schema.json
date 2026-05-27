@@ -69,6 +69,16 @@
         "sinr": { "type": ["integer", "null"], "description": "dB." }
       },
       "description": "Coarse current serving-cell snapshot for the operator dashboard. NOT a measurement record — the authoritative radio trace is radio.parquet. Null when no serving cell / radio unavailable."
+    },
+
+    "link_state": {
+      "$ref": "#/$defs/LinkState",
+      "description": "Monitor only: current default-route gateway per interface. Absent on Logger heartbeats."
+    },
+
+    "monitor_state": {
+      "$ref": "#/$defs/MonitorState",
+      "description": "Monitor only: live capture/ping snapshot for the operator dashboard. Absent on Logger heartbeats."
     }
   },
 
@@ -80,6 +90,61 @@
       "properties": {
         "mono_ns": { "type": "integer", "minimum": 0 },
         "utc_ns":  { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "InterfaceLinkState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default_gw"],
+      "properties": {
+        "default_gw":    { "type": "string", "description": "IP address of the default-route gateway on this interface." },
+        "since_mono_ns": { "type": "integer", "minimum": 0, "description": "Monotonic time when this gateway was last observed (on LINK_PROPERTIES_CHANGED)." }
+      }
+    },
+
+    "LinkState": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Current default-route gateway per physical interface. Null when interface is unavailable.",
+      "properties": {
+        "rmnet": { "oneOf": [{ "$ref": "#/$defs/InterfaceLinkState" }, { "type": "null" }] },
+        "wlan":  { "oneOf": [{ "$ref": "#/$defs/InterfaceLinkState" }, { "type": "null" }] }
+      }
+    },
+
+    "TopPeer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["peer_ip", "bytes_60s"],
+      "properties": {
+        "peer_ip":   { "type": "string" },
+        "app_label": { "type": ["string", "null"] },
+        "bytes_60s": { "type": "integer", "minimum": 0, "description": "Bytes (up+dn) in the last 60-second window." }
+      }
+    },
+
+    "MonitorState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active"],
+      "description": "Live snapshot of the Monitor's capture and ping engines.",
+      "properties": {
+        "active":                  { "type": "boolean" },
+        "scope":                   { "type": "string", "enum": ["all", "allowlist"] },
+        "apps_inventory_version":  { "type": "integer", "minimum": 0, "description": "Current installed-app inventory version; server requests LIST_APPS when its cached version is older." },
+        "bytes_observed":          { "type": "integer", "minimum": 0, "description": "Session-cumulative captured bytes (both directions, all apps)." },
+        "bytes_today":             { "type": "integer", "minimum": 0, "description": "Bytes captured since local midnight, for quota display." },
+        "quota_remaining_mb":      { "type": ["integer", "null"], "minimum": 0 },
+        "buckets_pending":         { "type": "integer", "minimum": 0, "description": "Aggregated 1-second buckets not yet flushed to Parquet." },
+        "pings_sent":              { "type": "integer", "minimum": 0 },
+        "pings_lost":              { "type": "integer", "minimum": 0 },
+        "top_peers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TopPeer" },
+          "maxItems": 5,
+          "description": "Up to 5 busiest peers in the last 60 s, for the Controller live view."
+        }
       }
     }
   }

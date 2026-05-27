@@ -1,5 +1,6 @@
 //! `contracts/schemas/capability.schema.json`
 
+use super::monitor::MonitorCapability;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -11,6 +12,9 @@ pub struct Capability {
     pub qos: QosCapability,
     pub mobility: MobilityCapability,
     pub timestamp_sources: Vec<TimestampSource>,
+    /// Present only on MP Monitor enrollments; absent on MP Logger enrollments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor: Option<MonitorCapability>,
 }
 
 /// Per-sample serving-cell fields a device can report.

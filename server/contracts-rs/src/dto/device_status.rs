@@ -1,5 +1,6 @@
 //! `contracts/schemas/device_status.schema.json`
 
+use crate::dto::monitor::{LinkState, MonitorState};
 use crate::enums::LoggerState;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -20,6 +21,12 @@ pub struct DeviceStatus {
     pub pending_uploads: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radio: Option<RadioSnapshot>,
+    /// Monitor only: current default-route gateway per interface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_state: Option<LinkState>,
+    /// Monitor only: live capture/ping engine snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor_state: Option<MonitorState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

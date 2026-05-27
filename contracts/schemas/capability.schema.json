@@ -17,6 +17,10 @@
       "uniqueItems": true,
       "minItems": 1,
       "description": "Available clock sources on this device. mono and utc are universally present; gps presence depends on hardware/permissions."
+    },
+    "monitor": {
+      "$ref": "#/$defs/MonitorCapability",
+      "description": "Present only on MP Monitor enrollments; absent on MP Logger enrollments."
     }
   },
 
@@ -68,6 +72,26 @@
         },
         "rrc_state":   { "type": "boolean", "default": false },
         "beam_switch": { "type": "boolean", "default": false }
+      }
+    },
+
+    "MonitorCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "MP Monitor–specific capabilities. Absent on Logger enrollments.",
+      "properties": {
+        "supports_vpn_capture": {
+          "type": "boolean", "default": false,
+          "description": "Device can create a VpnService tunnel for passive traffic capture."
+        },
+        "supports_background_ping": {
+          "type": "boolean", "default": false,
+          "description": "Device can run ICMP/UDP/TCP-SYN background latency probes."
+        },
+        "can_list_apps": {
+          "type": "boolean", "default": false,
+          "description": "Device can enumerate installed apps via PackageManager and push an AppList."
+        }
       }
     }
   }

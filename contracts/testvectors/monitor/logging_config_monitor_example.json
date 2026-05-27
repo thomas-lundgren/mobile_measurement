@@ -1,0 +1,65 @@
+{
+  "schema": "../../schemas/logging_config.schema.json",
+  "description": "LoggingConfig examples for MP Monitor — includes capture and ping sub-objects.",
+  "examples": [
+    {
+      "name": "monitor_allowlist_with_pings",
+      "description": "Capture Spotify and YouTube only; ping first-hop + Cloudflare; auto-derive top-5 peers from Spotify.",
+      "config": {
+        "version": 2,
+        "radio": {
+          "serving_cell": ["pci", "nci", "rsrp", "sinr"],
+          "neighbor_cells": false,
+          "lte_fallback": false,
+          "cqi": false, "mcs": false, "bler": false, "harq": false,
+          "drx": false, "bwp": false, "mimo_layers": false, "tx_power": false
+        },
+        "qos": { "5qi": false, "qfi": false, "slice_info": false },
+        "mobility": { "explicit_ho_events": false, "rrc_state": false, "beam_switch": false },
+        "events": ["SIGNAL_LOSS_START", "SIGNAL_LOSS_END"],
+        "gps": true,
+        "clock_calibration_interval_sec": 30,
+        "capture": {
+          "enabled": true,
+          "scope": "allowlist",
+          "apps": ["com.spotify.music", "com.google.android.youtube"],
+          "quota_mb_per_day": 500
+        },
+        "ping": {
+          "enabled": true,
+          "default_interval_ms": 1000,
+          "targets": [
+            { "label": "cloudflare_dns", "host": "1.1.1.1" },
+            { "label": "google_dns",     "host": "8.8.8.8", "interval_ms": 5000 }
+          ],
+          "follow_apps": ["com.spotify.music"],
+          "auto_target_count": 5
+        }
+      }
+    },
+    {
+      "name": "monitor_all_apps_no_pings",
+      "description": "Capture all apps (Logger and Monitor are hard-excluded); pings disabled.",
+      "config": {
+        "version": 1,
+        "radio": {
+          "serving_cell": ["rsrp", "sinr"],
+          "neighbor_cells": false, "lte_fallback": false,
+          "cqi": false, "mcs": false, "bler": false, "harq": false,
+          "drx": false, "bwp": false, "mimo_layers": false, "tx_power": false
+        },
+        "qos": { "5qi": false, "qfi": false, "slice_info": false },
+        "mobility": { "explicit_ho_events": false, "rrc_state": false, "beam_switch": false },
+        "events": [],
+        "gps": false,
+        "clock_calibration_interval_sec": 60,
+        "capture": {
+          "enabled": true,
+          "scope": "all",
+          "quota_mb_per_day": 200
+        },
+        "ping": { "enabled": false }
+      }
+    }
+  ]
+}

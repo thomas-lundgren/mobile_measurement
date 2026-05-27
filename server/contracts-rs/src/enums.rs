@@ -54,6 +54,7 @@ wire_enum!(
         RequestStatus    => "REQUEST_STATUS",
         RequestUpload    => "REQUEST_UPLOAD",
         RebootLogger     => "REBOOT_LOGGER",
+        ListApps         => "LIST_APPS",
     }
 );
 
@@ -145,18 +146,22 @@ wire_enum!(
 wire_enum!(
     /// events.parquet event_type (`enums.yaml` event_types).
     EventType {
-        TestStart           => "TEST_START",
-        TestStop            => "TEST_STOP",
-        SignalLossStart     => "SIGNAL_LOSS_START",
-        SignalLossEnd       => "SIGNAL_LOSS_END",
-        ClientConnected     => "CLIENT_CONNECTED",
-        ServerDisconnected  => "SERVER_DISCONNECTED",
-        UploadStarted       => "UPLOAD_STARTED",
-        Error               => "ERROR",
-        Handover            => "HANDOVER",
-        NeighborCountChange => "NEIGHBOR_COUNT_CHANGE",
-        CoverageGap         => "COVERAGE_GAP",
-        BandChange          => "BAND_CHANGE",
+        TestStart            => "TEST_START",
+        TestStop             => "TEST_STOP",
+        SignalLossStart      => "SIGNAL_LOSS_START",
+        SignalLossEnd        => "SIGNAL_LOSS_END",
+        ClientConnected      => "CLIENT_CONNECTED",
+        ServerDisconnected   => "SERVER_DISCONNECTED",
+        UploadStarted        => "UPLOAD_STARTED",
+        Error                => "ERROR",
+        FirstHopChange       => "FIRST_HOP_CHANGE",
+        MonitorConfigApplied => "MONITOR_CONFIG_APPLIED",
+        VpnScopeChange       => "VPN_SCOPE_CHANGE",
+        QuotaReached         => "QUOTA_REACHED",
+        Handover             => "HANDOVER",
+        NeighborCountChange  => "NEIGHBOR_COUNT_CHANGE",
+        CoverageGap          => "COVERAGE_GAP",
+        BandChange           => "BAND_CHANGE",
     }
 );
 
@@ -167,5 +172,31 @@ wire_enum!(
         Partial   => "PARTIAL",
         Failed    => "FAILED",
         Cancelled => "CANCELLED",
+    }
+);
+
+wire_enum!(
+    /// Enrolled app role (`enums.yaml` device_roles).
+    DeviceRole {
+        Logger  => "logger",
+        Monitor => "monitor",
+    }
+);
+
+wire_enum!(
+    /// VPN capture scope (`enums.yaml` vpn_scopes).
+    VpnScope {
+        All       => "all",
+        Allowlist => "allowlist",
+    }
+);
+
+wire_enum!(
+    /// Ping probe transport kind (`enums.yaml` probe_kinds).
+    ProbeKind {
+        Icmp        => "icmp",
+        Udp         => "udp",
+        TcpSyn      => "tcp_syn",
+        Unreachable => "unreachable",
     }
 );

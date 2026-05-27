@@ -1,0 +1,42 @@
+table: pings
+scope: per-monitor-session
+spec: "monitor extension — planning/monitor_app_extension.md"
+description: >
+  Background latency-probe results written by MP Monitor's ping_scheduler.
+  One row per probe attempt. Three target categories feed the scheduler:
+    1. First-hop gateways — auto-discovered from LinkProperties per interface
+       (label = "first_hop_cell" / "first_hop_wlan"). Always active.
+    2. Operator-pinned targets — explicit (label, host) from logging_config.ping.targets.
+    3. Auto-derived — top-N peers per follow_app from traffic.parquet (only
+       peers with first_seen_direction = "up").
+  The scheduler tries probe_kind in order: icmp → udp → tcp_syn. If all fail
+  within the budget, it emits one row with probe_kind = "unreachable" and
+  marks the target inactive.
+
+  Pinging the first-hop gateway separates access-stratum latency (UE →
+  radio → RAN → PGW/UPF) from end-to-end latency to internet targets.
+
+join_columns:
+  - { name: device_id,  type: utf8, nullable: false }
+  - { name: session_id, type: utf8, nullable: false }
+
+columns:
+  - { name: mono_ns,       type: uint64, nullable: false, doc: "Monotonic time the probe response was received (or the failure was recorded)." }
+  - { name: utc_ns,        type: uint64, nullable: false, doc: "UTC time of response/failure." }
+  - { name: target_label,  type: utf8,   nullable: false, doc: "Human-readable label (e.g. first_hop_cell, cdn_spotify). From config or auto-derived." }
+  - { name: target_ip,     type: utf8,   nullable: false, doc: "Resolved IPv4/IPv6 address that was probed." }
+  - { name: interface,     type: utf8,   nullable: true,  doc: "Interface used for the probe (rmnet0 / wlan0)." }
+
+  - name: probe_kind
+    type: utf8
+    nullable: false
+    doc: >
+      Transport used for this probe attempt (from enums.yaml probe_kinds):
+        icmp      — InetAddress.isReachable (ICMP echo)
+        udp       — UDP to traceroute-style port (33434)
+        tcp_syn   — TCP SYN to port 443 (no data exchange)
+        unreachable — all transports exhausted; rtt_ns will be null
+
+  - { name: rtt_ns,        type: uint64, nullable: true,  doc: "Round-trip time in nanoseconds. Null when probe_kind = unreachable or loss = true." }
+  - { name: ttl,           type: uint8,  nullable: true,  doc: "TTL/hop-limit of the response packet (where available)." }
+  - { name: loss,          type: bool,   nullable: false, doc: "True when the probe timed out with no response." }

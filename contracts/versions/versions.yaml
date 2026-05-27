@@ -45,3 +45,11 @@ auth_constants:
 # schema_version, app_version, logging_config_version. app_version is a
 # per-build identifier (semver string) sourced from the build system, not
 # from this file.
+
+# Android package names — pinned here so every component (Monitor VpnService
+# exclusion, server dispatcher, analysis) uses the same string without magic
+# literals.  Both apps MUST be signed with the same signing key so that
+# Android SSAID is stable across both apps (used as hardware_id).
+app_constants:
+  MP_LOGGER_PACKAGE:  com.measurement.logger
+  MP_MONITOR_PACKAGE: com.measurement.monitor

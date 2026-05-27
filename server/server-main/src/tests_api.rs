@@ -294,6 +294,8 @@ pub async fn list_devices(
             current_test_id: r.8,
             battery_level_pct: r.9,
             last_seen_utc_ns: r.10,
+            role: None,
+            hardware_id: None,
         })
         .collect();
     Ok(Json(out))

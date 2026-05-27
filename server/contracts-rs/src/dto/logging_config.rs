@@ -1,6 +1,7 @@
 //! `contracts/schemas/logging_config.schema.json`
 
 use super::capability::ServingCellField;
+use super::monitor::{CaptureConfig, PingConfig};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -16,6 +17,12 @@ pub struct LoggingConfig {
     pub events: Vec<GateableEvent>,
     pub gps: bool,
     pub clock_calibration_interval_sec: u32,
+    /// Monitor only: VPN-based passive capture. Absent/null = disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<CaptureConfig>,
+    /// Monitor only: background latency probing. Absent/null = disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ping: Option<PingConfig>,
 }
 
 /// The config-gateable subset of event types (operational events are always

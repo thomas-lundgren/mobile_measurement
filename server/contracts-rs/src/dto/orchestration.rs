@@ -5,7 +5,7 @@
 
 use crate::dto::logging_config::LoggingConfig;
 use crate::dto::test_plan::{FlowBinding, TestPlan};
-use crate::enums::{TestControlState, TestResult};
+use crate::enums::{DeviceRole, TestControlState, TestResult};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -30,6 +30,13 @@ pub struct DeviceSummary {
     pub battery_level_pct: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seen_utc_ns: Option<i64>,
+    /// Enrolled app role. Absent on pre-Monitor rows — Controller treats as Logger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<DeviceRole>,
+    /// Stable per-handset ID shared by Logger and Monitor APKs on the same device.
+    /// Controller groups rows by this field to form the handset view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hardware_id: Option<String>,
 }
 
 /// Result of pushing a logging-config update to a device

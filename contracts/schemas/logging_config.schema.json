@@ -30,6 +30,14 @@
     "clock_calibration_interval_sec": {
       "type": "integer", "minimum": 1, "maximum": 3600,
       "description": "Cadence of clock-calibration samples written to clock.parquet (mono / utc / optionally gps_utc tuples)."
+    },
+    "capture": {
+      "$ref": "#/$defs/CaptureConfig",
+      "description": "Monitor only: VPN-based passive traffic capture. Absent or null disables capture."
+    },
+    "ping": {
+      "$ref": "#/$defs/PingConfig",
+      "description": "Monitor only: background latency probing. Absent or null disables probing."
     }
   },
 
@@ -76,6 +84,76 @@
         "explicit_ho_events": { "type": "boolean", "default": false },
         "rrc_state":          { "type": "boolean", "default": false },
         "beam_switch":        { "type": "boolean", "default": false }
+      }
+    },
+
+    "CaptureConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "description": "MP Monitor passive traffic capture via VpnService.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "scope": {
+          "type": "string",
+          "enum": ["all", "allowlist"],
+          "default": "all",
+          "description": "all = every app except hard-excluded ones; allowlist = only listed package names."
+        },
+        "apps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Package names to capture when scope = allowlist. Ignored when scope = all.",
+          "default": []
+        },
+        "quota_mb_per_day": {
+          "type": "integer", "minimum": 1,
+          "description": "Daily byte cap (MB). When reached, VpnService is torn down and QUOTA_REACHED is logged."
+        }
+      }
+    },
+
+    "PingConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "description": "MP Monitor background latency probing.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "default_interval_ms": {
+          "type": "integer", "minimum": 100, "maximum": 60000,
+          "default": 1000,
+          "description": "Default probe cadence in ms. Per-target override takes precedence."
+        },
+        "targets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PingTarget" },
+          "description": "Operator-pinned targets. First-hop gateways and auto-derived targets are added device-side.",
+          "default": []
+        },
+        "follow_apps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Package names whose observed peers feed the auto ping-target pool (top-N by bytes_up).",
+          "default": []
+        },
+        "auto_target_count": {
+          "type": "integer", "minimum": 1, "maximum": 20,
+          "default": 5,
+          "description": "Maximum number of auto-derived targets per follow_app."
+        }
+      }
+    },
+
+    "PingTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "host"],
+      "description": "A single operator-pinned latency target.",
+      "properties": {
+        "label":       { "type": "string", "maxLength": 64 },
+        "host":        { "type": "string", "description": "IPv4, IPv6, or hostname. Resolved once on config apply." },
+        "interval_ms": { "type": "integer", "minimum": 100, "maximum": 60000, "description": "Per-target override; absent = default_interval_ms." }
       }
     }
   }

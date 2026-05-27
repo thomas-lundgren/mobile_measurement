@@ -1,6 +1,6 @@
 //! Auth DTOs — `planning/auth_openapi_sketch.yaml` (device + operator).
 
-use crate::enums::{OperatorRole, Platform};
+use crate::enums::{DeviceRole, OperatorRole, Platform};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -16,6 +16,14 @@ pub struct EnrollRequest {
     #[serde(default)]
     pub hw_info: HwInfo,
     pub protocol_version: u32,
+    /// What this enrollment does. Absent = "logger" (backward-compatible default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<DeviceRole>,
+    /// Stable per-handset identifier shared between Logger and Monitor APKs on the
+    /// same device (Android SSAID when both apps share the same signing key).
+    /// Used by the server to group co-located enrollments under one handset view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hardware_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]

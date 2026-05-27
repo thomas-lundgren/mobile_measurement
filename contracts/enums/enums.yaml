@@ -22,6 +22,7 @@ commands:
   - REQUEST_STATUS      # force an immediate device status report
   - REQUEST_UPLOAD      # trigger upload of pending sessions
   - REBOOT_LOGGER       # restart the foreground service (recovery)
+  - LIST_APPS           # monitor only: request current installed-app inventory
 
 # ---------------------------------------------------------------------------
 # Test-control: per-device state machine (spec sec 6.2).
@@ -122,6 +123,11 @@ event_types:
   - SERVER_DISCONNECTED
   - UPLOAD_STARTED
   - ERROR
+  # monitor-only operational events (always logged when monitor is active)
+  - FIRST_HOP_CHANGE        # default-route gateway changed on rmnet or wlan
+  - MONITOR_CONFIG_APPLIED  # a SET_LOGGING_CONFIG was applied; new version recorded
+  - VPN_SCOPE_CHANGE        # VPN allowlist/mode changed
+  - QUOTA_REACHED           # daily byte quota exhausted; capture paused
   # derived in post-processing from radio.parquet
   - HANDOVER              # PCI or NCI change between consecutive samples
   - NEIGHBOR_COUNT_CHANGE # significant change in neighbor cell list
@@ -142,6 +148,11 @@ event_type_provenance:
     - SERVER_DISCONNECTED
     - UPLOAD_STARTED
     - ERROR
+  logged_live_monitor_always:
+    - FIRST_HOP_CHANGE
+    - MONITOR_CONFIG_APPLIED
+    - VPN_SCOPE_CHANGE
+    - QUOTA_REACHED
   derived_post_processing:
     - HANDOVER
     - NEIGHBOR_COUNT_CHANGE
@@ -157,3 +168,28 @@ test_results:
   - PARTIAL       # ran some duration, ended early (network loss, OS kill)
   - FAILED        # could not start or aborted with no useful data
   - CANCELLED     # operator stop
+
+# ---------------------------------------------------------------------------
+# Device roles — what an enrolled app does. One enrollment per (device, role).
+# A physical handset may have both a logger and a monitor enrollment.
+# ---------------------------------------------------------------------------
+device_roles:
+  - logger    # MP Logger: controlled traffic tests
+  - monitor   # MP Monitor: VPN-based passive capture + background pings
+
+# ---------------------------------------------------------------------------
+# VPN capture scope — how widely Monitor's VPN tunnel is applied.
+# ---------------------------------------------------------------------------
+vpn_scopes:
+  - all        # all apps except Monitor itself and Logger (hard-excluded)
+  - allowlist  # only the explicitly listed package names
+
+# ---------------------------------------------------------------------------
+# Ping probe kind — which transport was used for the latency measurement.
+# The scheduler tries ICMP first, then falls back down the list.
+# ---------------------------------------------------------------------------
+probe_kinds:
+  - icmp         # ICMP echo (InetAddress.isReachable)
+  - udp          # UDP echo to traceroute-style port
+  - tcp_syn      # TCP SYN to port 80/443
+  - unreachable  # all probe types failed within budget; target marked inactive

@@ -17,3 +17,8 @@ pub const AUTH_PUBKEY_FORMAT: &str = "SPKI_DER";
 pub const AUTH_SIG_FORMAT: &str = "ASN1_DER";
 /// Domain separator prepended to the signed challenge blob.
 pub const AUTH_DOMAIN: &str = "mp-auth-v1";
+
+/// Android package name of MP Logger — hard-excluded from Monitor's VPN tunnel.
+pub const MP_LOGGER_PACKAGE: &str = "com.measurement.logger";
+/// Android package name of MP Monitor — excluded from its own VPN tunnel.
+pub const MP_MONITOR_PACKAGE: &str = "com.measurement.monitor";

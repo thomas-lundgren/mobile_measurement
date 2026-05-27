@@ -1,0 +1,60 @@
+table: traffic
+scope: per-monitor-session
+spec: "monitor extension — planning/monitor_app_extension.md"
+description: >
+  Aggregated traffic statistics collected by MP Monitor via VpnService.
+  One row per (app, peer, 1-second bucket). Ports and protocol are NOT
+  logged — only peer IP is needed to build the ping-target pool and to
+  correlate latency with traffic load. The aggregation key is (app_uid,
+  peer_ip); direction is a counter dimension (bytes_up / bytes_dn).
+
+  Private and CGNAT addresses ARE kept (carrier first-hop / RAN gateway
+  lives in those ranges). Only loopback, link-local, multicast, broadcast,
+  and unspecified addresses are filtered at capture time by is_loggable_peer().
+
+  The Logger APK and Monitor APK are hard-excluded from capture and never
+  appear as app_uid values in this table.
+
+join_columns:
+  - { name: device_id,  type: utf8, nullable: false }
+  - { name: session_id, type: utf8, nullable: false }
+
+columns:
+  - { name: bucket_start_mono_ns, type: uint64, nullable: false, doc: "Monotonic start of the 1-second aggregation bucket." }
+  - { name: bucket_start_utc_ns,  type: uint64, nullable: false, doc: "UTC start of the bucket. Use utc_ns for cross-node alignment." }
+  - { name: bucket_duration_ms,   type: uint32, nullable: false, doc: "Bucket width in ms (nominally 1000)." }
+
+  - name: app_uid
+    type: int32
+    nullable: true
+    doc: >
+      Android UID of the app that owns the flows in this bucket.
+      Resolved via ConnectivityManager.getConnectionOwnerUid() keyed on
+      the 5-tuple (parsed internally, not logged). Null for flows where
+      UID attribution fails (short-lived UDP, ICMP, race at socket close).
+
+  - { name: app_label,  type: utf8,   nullable: true,  doc: "Human-readable app name from the AppList inventory. Null when app_uid is null or the UID no longer maps to an installed app." }
+  - { name: peer_ip,    type: utf8,   nullable: false,  doc: "Canonical IPv4 or IPv6 address of the remote peer (dst for outgoing, src for incoming). Never a local/multicast/broadcast address." }
+  - { name: interface,  type: utf8,   nullable: true,   doc: "Network interface (rmnet0, wlan0, etc.) as seen by the VPN tunnel." }
+
+  - { name: bytes_up,   type: uint64, nullable: false, doc: "Bytes sent to peer_ip in this bucket." }
+  - { name: bytes_dn,   type: uint64, nullable: false, doc: "Bytes received from peer_ip in this bucket." }
+  - { name: pkts_up,    type: uint64, nullable: false, doc: "Packets sent to peer_ip in this bucket." }
+  - { name: pkts_dn,    type: uint64, nullable: false, doc: "Packets received from peer_ip in this bucket." }
+
+  - name: first_seen
+    type: bool
+    nullable: false
+    doc: >
+      True on the first bucket ever written for this (app_uid, peer_ip)
+      pair in this session. Analysis and the ping target_picker use this
+      to detect when a new peer relationship begins.
+
+  - name: first_seen_direction
+    type: utf8
+    nullable: true
+    doc: >
+      "up" if the first packet observed for this (app_uid, peer_ip) pair
+      was outgoing; "dn" if incoming; null when first_seen is false.
+      The ping target_picker admits only peers where first_seen_direction
+      = "up" (we can reach what we initiated to).
