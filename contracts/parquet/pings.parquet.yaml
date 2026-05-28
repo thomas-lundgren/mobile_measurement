@@ -1,17 +1,24 @@
 table: pings
-scope: per-monitor-session
+scope: per-session (Monitor background) or per-test (Logger gateway_ping flow)
 spec: "monitor extension — planning/monitor_app_extension.md"
 description: >
-  Background latency-probe results written by MP Monitor's ping_scheduler.
-  One row per probe attempt. Three target categories feed the scheduler:
+  Latency-probe results written by both MP Monitor (always-on background ping)
+  and MP Logger (gateway_ping test flow). One row per probe attempt.
+
+  MP Monitor — three target categories feed the ping_scheduler:
     1. First-hop gateways — auto-discovered from LinkProperties per interface
        (label = "first_hop_cell" / "first_hop_wlan"). Always active.
     2. Operator-pinned targets — explicit (label, host) from logging_config.ping.targets.
     3. Auto-derived — top-N peers per follow_app from traffic.parquet (only
        peers with first_seen_direction = "up").
-  The scheduler tries probe_kind in order: icmp → udp → tcp_syn. If all fail
-  within the budget, it emits one row with probe_kind = "unreachable" and
-  marks the target inactive.
+  test_id is null for Monitor background probes.
+
+  MP Logger (gateway_ping flow) — probes auto-discovered first-hop gateways
+  during the test window. test_id matches the parent test. Enables cross-table
+  join: Logger's radio.parquet + pings.parquet to correlate access-stratum RTT
+  with load flows.
+
+  Probe family fallback for both sources: icmp → udp → tcp_syn → unreachable.
 
   Pinging the first-hop gateway separates access-stratum latency (UE →
   radio → RAN → PGW/UPF) from end-to-end latency to internet targets.
@@ -19,6 +26,7 @@ description: >
 join_columns:
   - { name: device_id,  type: utf8, nullable: false }
   - { name: session_id, type: utf8, nullable: false }
+  - { name: test_id,    type: utf8, nullable: true,  doc: "Set for Logger gateway_ping test-flow rows; null for Monitor background probe rows." }
 
 columns:
   - { name: mono_ns,       type: uint64, nullable: false, doc: "Monotonic time the probe response was received (or the failure was recorded)." }

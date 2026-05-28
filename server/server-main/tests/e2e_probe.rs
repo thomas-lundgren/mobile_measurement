@@ -202,7 +202,7 @@ async fn probe_end_to_end() {
     assert_eq!(cmd["command"], "RUN_TEST");
     let payload: RunTestPayload = serde_json::from_value(cmd["payload"].clone()).unwrap();
     assert_eq!(payload.test_id, test_id);
-    let port = payload.flow_bindings[0].server_port;
+    let port = payload.flow_bindings[0].server_port.unwrap();
     let server_host = payload.server_host.clone();
 
     // --- device runs the probe flow against the generator -------------------

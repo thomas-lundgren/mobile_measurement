@@ -195,7 +195,7 @@ pub async fn create_test(
         .bind(b.flow_id as i64)
         .bind(ftype)
         .bind(direction)
-        .bind(b.server_port as i64)
+        .bind(b.server_port.map(|p| p as i64))
         .execute(&st.pool)
         .await?;
     }
@@ -396,6 +396,7 @@ fn flow_descr(flow: Option<&mp_contracts::Flow>) -> (&'static str, Option<&'stat
         Some(Flow::Probe { .. }) => ("probe", None),
         Some(Flow::RealtimeUdp { direction, .. }) => ("realtime_udp", Some(dir_wire(*direction))),
         Some(Flow::BulkTcp { direction, .. }) => ("bulk_tcp", Some(dir_wire(*direction))),
+        Some(Flow::GatewayPing { .. }) => ("gateway_ping", None),
         None => ("probe", None),
     }
 }

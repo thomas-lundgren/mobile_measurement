@@ -37,7 +37,7 @@
     },
     "ping": {
       "$ref": "#/$defs/PingConfig",
-      "description": "Logger and Monitor: latency probing to first-hop gateways and operator-pinned targets. Logger ignores follow_apps (no traffic capture). Absent or null disables probing."
+      "description": "Monitor only: always-on background latency probing to first-hop gateways and operator-pinned targets. Logger gateway probing is a test flow (gateway_ping in TestPlan), not a logging_config setting. Absent or null disables Monitor background probing."
     }
   },
 

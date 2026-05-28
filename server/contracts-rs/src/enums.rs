@@ -107,6 +107,7 @@ wire_enum!(
         Probe       => "probe",
         RealtimeUdp => "realtime_udp",
         BulkTcp     => "bulk_tcp",
+        GatewayPing => "gateway_ping",
     }
 );
 

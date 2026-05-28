@@ -115,6 +115,41 @@
         ]
       },
       "notes": "Demonstrates the bidirectional-as-two-flows pattern (remediation 2.3). Distinct flow_ids, distinct ports."
+    },
+    {
+      "name": "probe_with_gateway_ping",
+      "notes": "Probe flow + gateway_ping flow. The gateway_ping binding carries no server_port (device-local measurement; first-hop is auto-discovered from LinkProperties). Shows optional server_port in FlowBinding.",
+      "payload": {
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X8",
+        "session_id": "ses_2026_05_24_001",
+        "server_host": "10.0.0.1",
+        "test_plan": {
+          "name": "probe_and_gw_ping_v1",
+          "version": 1,
+          "duration_sec": 120,
+          "flows": [
+            {
+              "flow_id": 1,
+              "type": "probe",
+              "rate_pps": 10
+            },
+            {
+              "flow_id": 2,
+              "type": "gateway_ping",
+              "ping_interval_ms": 500
+            }
+          ]
+        },
+        "flow_bindings": [
+          {
+            "flow_id": 1,
+            "server_port": 41000
+          },
+          {
+            "flow_id": 2
+          }
+        ]
+      }
     }
   ]
 }

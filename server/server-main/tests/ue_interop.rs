@@ -77,12 +77,11 @@ fn dir_str(d: Direction) -> String {
 /// Merge the contract RUN_TEST payload (port-less flows + bindings) into the
 /// engine's lean config — exactly what the Java shell will do at the JNI seam.
 fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestConfig {
-    let port_of = |fid: u32| {
+    let port_of = |fid: u32| -> Option<u16> {
         p.flow_bindings
             .iter()
             .find(|b| b.flow_id == fid)
-            .unwrap()
-            .server_port
+            .and_then(|b| b.server_port)
     };
     let flows = p
         .test_plan
@@ -128,6 +127,15 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 rate_pps: None,
                 packet_size_bytes: None,
                 target_bytes: target_bytes.map(|t| t as u64),
+            },
+            Flow::GatewayPing { flow_id, .. } => UeFlow {
+                flow_id: *flow_id,
+                flow_type: "gateway_ping".into(),
+                direction: None,
+                server_port: None,
+                rate_pps: None,
+                packet_size_bytes: None,
+                target_bytes: None,
             },
         })
         .collect();

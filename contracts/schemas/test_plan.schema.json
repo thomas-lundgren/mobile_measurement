@@ -38,11 +38,12 @@
   "$defs": {
 
     "Flow": {
-      "description": "Discriminated by `type`. Port-less: the server port for each flow is allocated by test-control and lives in flow_bindings (see run_test_command.schema.json / header.schema.json), keyed by flow_id.",
+      "description": "Discriminated by `type`. Port-less: the server port for each flow is allocated by test-control and lives in flow_bindings (see run_test_command.schema.json / header.schema.json), keyed by flow_id. gateway_ping flows have no server endpoint and carry no server_port in their binding.",
       "oneOf": [
         { "$ref": "#/$defs/ProbeFlow" },
         { "$ref": "#/$defs/RealtimeUdpFlow" },
-        { "$ref": "#/$defs/BulkTcpFlow" }
+        { "$ref": "#/$defs/BulkTcpFlow" },
+        { "$ref": "#/$defs/GatewayPingFlow" }
       ]
     },
 
@@ -99,6 +100,22 @@
       "description": "Bulk-throughput TCP. Bidirectional is modeled as two flows on separate connections (remediation 2.2)."
     },
 
+    "GatewayPingFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow_id", "type"],
+      "properties": {
+        "flow_id": { "$ref": "#/$defs/FlowId" },
+        "type":    { "const": "gateway_ping" },
+        "ping_interval_ms": {
+          "type": "integer", "minimum": 100, "maximum": 60000,
+          "default": 1000,
+          "description": "Probe cadence in ms. Applies to all auto-discovered first-hop targets for this flow."
+        }
+      },
+      "description": "Logger-only: latency probes to auto-discovered first-hop gateways (rmnet + wlan) during the test window. Probe family: ICMP → UDP(33434) → TCP-SYN(443) → unreachable. Results written to pings.parquet with test_id set. No server endpoint — this flow has no server_port in its FlowBinding."
+    },
+
     "FlowId": {
       "type": "integer", "minimum": 1, "maximum": 65535,
       "description": "Plan-scoped flow identifier. Unique within a TestPlan. Carried verbatim in the wire packet header (u32 on the wire — narrower here for schema sanity). flow_bindings entries reference this."
@@ -112,10 +129,12 @@
     "FlowBinding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["flow_id", "server_port"],
+      "required": ["flow_id"],
       "properties": {
         "flow_id":     { "$ref": "#/$defs/FlowId" },
-        "server_port": { "$ref": "#/$defs/Port" }
+        "server_port": { "$ref": "#/$defs/Port",
+          "description": "Server-allocated port the UE connects/sends to. Absent for gateway_ping flows (no server endpoint)."
+        }
       },
       "description": "Server-allocated binding for one flow. Lives in RunTestPayload / header (not in the plan); referenced to the plan by flow_id. The single source for the binding shape."
     },

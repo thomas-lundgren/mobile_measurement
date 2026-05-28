@@ -169,6 +169,13 @@ async fn prepare(
             );
             (h, port)
         }
+        // gateway_ping has no server endpoint — the generator should never receive this.
+        Flow::GatewayPing { .. } => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "gateway_ping flows have no server generator".to_string(),
+            ))
+        }
     };
 
     let generator_id = format!("gen_{}", ulid::Ulid::new());

@@ -16,7 +16,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use mp_contracts::{
-    FlowBinding, GeneratorRef, GeneratorState, InternalGeneratorPrepare, InternalStartTest,
+    Flow, FlowBinding, GeneratorRef, GeneratorState, InternalGeneratorPrepare, InternalStartTest,
     InternalTestStatus, TestControlState, TestResult,
 };
 
@@ -135,6 +135,13 @@ async fn drive(st: AppState, req: InternalStartTest) {
 
     for flow in &req.plan.flows {
         let flow_id = flow.flow_id();
+
+        // gateway_ping is a device-local measurement — no server endpoint, no generator.
+        if matches!(flow, Flow::GatewayPing { .. }) {
+            bindings.push(FlowBinding { flow_id, server_port: None });
+            continue;
+        }
+
         let port = match st.0.ports.lock().unwrap().allocate() {
             Some(p) => p,
             None => return fail(&entry, &st, &allocated, "port range exhausted"),
@@ -153,7 +160,7 @@ async fn drive(st: AppState, req: InternalStartTest) {
             Ok(gid) => {
                 bindings.push(FlowBinding {
                     flow_id,
-                    server_port: port,
+                    server_port: Some(port),
                 });
                 generators.push(GeneratorRef {
                     flow_id,
@@ -273,7 +280,9 @@ async fn stop(
     {
         let mut ports = st.0.ports.lock().unwrap();
         for b in &bindings {
-            ports.release(b.server_port);
+            if let Some(p) = b.server_port {
+                ports.release(p);
+            }
         }
     }
     {

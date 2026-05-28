@@ -39,6 +39,15 @@ pub enum Flow {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         target_bytes: Option<u32>,
     },
+    /// Logger-only: ICMP/UDP/TCP-SYN probes to auto-discovered first-hop gateways.
+    /// No server endpoint — FlowBinding.server_port is None for this type.
+    #[serde(rename = "gateway_ping")]
+    GatewayPing {
+        flow_id: u32,
+        /// Probe cadence in ms. Default 1000.
+        #[serde(default = "default_ping_interval_ms", skip_serializing_if = "is_default_ping_interval")]
+        ping_interval_ms: u32,
+    },
 }
 
 impl Flow {
@@ -47,19 +56,22 @@ impl Flow {
         match *self {
             Flow::Probe { flow_id, .. }
             | Flow::RealtimeUdp { flow_id, .. }
-            | Flow::BulkTcp { flow_id, .. } => flow_id,
+            | Flow::BulkTcp { flow_id, .. }
+            | Flow::GatewayPing { flow_id, .. } => flow_id,
         }
     }
 }
 
-fn default_probe_packet_size() -> u32 {
-    22
-}
+fn default_probe_packet_size() -> u32 { 22 }
+fn default_ping_interval_ms() -> u32 { 1000 }
+fn is_default_ping_interval(v: &u32) -> bool { *v == 1000 }
 
-/// Server-allocated port for one flow, keyed by flow_id. Lives in
-/// RunTestPayload / header, not in the plan.
+/// Server-allocated binding for one flow, keyed by flow_id. Lives in
+/// RunTestPayload / header, not in the plan. `server_port` is absent for
+/// gateway_ping flows (no server endpoint).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct FlowBinding {
     pub flow_id: u32,
-    pub server_port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_port: Option<u16>,
 }

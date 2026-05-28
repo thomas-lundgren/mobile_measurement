@@ -56,7 +56,9 @@ pub struct UeFlow {
     /// "FromServer" | "ToServer" (absent for probe)
     #[serde(default)]
     pub direction: Option<String>,
-    pub server_port: u16,
+    /// None for gateway_ping flows (no server endpoint; first-hop probed locally).
+    #[serde(default)]
+    pub server_port: Option<u16>,
     #[serde(default)]
     pub rate_pps: Option<u32>,
     #[serde(default)]
@@ -178,41 +180,42 @@ fn spawn_flow(
     counters: Arc<Counters>,
     stop: Arc<AtomicBool>,
 ) -> std::io::Result<JoinHandle<()>> {
-    let server = format!("{}:{}", server_host, flow.server_port);
     let dir = flow.direction.as_deref();
 
     match (flow.flow_type.as_str(), dir) {
-        ("probe", _) => {
-            let socket = connected_udp(&server)?;
-            Ok(thread::spawn(move || {
-                probe_ue(socket, sink, flow, counters, stop)
-            }))
+        ("probe", _) | ("realtime_udp", _) | ("bulk_tcp", _) => {
+            let port = flow.server_port.ok_or_else(|| {
+                std::io::Error::other(format!("flow {} missing server_port", flow.flow_id))
+            })?;
+            let server = format!("{server_host}:{port}");
+            match (flow.flow_type.as_str(), dir) {
+                ("probe", _) => {
+                    let socket = connected_udp(&server)?;
+                    Ok(thread::spawn(move || probe_ue(socket, sink, flow, counters, stop)))
+                }
+                ("realtime_udp", Some("ToServer")) => {
+                    let socket = connected_udp(&server)?;
+                    Ok(thread::spawn(move || realtime_send(socket, sink, flow, counters, stop)))
+                }
+                ("realtime_udp", _) => {
+                    let socket = connected_udp(&server)?;
+                    Ok(thread::spawn(move || realtime_recv(socket, sink, flow, counters, stop)))
+                }
+                ("bulk_tcp", Some("ToServer")) => {
+                    let stream = TcpStream::connect(&server)?;
+                    Ok(thread::spawn(move || bulk_send(stream, sink, flow, counters, stop)))
+                }
+                _ => {
+                    let stream = TcpStream::connect(&server)?;
+                    Ok(thread::spawn(move || bulk_recv(stream, sink, flow, counters, stop)))
+                }
+            }
         }
-        ("realtime_udp", Some("ToServer")) => {
-            let socket = connected_udp(&server)?;
-            Ok(thread::spawn(move || {
-                realtime_send(socket, sink, flow, counters, stop)
-            }))
-        }
-        ("realtime_udp", _) => {
-            // FromServer (default): keepalive then receive downlink
-            let socket = connected_udp(&server)?;
-            Ok(thread::spawn(move || {
-                realtime_recv(socket, sink, flow, counters, stop)
-            }))
-        }
-        ("bulk_tcp", Some("ToServer")) => {
-            let stream = TcpStream::connect(&server)?;
-            Ok(thread::spawn(move || {
-                bulk_send(stream, sink, flow, counters, stop)
-            }))
-        }
-        ("bulk_tcp", _) => {
-            let stream = TcpStream::connect(&server)?;
-            Ok(thread::spawn(move || {
-                bulk_recv(stream, sink, flow, counters, stop)
-            }))
-        }
+        // gateway_ping: local probe to auto-discovered first-hop gateway.
+        // Full implementation is a later milestone; stub thread exits immediately.
+        ("gateway_ping", _) => Ok(thread::spawn(move || {
+            drop((sink, counters, stop));
+        })),
         (other, _) => Err(std::io::Error::other(format!("unknown flow type: {other}"))),
     }
 }
