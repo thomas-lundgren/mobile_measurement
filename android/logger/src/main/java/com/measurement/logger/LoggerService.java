@@ -53,7 +53,8 @@ public final class LoggerService extends Service {
         // A dataSync FGS can't always (re)start — e.g. right after the system
         // timed it out. Guard so we stop cleanly instead of crash-looping.
         try {
-            startForeground(1, notification("starting"));
+            startForeground(1, notification("starting"),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         } catch (Exception e) {
             setState("STOPPED: cannot start foreground (" + e.getClass().getSimpleName() + ")");
             stopSelf();
