@@ -103,6 +103,8 @@ mod tests {
                 TimestampSource::Utc,
                 TimestampSource::Gps,
             ],
+            supports_ping: true,
+            monitor: None,
         }
     }
 

@@ -424,14 +424,43 @@ components:
       properties:
         mobility:
           $ref: '#/components/schemas/MobilityCapability'
+        monitor:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/MonitorCapability'
+            description: Present only on MP Monitor enrollments; absent on MP Logger enrollments.
         qos:
           $ref: '#/components/schemas/QosCapability'
         radio:
           $ref: '#/components/schemas/RadioCapability'
+        supports_ping:
+          type: boolean
+          description: Device can probe first-hop gateways and operator-pinned targets (Logger and Monitor).
         timestamp_sources:
           type: array
           items:
             $ref: '#/components/schemas/TimestampSource'
+    CaptureConfig:
+      type: object
+      description: VPN-based passive traffic capture config (Monitor only).
+      required:
+      - enabled
+      properties:
+        apps:
+          type: array
+          items:
+            type: string
+          description: Package names to capture when scope = Allowlist.
+        enabled:
+          type: boolean
+        quota_mb_per_day:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        scope:
+          $ref: '#/components/schemas/VpnScope'
     ChallengeRequest:
       type: object
       required:
@@ -473,6 +502,7 @@ components:
       - REQUEST_STATUS
       - REQUEST_UPLOAD
       - REBOOT_LOGGER
+      - LIST_APPS
     CreateTestRequest:
       type: object
       description: |-
@@ -507,6 +537,11 @@ components:
           format: int64
         payload:
           type: object
+    DeviceRole:
+      type: string
+      enum:
+      - logger
+      - monitor
     DeviceStatus:
       type: object
       description: Body of `POST /devices/{id}/status` — the periodic device heartbeat.
@@ -523,12 +558,22 @@ components:
           type:
           - string
           - 'null'
+        link_state:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/LinkState'
+            description: 'Monitor only: current default-route gateway per interface.'
         logger_state:
           $ref: '#/components/schemas/LoggerState'
         logging_config_version:
           type: integer
           format: int32
           minimum: 0
+        monitor_state:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/MonitorState'
+            description: 'Monitor only: live capture/ping engine snapshot.'
         pending_uploads:
           type:
           - integer
@@ -575,6 +620,13 @@ components:
         enrolled_at_utc_ns:
           type: integer
           format: int64
+        hardware_id:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Stable per-handset ID shared by Logger and Monitor APKs on the same device.
+            Controller groups rows by this field to form the handset view.
         last_seen_utc_ns:
           type:
           - integer
@@ -593,6 +645,11 @@ components:
           - 'null'
         platform:
           type: string
+        role:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/DeviceRole'
+            description: Enrolled app role. Absent on pre-Monitor rows — Controller treats as Logger.
         status:
           type: string
     Direction:
@@ -626,6 +683,14 @@ components:
         device_pubkey:
           type: string
           description: SPKI DER, base64.
+        hardware_id:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Stable per-handset identifier shared between Logger and Monitor APKs on the
+            same device (Android SSAID when both apps share the same signing key).
+            Used by the server to group co-located enrollments under one handset view.
         hw_info:
           $ref: '#/components/schemas/HwInfo'
         platform:
@@ -636,6 +701,11 @@ components:
           minimum: 0
         pubkey_format:
           type: string
+        role:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/DeviceRole'
+            description: What this enrollment does. Absent = "logger" (backward-compatible default).
         sig_alg:
           type: string
         sig_format:
@@ -736,22 +806,74 @@ components:
             type: string
             enum:
             - bulk_tcp
+      - type: object
+        description: |-
+          Logger-only: ICMP/UDP/TCP-SYN probes to auto-discovered first-hop gateways.
+          No server endpoint — FlowBinding.server_port is None for this type.
+        required:
+        - flow_id
+        - type
+        properties:
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          ping_interval_ms:
+            type: integer
+            format: int32
+            description: Probe cadence in ms. Default 1000.
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - gateway_ping
+      - type: object
+        description: |-
+          DSCP transparency probe. UE cycles through dscp_values marking each outgoing
+          packet; server echoes with observed + intended DSCP filled into the payload.
+          See contracts/packets/dscp_probe.md.
+        required:
+        - flow_id
+        - dscp_values
+        - type
+        properties:
+          dscp_values:
+            type: array
+            items:
+              type: integer
+              format: int32
+              minimum: 0
+            description: DSCP values (0–63) to cycle through, one per packet (seq % len).
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          rate_pps:
+            type: integer
+            format: int32
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - dscp_probe
       description: A flow, discriminated by `type`. Port-less — `Flow` carries no server_port.
     FlowBinding:
       type: object
       description: |-
-        Server-allocated port for one flow, keyed by flow_id. Lives in
-        RunTestPayload / header, not in the plan.
+        Server-allocated binding for one flow, keyed by flow_id. Lives in
+        RunTestPayload / header, not in the plan. `server_port` is absent for
+        gateway_ping flows (no server endpoint).
       required:
       - flow_id
-      - server_port
       properties:
         flow_id:
           type: integer
           format: int32
           minimum: 0
         server_port:
-          type: integer
+          type:
+          - integer
+          - 'null'
           format: int32
           minimum: 0
     GateableEvent:
@@ -783,6 +905,31 @@ components:
           type:
           - string
           - 'null'
+    InterfaceLinkState:
+      type: object
+      description: Per-interface default-route gateway state.
+      required:
+      - default_gw
+      properties:
+        default_gw:
+          type: string
+        since_mono_ns:
+          type:
+          - integer
+          - 'null'
+          format: int64
+    LinkState:
+      type: object
+      description: Current link state per physical interface. Absent on Logger heartbeats.
+      properties:
+        rmnet:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/InterfaceLinkState'
+        wlan:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/InterfaceLinkState'
     LoggerState:
       type: string
       enum:
@@ -808,6 +955,11 @@ components:
       - gps
       - clock_calibration_interval_sec
       properties:
+        capture:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/CaptureConfig'
+            description: 'Monitor only: VPN-based passive capture. Absent/null = disabled.'
         clock_calibration_interval_sec:
           type: integer
           format: int32
@@ -821,6 +973,11 @@ components:
           type: boolean
         mobility:
           $ref: '#/components/schemas/MobilityLogging'
+        ping:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/PingConfig'
+            description: 'Monitor only: background latency probing. Absent/null = disabled.'
         qos:
           $ref: '#/components/schemas/QosLogging'
         radio:
@@ -906,12 +1063,113 @@ components:
           type: boolean
         rrc_state:
           type: boolean
+    MonitorCapability:
+      type: object
+      properties:
+        can_list_apps:
+          type: boolean
+        supports_vpn_capture:
+          type: boolean
+    MonitorState:
+      type: object
+      description: Live snapshot of the Monitor's capture and ping engines. Absent on Logger heartbeats.
+      required:
+      - active
+      properties:
+        active:
+          type: boolean
+        apps_inventory_version:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Current installed-app inventory version; server requests LIST_APPS when stale.
+          minimum: 0
+        buckets_pending:
+          type: integer
+          format: int32
+          minimum: 0
+        bytes_observed:
+          type: integer
+          format: int64
+          minimum: 0
+        bytes_today:
+          type: integer
+          format: int64
+          minimum: 0
+        pings_lost:
+          type: integer
+          format: int32
+          minimum: 0
+        pings_sent:
+          type: integer
+          format: int32
+          minimum: 0
+        quota_remaining_mb:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        scope:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/VpnScope'
+        top_peers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopPeer'
     OperatorRole:
       type: string
       enum:
       - viewer
       - operator
       - admin
+    PingConfig:
+      type: object
+      description: Background latency-probing config (Monitor only).
+      required:
+      - enabled
+      properties:
+        auto_target_count:
+          type: integer
+          format: int32
+          minimum: 0
+        default_interval_ms:
+          type: integer
+          format: int32
+          description: Default probe cadence in ms.
+          minimum: 0
+        enabled:
+          type: boolean
+        follow_apps:
+          type: array
+          items:
+            type: string
+          description: Package names whose observed peers feed the auto ping-target pool.
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/PingTarget'
+          description: Operator-pinned targets. First-hop and auto-derived targets are added device-side.
+    PingTarget:
+      type: object
+      description: A single operator-pinned latency target.
+      required:
+      - label
+      - host
+      properties:
+        host:
+          type: string
+          description: IPv4, IPv6, or hostname. Resolved once on config apply.
+        interval_ms:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        label:
+          type: string
     Platform:
       type: string
       enum:
@@ -1191,6 +1449,24 @@ components:
       - mono
       - utc
       - gps
+    TopPeer:
+      type: object
+      description: Compact busy-peer row for the Controller's live view.
+      required:
+      - peer_ip
+      - bytes_60s
+      properties:
+        app_label:
+          type:
+          - string
+          - 'null'
+        bytes_60s:
+          type: integer
+          format: int64
+          description: Bytes (up+dn) observed in the last 60-second window.
+          minimum: 0
+        peer_ip:
+          type: string
     UploadInitResponse:
       type: object
       description: 'Response to phase 1: the resume mechanism (file-granular).'
@@ -1252,3 +1528,8 @@ components:
           minimum: 0
         session_token:
           type: string
+    VpnScope:
+      type: string
+      enum:
+      - all
+      - allowlist
