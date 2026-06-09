@@ -40,6 +40,70 @@ The same Rust **core** (`fieldtest-core`) is linked natively into the server and
 cross-compiled (`cargo-ndk`) into the Logger, so both nodes share one traffic
 engine, one Parquet writer, and one wire codec — no second implementation.
 
+## What you can measure
+
+### Traffic flows (defined per test, mixed freely in one run)
+
+| Flow            | Direction(s)              | What it measures                                                 |
+|-----------------|---------------------------|------------------------------------------------------------------|
+| `probe`         | bidirectional echo        | RTT, jitter, packet loss; cheap heartbeat                        |
+| `realtime_udp`  | `FromServer` / `ToServer` | one-way delay (OWD), inter-arrival jitter, loss at fixed PPS     |
+| `bulk_tcp`      | `FromServer` / `ToServer` | sustained throughput (UL or DL), with per-chunk arrival logging  |
+| `gateway_ping`  | local (UE → first hop)    | first-hop latency to the auto-discovered gateway (rmnet / wlan)  |
+| `dscp_probe`    | bidirectional, marked     | DSCP transparency UL and DL independently (which bits survive)   |
+
+Every flow is logged on **both** endpoints into per-packet Parquet, with
+embedded sender timestamps where applicable so OWD/jitter can be reconstructed
+offline.
+
+### Metrics derived (in `analysis/`)
+
+- **RTT** and inter-arrival jitter from `probe`
+- **One-way delay** with explicit **clock-uncertainty bounds** from
+  `realtime_udp`
+- **Packet loss** and sequence-gap analysis on any UDP flow
+- **Throughput** (bytes/sec, p50/p95) from `bulk_tcp`
+- **DSCP transparency matrix** — which DSCP values the operator preserves vs.
+  remarks vs. strips, separately for UL and DL
+- **Handover events**, **coverage gaps**, **band changes** — derived
+  post-hoc from `radio.parquet` (PCI/NCI/band transitions), not logged live
+
+### Contextual signals (recorded by the Logger, once per test)
+
+- **GPS** position track (`gps.parquet`)
+- **Radio**: serving cell (PCI, NCI, TAC, NRARFCN, RSRP, RSRQ, SINR),
+  neighbor cells, LTE fallback (`radio.parquet`)
+- **Clock-sync samples** (`clock.parquet`) — mono ↔ utc ↔ gps offsets for
+  OWD uncertainty estimation
+- **Capability-tolerant**: anything the Pixel 9 Pro doesn't expose
+  (DRX, 5QI/QFI, MCS/CQI/BLER/HARQ, RRC-state) is silently omitted; readers
+  treat all fields as optional
+
+### Operating modes
+
+- **Logger** — test-driven: the device polls for `RUN_TEST`, drives one or
+  more flows, seals the resulting log dir, uploads when convenient.
+- **Monitor** — always-on background probing (server-configured pings to
+  pinned targets) that runs in parallel with tests; suitable for continuous
+  network-quality coverage rather than scheduled experiments.
+
+### Platform-level capabilities
+
+- **Hardware-backed device identity** — P-256 enrollment + challenge/response
+  with operator-issued one-time enrollment tokens
+- **Operator console (Android Controller, Kotlin)** — fleet view, test
+  start/stop, live state; REST client generated from OpenAPI
+- **Server-configured logging** — effective config =
+  *test-plan profile ∩ device capabilities ∩ overrides*, versioned, pushed
+  via `SET_LOGGING_CONFIG`
+- **Logging-first** — local Parquet writes never block on the network;
+  uploads are deferred and resumable (per-file SHA-256 manifests)
+- **Forward-compatible logs** — additive-only schemas; readers tolerate
+  unknown fields and null cells
+- **Cross-language contract gates** — single `contracts/` directory with
+  OpenAPI / JSON Schema / Parquet schemas / golden binary vectors /
+  SQL schema, all parity-tested in CI
+
 ## Cross-cutting invariants
 
 These span components and are honoured everywhere:
