@@ -168,6 +168,8 @@ pub fn spawn_realtime_udp(
                             sender: None,
                             expected_interval_ns: Some(period_ns),
                             actual_interval_ns: None,
+                            dscp_sent: None,
+                            dscp_recv: None,
                         });
                     }
                     seq += 1;
@@ -219,6 +221,8 @@ pub fn spawn_realtime_udp(
                                 sender,
                                 expected_interval_ns: Some(period_ns),
                                 actual_interval_ns: actual,
+                                dscp_sent: None,
+                                dscp_recv: None,
                             });
                         }
                         Err(ref e) if would_block(e) => continue,
@@ -338,6 +342,8 @@ fn bulk_row(flow_id: u32, seq: u64, direction: Direction, ts: Timestamp, size: u
         sender: None,
         expected_interval_ns: None,
         actual_interval_ns: None,
+        dscp_sent: None,
+        dscp_recv: None,
     }
 }
 

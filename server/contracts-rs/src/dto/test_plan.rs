@@ -48,6 +48,18 @@ pub enum Flow {
         #[serde(default = "default_ping_interval_ms", skip_serializing_if = "is_default_ping_interval")]
         ping_interval_ms: u32,
     },
+
+    /// DSCP transparency probe. UE cycles through dscp_values marking each outgoing
+    /// packet; server echoes with observed + intended DSCP filled into the payload.
+    /// See contracts/packets/dscp_probe.md.
+    #[serde(rename = "dscp_probe")]
+    DscpProbe {
+        flow_id: u32,
+        /// DSCP values (0–63) to cycle through, one per packet (seq % len).
+        dscp_values: Vec<u8>,
+        #[serde(default = "default_dscp_rate_pps", skip_serializing_if = "is_default_dscp_rate")]
+        rate_pps: u32,
+    },
 }
 
 impl Flow {
@@ -57,7 +69,8 @@ impl Flow {
             Flow::Probe { flow_id, .. }
             | Flow::RealtimeUdp { flow_id, .. }
             | Flow::BulkTcp { flow_id, .. }
-            | Flow::GatewayPing { flow_id, .. } => flow_id,
+            | Flow::GatewayPing { flow_id, .. }
+            | Flow::DscpProbe { flow_id, .. } => flow_id,
         }
     }
 }
@@ -65,6 +78,8 @@ impl Flow {
 fn default_probe_packet_size() -> u32 { 22 }
 fn default_ping_interval_ms() -> u32 { 1000 }
 fn is_default_ping_interval(v: &u32) -> bool { *v == 1000 }
+fn default_dscp_rate_pps() -> u32 { 10 }
+fn is_default_dscp_rate(v: &u32) -> bool { *v == 10 }
 
 /// Server-allocated binding for one flow, keyed by flow_id. Lives in
 /// RunTestPayload / header, not in the plan. `server_port` is absent for

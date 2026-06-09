@@ -176,6 +176,24 @@ async fn prepare(
                 "gateway_ping flows have no server generator".to_string(),
             ))
         }
+        // dscp_probe: full echo implementation (IP_RECVTOS + DSCP-marked replies) is a
+        // later milestone. Stub: bind a UDP port, echo verbatim without reading TOS.
+        Flow::DscpProbe { .. } => {
+            let socket = bind_udp(req.server_port)?;
+            let port = socket.local_addr().map_err(internal)?.port();
+            (
+                flow::spawn_probe_echo(
+                    socket,
+                    sink,
+                    writer,
+                    flow_id,
+                    state.clone(),
+                    counters.clone(),
+                    stop.clone(),
+                ),
+                port,
+            )
+        }
     };
 
     let generator_id = format!("gen_{}", ulid::Ulid::new());

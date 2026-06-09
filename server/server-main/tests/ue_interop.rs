@@ -137,6 +137,15 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 packet_size_bytes: None,
                 target_bytes: None,
             },
+            Flow::DscpProbe { flow_id, rate_pps, .. } => UeFlow {
+                flow_id: *flow_id,
+                flow_type: "dscp_probe".into(),
+                direction: None,
+                server_port: port_of(*flow_id),
+                rate_pps: Some(*rate_pps),
+                packet_size_bytes: None,
+                target_bytes: None,
+            },
         })
         .collect();
     UeTestConfig {

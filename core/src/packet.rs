@@ -8,8 +8,12 @@
 /// Packet type discriminators.
 pub const PKT_PROBE: u8 = 0x01;
 pub const PKT_REALTIME: u8 = 0x02;
+pub const PKT_DSCP_PROBE: u8 = 0x03;
 /// Initial per-type format version.
 pub const VER_1: u8 = 0x01;
+
+/// Sentinel: field not yet filled by the remote (set in the first UE send).
+pub const DSCP_UNKNOWN: u8 = 0xFF;
 
 /// Decode failures (typed — never panic on bad input).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,11 +132,68 @@ impl RealtimePacket {
     }
 }
 
+/// DSCP transparency probe (`pkt_t = 0x03`, `ver = 0x01`). 24-byte core, 26 on the wire.
+///
+/// See `contracts/packets/dscp_probe.md` for the measurement protocol.
+/// Fields use `DSCP_UNKNOWN` (0xFF) when not yet filled by the remote.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DscpProbePacket {
+    pub flow_id: u32,
+    pub sequence_number: u64,
+    pub send_mono_ns: u64,
+    /// DSCP value UE set on the outgoing socket (0–63).
+    pub dscp_intended_ul: u8,
+    /// DSCP value actually received by server from the IP header. `DSCP_UNKNOWN` in first send.
+    pub dscp_actual_ul: u8,
+    /// DSCP value server set on the echo socket. `DSCP_UNKNOWN` in first send.
+    pub dscp_intended_dl: u8,
+}
+
+impl DscpProbePacket {
+    pub const CORE_LEN: usize = 24;
+    pub const WIRE_LEN: usize = 2 + Self::CORE_LEN; // 26
+
+    pub fn to_bytes(&self) -> [u8; Self::WIRE_LEN] {
+        let mut b = [0u8; Self::WIRE_LEN];
+        b[0] = PKT_DSCP_PROBE;
+        b[1] = VER_1;
+        b[2..6].copy_from_slice(&self.flow_id.to_be_bytes());
+        b[6..14].copy_from_slice(&self.sequence_number.to_be_bytes());
+        b[14..22].copy_from_slice(&self.send_mono_ns.to_be_bytes());
+        b[22] = self.dscp_intended_ul;
+        b[23] = self.dscp_actual_ul;
+        b[24] = self.dscp_intended_dl;
+        b[25] = 0x00; // _pad
+        b
+    }
+
+    pub fn decode(buf: &[u8]) -> Result<Self, PacketError> {
+        if buf.len() < 2 {
+            return Err(PacketError::ShortBuffer);
+        }
+        if buf[0] != PKT_DSCP_PROBE || buf[1] != VER_1 {
+            return Err(PacketError::UnknownType(buf[0], buf[1]));
+        }
+        if buf.len() < Self::WIRE_LEN {
+            return Err(PacketError::ShortBuffer);
+        }
+        Ok(Self {
+            flow_id: u32::from_be_bytes(buf[2..6].try_into().unwrap()),
+            sequence_number: u64::from_be_bytes(buf[6..14].try_into().unwrap()),
+            send_mono_ns: u64::from_be_bytes(buf[14..22].try_into().unwrap()),
+            dscp_intended_ul: buf[22],
+            dscp_actual_ul: buf[23],
+            dscp_intended_dl: buf[24],
+        })
+    }
+}
+
 /// Either packet type, dispatched on the header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Packet {
     Probe(ProbePacket),
     Realtime(RealtimePacket),
+    DscpProbe(DscpProbePacket),
 }
 
 impl Packet {
@@ -143,6 +204,7 @@ impl Packet {
         match (buf[0], buf[1]) {
             (PKT_PROBE, VER_1) => Ok(Packet::Probe(ProbePacket::decode(buf)?)),
             (PKT_REALTIME, VER_1) => Ok(Packet::Realtime(RealtimePacket::decode(buf)?)),
+            (PKT_DSCP_PROBE, VER_1) => Ok(Packet::DscpProbe(DscpProbePacket::decode(buf)?)),
             (t, v) => Err(PacketError::UnknownType(t, v)),
         }
     }
@@ -220,6 +282,53 @@ mod tests {
             assert_eq!(pkt.to_bytes().to_vec(), expected, "encode `{name}`");
             assert_eq!(
                 ProbePacket::decode(&expected).unwrap(),
+                pkt,
+                "decode `{name}`"
+            );
+        }
+    }
+
+    #[test]
+    fn dscp_probe_roundtrip() {
+        let pkt = DscpProbePacket {
+            flow_id: 1,
+            sequence_number: 0,
+            send_mono_ns: 1_000_000_000,
+            dscp_intended_ul: 46,
+            dscp_actual_ul: DSCP_UNKNOWN,
+            dscp_intended_dl: DSCP_UNKNOWN,
+        };
+        assert_eq!(DscpProbePacket::decode(&pkt.to_bytes()).unwrap(), pkt);
+        // Echo: server fills in observed values
+        let echo = DscpProbePacket {
+            dscp_actual_ul: 0,
+            dscp_intended_dl: 46,
+            ..pkt
+        };
+        assert_eq!(DscpProbePacket::decode(&echo.to_bytes()).unwrap(), echo);
+    }
+
+    #[test]
+    fn golden_dscp_probe_v1() {
+        let doc: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(vectors_dir().join("dscp_probe_v1.json")).unwrap(),
+        )
+        .unwrap();
+        for case in doc["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let d = &case["decoded"];
+            let pkt = DscpProbePacket {
+                flow_id: d["flow_id"].as_u64().unwrap() as u32,
+                sequence_number: d["sequence_number"].as_u64().unwrap(),
+                send_mono_ns: d["send_mono_ns"].as_u64().unwrap(),
+                dscp_intended_ul: d["dscp_intended_ul"].as_u64().unwrap() as u8,
+                dscp_actual_ul: d["dscp_actual_ul"].as_u64().unwrap() as u8,
+                dscp_intended_dl: d["dscp_intended_dl"].as_u64().unwrap() as u8,
+            };
+            let expected = hex_to_bytes(case["hex"].as_str().unwrap());
+            assert_eq!(pkt.to_bytes().to_vec(), expected, "encode `{name}`");
+            assert_eq!(
+                DscpProbePacket::decode(&expected).unwrap(),
                 pkt,
                 "decode `{name}`"
             );

@@ -216,6 +216,11 @@ fn spawn_flow(
         ("gateway_ping", _) => Ok(thread::spawn(move || {
             drop((sink, counters, stop));
         })),
+        // dscp_probe: DSCP transparency measurement via IP_RECVTOS / NDK recvmsg.
+        // Full implementation is a later milestone; stub exits immediately.
+        ("dscp_probe", _) => Ok(thread::spawn(move || {
+            drop((sink, counters, stop));
+        })),
         (other, _) => Err(std::io::Error::other(format!("unknown flow type: {other}"))),
     }
 }
@@ -350,6 +355,8 @@ fn realtime_send(
                 sender: None,
                 expected_interval_ns: Some(period_ns),
                 actual_interval_ns: None,
+                dscp_sent: None,
+                dscp_recv: None,
             });
         }
         seq += 1;
@@ -413,6 +420,8 @@ fn realtime_recv(
                     sender,
                     expected_interval_ns: Some(period_ns),
                     actual_interval_ns: actual,
+                    dscp_sent: None,
+                    dscp_recv: None,
                 });
             }
             Err(ref e) if would_block(e) => {}
@@ -501,5 +510,7 @@ fn bulk_row(flow_id: u32, seq: u64, direction: Direction, ts: Timestamp, size: u
         sender: None,
         expected_interval_ns: None,
         actual_interval_ns: None,
+        dscp_sent: None,
+        dscp_recv: None,
     }
 }

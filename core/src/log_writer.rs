@@ -8,7 +8,7 @@
 //! thread (`spawn_packet_writer`), dropping and counting on overflow rather
 //! than blocking (see `contracts/internal/logger_sink.md`).
 
-use arrow::array::{RecordBatch, StringArray, UInt32Array, UInt64Array};
+use arrow::array::{RecordBatch, StringArray, UInt32Array, UInt64Array, UInt8Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
@@ -77,6 +77,10 @@ pub struct PacketRow {
     pub sender: Option<Timestamp>,
     pub expected_interval_ns: Option<u64>,
     pub actual_interval_ns: Option<u64>,
+    /// DSCP value set on outgoing packet (dscp_probe SENT rows; null for all other types).
+    pub dscp_sent: Option<u8>,
+    /// DSCP value read from received packet IP header (dscp_probe RECEIVED rows; null otherwise).
+    pub dscp_recv: Option<u8>,
 }
 
 impl PacketRow {
@@ -100,6 +104,8 @@ impl PacketRow {
             sender: None,
             expected_interval_ns: None,
             actual_interval_ns: None,
+            dscp_sent: None,
+            dscp_recv: None,
         }
     }
 }
@@ -125,6 +131,8 @@ fn packets_schema() -> Schema {
         Field::new("sender_utc_ns", DataType::UInt64, true),
         Field::new("expected_interval_ns", DataType::UInt64, true),
         Field::new("actual_interval_ns", DataType::UInt64, true),
+        Field::new("dscp_sent", DataType::UInt8, true),
+        Field::new("dscp_recv", DataType::UInt8, true),
     ])
 }
 
@@ -283,6 +291,12 @@ impl SegmentedPacketWriter {
                         .iter()
                         .map(|r| r.actual_interval_ns)
                         .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt8Array::from(
+                    self.rows.iter().map(|r| r.dscp_sent).collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt8Array::from(
+                    self.rows.iter().map(|r| r.dscp_recv).collect::<Vec<_>>(),
                 )) as _,
             ],
         )
@@ -541,7 +555,7 @@ mod tests {
             .build()
             .unwrap();
         let batch = reader.next().unwrap().unwrap();
-        assert_eq!(batch.num_columns(), 17, "join + data columns");
+        assert_eq!(batch.num_columns(), 19, "join + data columns");
         let names: Vec<String> = batch
             .schema()
             .fields()

@@ -32,3 +32,8 @@ columns:
   # Interval analysis (realtime flows).
   - { name: expected_interval_ns, type: uint64, nullable: true, doc: "Nominal flow spacing = 1e9 / rate_pps." }
   - { name: actual_interval_ns,   type: uint64, nullable: true, doc: "recv_mono_ns[i] - recv_mono_ns[i-1] over CONSECUTIVE RECEIVED packets of this flow, gaps preserved (remediation 4.2). Null for the first received packet and for SENT rows." }
+
+  # DSCP transparency (dscp_probe flow only — null for all other flow types).
+  # See contracts/packets/dscp_probe.md for the measurement protocol.
+  - { name: dscp_sent, type: uint8, nullable: true, doc: "DSCP value (0–63) this node intended to set on the outgoing IP packet. Present for dscp_probe SENT rows; null otherwise." }
+  - { name: dscp_recv, type: uint8, nullable: true, doc: "DSCP value (0–63) actually observed in the received packet's IP header (via IP_RECVTOS / IPV6_RECVTCLASS). Present for dscp_probe RECEIVED rows; null otherwise." }

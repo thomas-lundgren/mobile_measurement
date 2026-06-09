@@ -108,6 +108,7 @@ wire_enum!(
         RealtimeUdp => "realtime_udp",
         BulkTcp     => "bulk_tcp",
         GatewayPing => "gateway_ping",
+        DscpProbe   => "dscp_probe",
     }
 );
 

@@ -72,6 +72,7 @@ flow_types:
   - realtime_udp   # fixed-rate UDP, one-way delay + jitter
   - bulk_tcp       # bulk throughput, separate UL/DL connections for Bidirectional
   - gateway_ping   # Logger only: ICMP/UDP/TCP-SYN latency probe to first-hop gateways during a test
+  - dscp_probe     # DSCP transparency: UE cycles through dscp_values; server echoes with observed + intended DSCP filled in
 
 # ---------------------------------------------------------------------------
 # Flow direction — who sends payload. PascalCase on the wire (spec sec 8.3).

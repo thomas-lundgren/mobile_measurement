@@ -1,0 +1,59 @@
+{
+  "packet_type": "DscpProbe",
+  "version": 1,
+  "description": "Golden vectors for DscpProbePacket (pkt_t=0x03, ver=0x01). 26 bytes on wire. See contracts/packets/dscp_probe.md for field definitions. Layout: pkt_t(1) + ver(1) + flow_id(4) + seq(8) + send_mono_ns(8) + dscp_intended_ul(1) + dscp_actual_ul(1) + dscp_intended_dl(1) + _pad(1).",
+  "cases": [
+    {
+      "name": "first_send_ef",
+      "notes": "UE first send with DSCP EF (46=0x2E). dscp_actual_ul and dscp_intended_dl are 0xFF (server has not yet echoed).",
+      "decoded": {
+        "flow_id": 1,
+        "sequence_number": 0,
+        "send_mono_ns": 1000000000,
+        "dscp_intended_ul": 46,
+        "dscp_actual_ul": 255,
+        "dscp_intended_dl": 255
+      },
+      "hex": "0301000000010000000000000000000000003b9aca002effff00"
+    },
+    {
+      "name": "echo_ef_stripped",
+      "notes": "Server echo: UE intended DSCP EF (46) but server received DSCP 0 (operator stripped). Server marks echo with EF (dscp_intended_dl=46).",
+      "decoded": {
+        "flow_id": 1,
+        "sequence_number": 0,
+        "send_mono_ns": 1000000000,
+        "dscp_intended_ul": 46,
+        "dscp_actual_ul": 0,
+        "dscp_intended_dl": 46
+      },
+      "hex": "0301000000010000000000000000000000003b9aca002e002e00"
+    },
+    {
+      "name": "echo_ef_preserved",
+      "notes": "Server echo: UE sent DSCP EF (46) and server also received EF — operator is transparent in both directions.",
+      "decoded": {
+        "flow_id": 1,
+        "sequence_number": 0,
+        "send_mono_ns": 1000000000,
+        "dscp_intended_ul": 46,
+        "dscp_actual_ul": 46,
+        "dscp_intended_dl": 46
+      },
+      "hex": "0301000000010000000000000000000000003b9aca002e2e2e00"
+    },
+    {
+      "name": "all_zeros",
+      "notes": "All-zero case: CS0 (best-effort), baseline reference.",
+      "decoded": {
+        "flow_id": 0,
+        "sequence_number": 0,
+        "send_mono_ns": 0,
+        "dscp_intended_ul": 0,
+        "dscp_actual_ul": 0,
+        "dscp_intended_dl": 0
+      },
+      "hex": "0301000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

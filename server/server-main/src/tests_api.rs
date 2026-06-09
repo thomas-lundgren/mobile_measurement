@@ -397,6 +397,7 @@ fn flow_descr(flow: Option<&mp_contracts::Flow>) -> (&'static str, Option<&'stat
         Some(Flow::RealtimeUdp { direction, .. }) => ("realtime_udp", Some(dir_wire(*direction))),
         Some(Flow::BulkTcp { direction, .. }) => ("bulk_tcp", Some(dir_wire(*direction))),
         Some(Flow::GatewayPing { .. }) => ("gateway_ping", None),
+        Some(Flow::DscpProbe { .. }) => ("dscp_probe", None),
         None => ("probe", None),
     }
 }

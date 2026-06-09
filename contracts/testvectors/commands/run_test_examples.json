@@ -150,6 +150,37 @@
           }
         ]
       }
+    },
+    {
+      "name": "dscp_transparency_sweep",
+      "notes": "DSCP transparency test: probe (baseline RTT) + dscp_probe (DSCP sweep). dscp_probe cycles CS0/CS1/CS2/AF41/EF to characterise the operator's full DSCP policy in one test run.",
+      "payload": {
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X9",
+        "session_id": "ses_2026_05_24_001",
+        "server_host": "10.0.0.1",
+        "test_plan": {
+          "name": "dscp_sweep_v1",
+          "version": 1,
+          "duration_sec": 60,
+          "flows": [
+            {
+              "flow_id": 1,
+              "type": "probe",
+              "rate_pps": 10
+            },
+            {
+              "flow_id": 2,
+              "type": "dscp_probe",
+              "dscp_values": [0, 8, 16, 34, 46],
+              "rate_pps": 10
+            }
+          ]
+        },
+        "flow_bindings": [
+          { "flow_id": 1, "server_port": 41000 },
+          { "flow_id": 2, "server_port": 41001 }
+        ]
+      }
     }
   ]
 }
