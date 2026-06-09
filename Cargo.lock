@@ -1621,6 +1621,7 @@ name = "mp-server-main"
 version = "0.1.0"
 dependencies = [
  "argon2",
+ "arrow",
  "axum",
  "base64",
  "fieldtest-core",
@@ -1629,6 +1630,7 @@ dependencies = [
  "mp-data-generator",
  "mp-test-control",
  "p256",
+ "parquet",
  "rand 0.8.6",
  "reqwest",
  "serde",

@@ -166,6 +166,62 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
     }
 }
 
+/// Read every `packets*.parquet` under `dir` and return the distinct
+/// `dscp_sent` and `dscp_recv` values seen for `flow_id`. Used to prove the
+/// dscp_probe round-trip wrote the columns end-to-end.
+fn read_dscp_values(
+    dir: &std::path::Path,
+    flow_id: u32,
+) -> (std::collections::BTreeSet<u8>, std::collections::BTreeSet<u8>) {
+    use arrow::array::{Array, UInt8Array, UInt32Array};
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    let mut sent = std::collections::BTreeSet::new();
+    let mut recv = std::collections::BTreeSet::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.extension().map(|x| x != "parquet").unwrap_or(true) {
+            continue;
+        }
+        let file = std::fs::File::open(&p).unwrap();
+        let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+            .unwrap()
+            .build()
+            .unwrap();
+        for batch in reader.flatten() {
+            let fids = batch
+                .column_by_name("flow_id")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .unwrap();
+            let s = batch
+                .column_by_name("dscp_sent")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt8Array>()
+                .unwrap();
+            let r = batch
+                .column_by_name("dscp_recv")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt8Array>()
+                .unwrap();
+            for i in 0..batch.num_rows() {
+                if fids.value(i) != flow_id {
+                    continue;
+                }
+                if !s.is_null(i) {
+                    sent.insert(s.value(i));
+                }
+                if !r.is_null(i) {
+                    recv.insert(r.value(i));
+                }
+            }
+        }
+    }
+    (sent, recv)
+}
+
 fn parquet_count(dir: &std::path::Path) -> usize {
     std::fs::read_dir(dir)
         .map(|rd| {
@@ -276,7 +332,8 @@ async fn ue_engine_interops_with_live_server_all_flows() {
             { "flow_id": 2, "type": "realtime_udp", "direction": "FromServer", "rate_pps": 100, "packet_size_bytes": 120 },
             { "flow_id": 3, "type": "realtime_udp", "direction": "ToServer", "rate_pps": 100, "packet_size_bytes": 120 },
             { "flow_id": 4, "type": "bulk_tcp", "direction": "ToServer" },
-            { "flow_id": 5, "type": "bulk_tcp", "direction": "FromServer" }
+            { "flow_id": 5, "type": "bulk_tcp", "direction": "FromServer" },
+            { "flow_id": 6, "type": "dscp_probe", "dscp_values": [0, 46], "rate_pps": 50 }
         ]}
     })).await;
     assert_eq!(s, StatusCode::CREATED, "create test: {ts}");
@@ -341,11 +398,35 @@ async fn ue_engine_interops_with_live_server_all_flows() {
         "bulk down {}",
         by_id(5).bytes_received
     );
+    // dscp_probe: UE sent marked packets, server echoed them back
+    assert!(
+        by_id(6).packets_sent >= 10,
+        "dscp sent {}",
+        by_id(6).packets_sent
+    );
+    assert!(
+        by_id(6).packets_received >= 5,
+        "dscp echoes {}",
+        by_id(6).packets_received
+    );
 
     // mobile core wrote its packets.parquet (segmented)
     assert!(
         parquet_count(mobile_logs.path()) >= 1,
         "mobile packets.parquet written"
+    );
+
+    // dscp_probe semantic check: the mobile parquet must carry the dscp_sent /
+    // dscp_recv columns populated for flow 6, with at least one row hitting the
+    // EF (46) DSCP we cycled through (round-trip + columns wired end-to-end).
+    let (sent_uniq, recv_uniq) = read_dscp_values(mobile_logs.path(), 6);
+    assert!(
+        sent_uniq.contains(&46),
+        "expected dscp_sent=46 (EF) in some row, got {sent_uniq:?}",
+    );
+    assert!(
+        !recv_uniq.is_empty(),
+        "expected at least one row with dscp_recv populated"
     );
 
     // server side logged too, under its own session/test/server tree

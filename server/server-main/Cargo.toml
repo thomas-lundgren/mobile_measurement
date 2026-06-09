@@ -38,3 +38,5 @@ mp-data-generator = { path = "../data-generator" }
 mp-test-control = { path = "../test-control" }
 fieldtest-core = { path = "../../core" }
 serde_yaml = { workspace = true }
+parquet = "54"
+arrow = "54"

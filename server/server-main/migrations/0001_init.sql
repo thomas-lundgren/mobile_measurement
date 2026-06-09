@@ -143,9 +143,9 @@ CREATE INDEX idx_tests_session ON tests(session_id);
 CREATE TABLE flows (
   test_id           TEXT NOT NULL REFERENCES tests(test_id),
   flow_id           INTEGER NOT NULL,
-  type              TEXT NOT NULL CHECK (type IN ('probe','realtime_udp','bulk_tcp')),
-  direction         TEXT CHECK (direction IN ('FromServer','ToServer')),  -- NULL for probe
-  server_port       INTEGER NOT NULL,            -- allocated binding
+  type              TEXT NOT NULL CHECK (type IN ('probe','realtime_udp','bulk_tcp','gateway_ping','dscp_probe')),
+  direction         TEXT CHECK (direction IN ('FromServer','ToServer')),  -- NULL for probe/gateway_ping/dscp_probe
+  server_port       INTEGER,                     -- allocated binding (NULL for gateway_ping)
   rate_pps          INTEGER,
   packet_size_bytes INTEGER,
   target_bytes      INTEGER,
