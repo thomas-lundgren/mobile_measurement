@@ -100,6 +100,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 rate_pps: Some(*rate_pps),
                 packet_size_bytes: Some(*packet_size_bytes),
                 target_bytes: None,
+                dscp_values: None,
             },
             Flow::RealtimeUdp {
                 flow_id,
@@ -114,6 +115,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 rate_pps: Some(*rate_pps),
                 packet_size_bytes: Some(*packet_size_bytes),
                 target_bytes: None,
+                dscp_values: None,
             },
             Flow::BulkTcp {
                 flow_id,
@@ -127,6 +129,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 rate_pps: None,
                 packet_size_bytes: None,
                 target_bytes: target_bytes.map(|t| t as u64),
+                dscp_values: None,
             },
             Flow::GatewayPing { flow_id, .. } => UeFlow {
                 flow_id: *flow_id,
@@ -136,8 +139,9 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 rate_pps: None,
                 packet_size_bytes: None,
                 target_bytes: None,
+                dscp_values: None,
             },
-            Flow::DscpProbe { flow_id, rate_pps, .. } => UeFlow {
+            Flow::DscpProbe { flow_id, rate_pps, dscp_values, .. } => UeFlow {
                 flow_id: *flow_id,
                 flow_type: "dscp_probe".into(),
                 direction: None,
@@ -145,6 +149,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 rate_pps: Some(*rate_pps),
                 packet_size_bytes: None,
                 target_bytes: None,
+                dscp_values: Some(dscp_values.clone()),
             },
         })
         .collect();

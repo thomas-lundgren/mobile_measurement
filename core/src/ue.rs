@@ -9,7 +9,9 @@
 //! `RunTestPayload` (plan flows + flow_bindings + server_host) into this shape.
 
 use std::io::{Read, Write};
+use std::mem;
 use std::net::{TcpStream, UdpSocket};
+use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -21,7 +23,7 @@ use crate::log_writer::{
     packet_channel, spawn_packet_writer_multi, Direction, LogContext, LogSink, PacketRow, Protocol,
     WriterHandle,
 };
-use crate::packet::{ProbePacket, RealtimePacket};
+use crate::packet::{DscpProbePacket, ProbePacket, RealtimePacket, DSCP_UNKNOWN};
 use crate::timestamp::Timestamp;
 
 const RING_CAPACITY: usize = 8192;
@@ -65,6 +67,9 @@ pub struct UeFlow {
     pub packet_size_bytes: Option<u32>,
     #[serde(default)]
     pub target_bytes: Option<u64>,
+    /// DSCP values (0–63) to cycle through. Present for dscp_probe flows only.
+    #[serde(default)]
+    pub dscp_values: Option<Vec<u8>>,
 }
 
 #[derive(Default)]
@@ -183,7 +188,7 @@ fn spawn_flow(
     let dir = flow.direction.as_deref();
 
     match (flow.flow_type.as_str(), dir) {
-        ("probe", _) | ("realtime_udp", _) | ("bulk_tcp", _) => {
+        ("probe", _) | ("realtime_udp", _) | ("bulk_tcp", _) | ("dscp_probe", _) => {
             let port = flow.server_port.ok_or_else(|| {
                 std::io::Error::other(format!("flow {} missing server_port", flow.flow_id))
             })?;
@@ -205,6 +210,10 @@ fn spawn_flow(
                     let stream = TcpStream::connect(&server)?;
                     Ok(thread::spawn(move || bulk_send(stream, sink, flow, counters, stop)))
                 }
+                ("dscp_probe", _) => {
+                    let socket = connected_udp(&server)?;
+                    Ok(thread::spawn(move || dscp_probe_ue(socket, sink, flow, counters, stop)))
+                }
                 _ => {
                     let stream = TcpStream::connect(&server)?;
                     Ok(thread::spawn(move || bulk_recv(stream, sink, flow, counters, stop)))
@@ -214,11 +223,6 @@ fn spawn_flow(
         // gateway_ping: local probe to auto-discovered first-hop gateway.
         // Full implementation is a later milestone; stub thread exits immediately.
         ("gateway_ping", _) => Ok(thread::spawn(move || {
-            drop((sink, counters, stop));
-        })),
-        // dscp_probe: DSCP transparency measurement via IP_RECVTOS / NDK recvmsg.
-        // Full implementation is a later milestone; stub exits immediately.
-        ("dscp_probe", _) => Ok(thread::spawn(move || {
             drop((sink, counters, stop));
         })),
         (other, _) => Err(std::io::Error::other(format!("unknown flow type: {other}"))),
@@ -493,6 +497,174 @@ fn bulk_recv(
             }
             Err(ref e) if would_block(e) => {}
             Err(_) => break,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DSCP probe (UE side)
+// ---------------------------------------------------------------------------
+
+fn enable_ip_recvtos(fd: std::os::fd::RawFd) {
+    let one: libc::c_int = 1;
+    unsafe {
+        libc::setsockopt(
+            fd,
+            libc::IPPROTO_IP,
+            libc::IP_RECVTOS,
+            &one as *const libc::c_int as *const libc::c_void,
+            mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
+}
+
+fn set_ip_tos(fd: std::os::fd::RawFd, tos: u8) {
+    let val: libc::c_int = tos as libc::c_int;
+    unsafe {
+        libc::setsockopt(
+            fd,
+            libc::IPPROTO_IP,
+            libc::IP_TOS,
+            &val as *const libc::c_int as *const libc::c_void,
+            mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
+}
+
+/// `recvmsg` on a connected socket: returns `(bytes_read, tos_byte)`.
+/// Respects the socket's `SO_RCVTIMEO` (set via `set_read_timeout`).
+fn recv_with_tos_connected(fd: std::os::fd::RawFd, buf: &mut [u8]) -> std::io::Result<(usize, Option<u8>)> {
+    let cmsg_capacity =
+        unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as u32) as usize };
+    let mut cmsg_buf = vec![0u8; cmsg_capacity];
+    let mut iov = libc::iovec {
+        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+        iov_len: buf.len(),
+    };
+    let mut msg = libc::msghdr {
+        msg_name: std::ptr::null_mut(),
+        msg_namelen: 0,
+        msg_iov: &mut iov,
+        msg_iovlen: 1,
+        msg_control: cmsg_buf.as_mut_ptr() as *mut libc::c_void,
+        msg_controllen: cmsg_buf.len() as _,
+        msg_flags: 0,
+    };
+    let n = unsafe { libc::recvmsg(fd, &mut msg, 0) };
+    if n < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut tos_byte: Option<u8> = None;
+    let mut cmsg = unsafe { libc::CMSG_FIRSTHDR(&msg) };
+    while !cmsg.is_null() {
+        let (level, typ) = unsafe { ((*cmsg).cmsg_level, (*cmsg).cmsg_type) };
+        if level == libc::IPPROTO_IP && typ == libc::IP_TOS {
+            tos_byte = Some(unsafe { *libc::CMSG_DATA(cmsg) });
+        }
+        cmsg = unsafe { libc::CMSG_NXTHDR(&msg, cmsg) };
+    }
+    Ok((n as usize, tos_byte))
+}
+
+/// DSCP transparency probe: cycles through `dscp_values` on each sent packet,
+/// reads the echoed packet's IP TOS to measure downlink transparency.
+///
+/// Log rows:
+/// - SENT: `dscp_sent = dscp_intended_ul`, `dscp_recv = None`
+/// - RECEIVED: `dscp_sent = dscp_intended_dl` (server's intended DL DSCP),
+///             `dscp_recv = dscp_actual_dl` (TOS observed on arriving echo)
+fn dscp_probe_ue(
+    socket: UdpSocket,
+    mut sink: LogSink,
+    flow: UeFlow,
+    counters: Arc<Counters>,
+    stop: Arc<AtomicBool>,
+) {
+    let period = rate_period(flow.rate_pps);
+    let dscp_values: Vec<u8> = flow
+        .dscp_values
+        .as_deref()
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_vec())
+        .unwrap_or_else(|| vec![0]);
+
+    let fd = socket.as_raw_fd();
+    enable_ip_recvtos(fd);
+
+    let mut recv_buf = [0u8; 2048];
+    let mut seq = 1u64;
+    let mut next = Instant::now();
+
+    while !stop.load(Ordering::Acquire) {
+        let dscp_intended_ul = dscp_values[((seq - 1) as usize) % dscp_values.len()];
+
+        set_ip_tos(fd, dscp_intended_ul << 2);
+
+        let ts = Timestamp::now();
+        let pkt = DscpProbePacket {
+            flow_id: flow.flow_id,
+            sequence_number: seq,
+            send_mono_ns: ts.mono_ns,
+            dscp_intended_ul,
+            dscp_actual_ul: DSCP_UNKNOWN,
+            dscp_intended_dl: DSCP_UNKNOWN,
+        };
+        let bytes = pkt.to_bytes();
+        if socket.send(&bytes).is_ok() {
+            counters.sent.fetch_add(1, Ordering::Relaxed);
+            counters.bytes_sent.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            sink.push(PacketRow {
+                flow_id: flow.flow_id,
+                sequence_number: seq,
+                direction: Direction::Sent,
+                timestamp: ts,
+                payload_size: bytes.len() as u32,
+                protocol: Protocol::Udp,
+                local_port: None,
+                remote_port: None,
+                sender: None,
+                expected_interval_ns: None,
+                actual_interval_ns: None,
+                dscp_sent: Some(dscp_intended_ul),
+                dscp_recv: None,
+            });
+        }
+
+        match recv_with_tos_connected(fd, &mut recv_buf) {
+            Ok((n, tos_byte)) => {
+                let recv_ts = Timestamp::now();
+                if let Ok(echo) = DscpProbePacket::decode(&recv_buf[..n]) {
+                    counters.received.fetch_add(1, Ordering::Relaxed);
+                    counters.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
+                    let dscp_actual_dl = tos_byte.map(|t| t >> 2).unwrap_or(DSCP_UNKNOWN);
+                    sink.push(PacketRow {
+                        flow_id: flow.flow_id,
+                        sequence_number: echo.sequence_number,
+                        direction: Direction::Received,
+                        timestamp: recv_ts,
+                        payload_size: n as u32,
+                        protocol: Protocol::Udp,
+                        local_port: None,
+                        remote_port: None,
+                        sender: None,
+                        expected_interval_ns: None,
+                        actual_interval_ns: None,
+                        dscp_sent: Some(echo.dscp_intended_dl),
+                        dscp_recv: Some(dscp_actual_dl),
+                    });
+                }
+            }
+            Err(ref e) if would_block(e) => {}
+            Err(_) => {}
+        }
+
+        seq += 1;
+        next += period;
+        let now = Instant::now();
+        if next > now {
+            thread::sleep(next - now);
+        } else {
+            next = now;
         }
     }
 }

@@ -76,6 +76,7 @@ fn probe_against_echo_peer() {
             rate_pps: Some(100),
             packet_size_bytes: None,
             target_bytes: None,
+            dscp_values: None,
         },
     ))
     .unwrap();
@@ -126,6 +127,7 @@ fn realtime_to_server_send() {
             rate_pps: Some(100),
             packet_size_bytes: Some(64),
             target_bytes: None,
+            dscp_values: None,
         },
     ))
     .unwrap();
@@ -175,6 +177,7 @@ fn realtime_from_server_recv() {
             rate_pps: Some(200),
             packet_size_bytes: Some(80),
             target_bytes: None,
+            dscp_values: None,
         },
     ))
     .unwrap();
@@ -222,6 +225,7 @@ fn bulk_to_server_upload() {
             rate_pps: None,
             packet_size_bytes: None,
             target_bytes: None,
+            dscp_values: None,
         },
     ))
     .unwrap();
@@ -262,6 +266,7 @@ fn bulk_from_server_download() {
             rate_pps: None,
             packet_size_bytes: None,
             target_bytes: None,
+            dscp_values: None,
         },
     ))
     .unwrap();
