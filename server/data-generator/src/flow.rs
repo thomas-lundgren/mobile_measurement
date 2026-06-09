@@ -5,15 +5,18 @@
 //! timestamp → send → push for the echo. Logging is the wait-free SPSC handoff;
 //! the writer thread does Parquet off the hot path.
 
-use std::io::{Read, Write};
-use std::net::{TcpListener, UdpSocket};
+use std::io::{self, Read, Write};
+use std::mem;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener,
+               UdpSocket};
+use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use fieldtest_core::log_writer::{Direction, LogSink, PacketRow, Protocol, WriterHandle};
-use fieldtest_core::packet::{ProbePacket, RealtimePacket};
+use fieldtest_core::packet::{DscpProbePacket, ProbePacket, RealtimePacket, DSCP_UNKNOWN};
 use fieldtest_core::timestamp::Timestamp;
 use mp_contracts::Direction as FlowDir;
 use mp_contracts::GeneratorState;
@@ -98,6 +101,233 @@ pub fn spawn_probe_echo(
         drop(sink); // close the producer so the writer can drain + finish
         writer.shutdown();
         *state.lock().unwrap() = GeneratorState::Stopped;
+    })
+}
+
+// ---------------------------------------------------------------------------
+// IP_RECVTOS helpers (Linux IPv4 only — the server binds 0.0.0.0)
+// ---------------------------------------------------------------------------
+
+/// Enable `IP_RECVTOS` on a UDP socket so `recv_with_tos` can read the TOS
+/// byte from incoming packets' IP headers via ancillary data.
+fn enable_ip_recvtos(fd: std::os::fd::RawFd) {
+    let one: libc::c_int = 1;
+    unsafe {
+        libc::setsockopt(
+            fd,
+            libc::IPPROTO_IP,
+            libc::IP_RECVTOS,
+            &one as *const libc::c_int as *const libc::c_void,
+            mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
+}
+
+/// Set `IP_TOS` on the socket before a send so the outgoing packet carries
+/// `tos` in its IP header. `tos = dscp << 2` (ECN bits left zero).
+fn set_ip_tos(fd: std::os::fd::RawFd, tos: u8) {
+    let val: libc::c_int = tos as libc::c_int;
+    unsafe {
+        libc::setsockopt(
+            fd,
+            libc::IPPROTO_IP,
+            libc::IP_TOS,
+            &val as *const libc::c_int as *const libc::c_void,
+            mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
+}
+
+struct RecvMsg {
+    n: usize,
+    peer: SocketAddr,
+    /// Raw TOS byte from the IP header. `None` if `IP_RECVTOS` returned no
+    /// control message (shouldn't happen once the option is enabled).
+    tos_byte: Option<u8>,
+}
+
+/// `recvmsg(2)` wrapper that extracts both the sender address and the IP TOS
+/// byte (delivered via `IP_RECVTOS` ancillary data). The read timeout set on
+/// the socket still fires, returning `WouldBlock` / `TimedOut`.
+fn recv_with_tos(fd: std::os::fd::RawFd, buf: &mut [u8]) -> io::Result<RecvMsg> {
+    // Space for one IP_TOS control message. The kernel delivers TOS as a
+    // single byte but `CMSG_SPACE` rounds up to the alignment requirement.
+    let cmsg_capacity =
+        unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as u32) as usize };
+    let mut cmsg_buf = vec![0u8; cmsg_capacity];
+
+    let mut addr: libc::sockaddr_storage = unsafe { mem::zeroed() };
+    let mut iov = libc::iovec {
+        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+        iov_len: buf.len(),
+    };
+    let mut msg = libc::msghdr {
+        msg_name: &mut addr as *mut _ as *mut libc::c_void,
+        msg_namelen: mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t,
+        msg_iov: &mut iov,
+        msg_iovlen: 1,
+        msg_control: cmsg_buf.as_mut_ptr() as *mut libc::c_void,
+        msg_controllen: cmsg_buf.len() as _,
+        msg_flags: 0,
+    };
+
+    let n = unsafe { libc::recvmsg(fd, &mut msg, 0) };
+    if n < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let peer = sockaddr_storage_to_addr(&addr, msg.msg_namelen)?;
+
+    // Walk the control-message chain looking for IP_TOS.
+    let mut tos_byte: Option<u8> = None;
+    let mut cmsg = unsafe { libc::CMSG_FIRSTHDR(&msg) };
+    while !cmsg.is_null() {
+        // SAFETY: `cmsg` is a valid pointer within `cmsg_buf` while `msg` lives.
+        let (level, typ) = unsafe { ((*cmsg).cmsg_level, (*cmsg).cmsg_type) };
+        if level == libc::IPPROTO_IP && typ == libc::IP_TOS {
+            // The kernel puts a single TOS byte in the data area.
+            // SAFETY: CMSG_DATA returns a pointer inside cmsg_buf.
+            tos_byte = Some(unsafe { *libc::CMSG_DATA(cmsg) });
+        }
+        cmsg = unsafe { libc::CMSG_NXTHDR(&msg, cmsg) };
+    }
+
+    Ok(RecvMsg { n: n as usize, peer, tos_byte })
+}
+
+fn sockaddr_storage_to_addr(
+    addr: &libc::sockaddr_storage,
+    _len: libc::socklen_t,
+) -> io::Result<SocketAddr> {
+    match addr.ss_family as libc::c_int {
+        libc::AF_INET => {
+            // SAFETY: ss_family == AF_INET guarantees this cast is valid.
+            let a = unsafe { &*(addr as *const _ as *const libc::sockaddr_in) };
+            let ip = Ipv4Addr::from(u32::from_be(a.sin_addr.s_addr));
+            Ok(SocketAddr::V4(SocketAddrV4::new(ip, u16::from_be(a.sin_port))))
+        }
+        libc::AF_INET6 => {
+            let a = unsafe { &*(addr as *const _ as *const libc::sockaddr_in6) };
+            let ip = Ipv6Addr::from(a.sin6_addr.s6_addr);
+            Ok(SocketAddr::V6(SocketAddrV6::new(
+                ip,
+                u16::from_be(a.sin6_port),
+                a.sin6_flowinfo,
+                a.sin6_scope_id,
+            )))
+        }
+        _ => Err(io::Error::new(io::ErrorKind::Other, "unexpected address family")),
+    }
+}
+
+/// DSCP probe echo: reads incoming `DscpProbePacket`s via `recvmsg` to capture
+/// the TOS byte from the IP header, fills in `dscp_actual_ul` and
+/// `dscp_intended_dl` in the echo packet, sets `IP_TOS` on the reply socket,
+/// and echoes the modified packet back to the UE.
+///
+/// Log schema (packets.parquet):
+/// - RECEIVED row: `dscp_sent = dscp_intended_ul`, `dscp_recv = dscp_actual_ul`
+/// - SENT echo row: `dscp_sent = dscp_intended_dl`, `dscp_recv = None`
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_dscp_probe_echo(
+    socket: UdpSocket,
+    mut sink: LogSink,
+    writer: WriterHandle,
+    flow_id: u32,
+    state: Arc<Mutex<GeneratorState>>,
+    counters: Arc<Counters>,
+    stop: Arc<AtomicBool>,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let fd = socket.as_raw_fd();
+        enable_ip_recvtos(fd);
+
+        *state.lock().unwrap() = GeneratorState::WaitingForClient;
+        let mut buf = [0u8; 2048];
+        let mut seen_client = false;
+
+        loop {
+            if stop.load(Ordering::Acquire) { break; }
+
+            let recv = match recv_with_tos(fd, &mut buf) {
+                Ok(r) => r,
+                Err(ref e) if would_block(e) => continue,
+                Err(_) => continue,
+            };
+            let recv_ts = Timestamp::now();
+
+            if !seen_client {
+                seen_client = true;
+                *state.lock().unwrap() = GeneratorState::Running;
+            }
+            counters.received.fetch_add(1, Ordering::Relaxed);
+            counters.bytes_received.fetch_add(recv.n as u64, Ordering::Relaxed);
+
+            // Decode the incoming packet. Skip silently if it doesn't parse.
+            let pkt = match DscpProbePacket::decode(&buf[..recv.n]) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            // dscp_actual_ul = DSCP bits from received IP TOS (top 6 bits).
+            let dscp_actual_ul = recv.tos_byte
+                .map(|t| t >> 2)
+                .unwrap_or(DSCP_UNKNOWN);
+
+            // Log RECEIVED: dscp_sent = what UE intended, dscp_recv = what arrived.
+            sink.push(PacketRow {
+                flow_id,
+                sequence_number: pkt.sequence_number,
+                direction: Direction::Received,
+                timestamp: recv_ts,
+                payload_size: recv.n as u32,
+                protocol: Protocol::Udp,
+                local_port: None,
+                remote_port: None,
+                sender: None,
+                expected_interval_ns: None,
+                actual_interval_ns: None,
+                dscp_sent: Some(pkt.dscp_intended_ul),
+                dscp_recv: Some(dscp_actual_ul),
+            });
+
+            // Echo strategy: mirror the UE's intended DSCP for the downlink direction.
+            let dscp_intended_dl = pkt.dscp_intended_ul;
+
+            // Build echo with updated DSCP fields.
+            let echo = DscpProbePacket {
+                dscp_actual_ul,
+                dscp_intended_dl,
+                ..pkt
+            };
+            let echo_bytes = echo.to_bytes();
+
+            // Mark the outgoing IP header with dscp_intended_dl before sending.
+            set_ip_tos(fd, dscp_intended_dl << 2);
+
+            let send_ts = Timestamp::now();
+            if socket.send_to(&echo_bytes, recv.peer).is_ok() {
+                counters.sent.fetch_add(1, Ordering::Relaxed);
+                counters.bytes_sent.fetch_add(echo_bytes.len() as u64, Ordering::Relaxed);
+                sink.push(PacketRow {
+                    flow_id,
+                    sequence_number: pkt.sequence_number,
+                    direction: Direction::Sent,
+                    timestamp: send_ts,
+                    payload_size: echo_bytes.len() as u32,
+                    protocol: Protocol::Udp,
+                    local_port: None,
+                    remote_port: None,
+                    sender: None,
+                    expected_interval_ns: None,
+                    actual_interval_ns: None,
+                    dscp_sent: Some(dscp_intended_dl),
+                    dscp_recv: None,
+                });
+            }
+        }
+
+        finalize(&state, sink, writer);
     })
 }
 

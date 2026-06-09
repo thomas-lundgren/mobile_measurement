@@ -20,6 +20,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 axum = "0.8"
 ulid = "1"
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
