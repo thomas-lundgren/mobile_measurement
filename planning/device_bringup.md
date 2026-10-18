@@ -131,10 +131,15 @@ Cleartext HTTP is allowed by `network_security_config.xml`
 
 ## Gotchas
 
-- **Don't restart server-main mid-session.** The Logger's poll loop sits in one
-  outer try/catch, so a dropped connection ends the worker and it stops polling
-  until the app is force-restarted. Start the server first, then the app.
-  (Per-iteration retry/backoff is a Phase-5 robustness follow-up.)
+- **Connection drops and server restarts are survivable.** The Logger's worker
+  reconnects with backoff (1 → 30 s) and re-authenticates; the UI shows
+  `RECONNECTING: …` meanwhile. Commands are at-least-once: a delivered RUN_TEST
+  not acked within 30 s is redelivered, and the Logger de-duplicates by
+  `test_id`. The Logger acks RUN_TEST once measuring is done and the upload is
+  queued on disk (server-main then stops the generators); uploads run on their
+  own thread from `files/<session>/<test>/upload_pending.json` markers and
+  retry through outages. A restarted *test-control* forgets in-flight tests, so
+  restart it only between tests.
 - **`MainActivity` is `singleTop`** — a re-`am start` hits `onNewIntent` (not
   handled for auto-start), so `force-stop` first to re-run `onCreate`.
 - **`pm clear`** wipes granted permissions *and* the Keystore key (forces a

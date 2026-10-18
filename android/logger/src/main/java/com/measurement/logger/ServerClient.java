@@ -27,6 +27,15 @@ public final class ServerClient {
     private final OkHttpClient http = new OkHttpClient.Builder()
             .callTimeout(30, TimeUnit.SECONDS)
             .build();
+    /** File PUTs: no cap on the whole call (a large file on a weak link may
+     *  legitimately take minutes), only on stalls — a link that moves no bytes
+     *  for 60 s fails and the upload queue retries later. */
+    private final OkHttpClient uploadHttp = http.newBuilder()
+            .callTimeout(0, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .build();
 
     public ServerClient(String base) {
         this.base = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
@@ -117,7 +126,7 @@ public final class ServerClient {
                 .header("Authorization", "Bearer " + session)
                 .put(RequestBody.create(bytes, OCTET))
                 .build();
-        try (Response r = http.newCall(req).execute()) {
+        try (Response r = uploadHttp.newCall(req).execute()) {
             if (!r.isSuccessful()) {
                 throw new IOException("PUT " + relPath + " -> " + r.code());
             }

@@ -3,10 +3,13 @@ package com.measurement.logger;
 import android.Manifest;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.Button;
@@ -43,6 +46,7 @@ public final class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         requestPermissions();
+        requestBatteryExemption();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
 
         AutoCompleteTextView serverUrl = findViewById(R.id.serverUrl);
@@ -133,6 +137,22 @@ public final class MainActivity extends AppCompatActivity {
         }
         prefs.edit().putString(KEY_URLS, sb.toString()).apply();
         if (urlAdapter != null) urlAdapter.notifyDataSetChanged();
+    }
+
+    /** Doze and app-standby would throttle the logger's network and timers in
+     *  a pocket; a measurement instrument must be exempt. Asks once per launch
+     *  until granted (system dialog). */
+    private void requestBatteryExemption() {
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (pm.isIgnoringBatteryOptimizations(getPackageName())) {
+            return;
+        }
+        try {
+            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Exception ignored) {
+            // no handler on this ROM — the user can still set it in Settings
+        }
     }
 
     private void requestPermissions() {

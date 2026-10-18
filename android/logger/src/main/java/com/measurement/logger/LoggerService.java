@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -16,8 +17,11 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Foreground service: the autonomous Logger. Onboards (enroll → challenge →
@@ -45,6 +49,15 @@ public final class LoggerService extends Service {
 
     private volatile boolean running;
     private Thread worker;
+    private Thread uploader;
+    /** Session of the connected worker, shared with the uploader; null while
+     *  reconnecting (the uploader then waits). */
+    private volatile String currentSession;
+    private final Object uploadSignal = new Object();
+    /** Held for the service's lifetime: with the screen off (phone in a pocket)
+     *  the CPU would otherwise suspend, stalling flow threads and timers and
+     *  distorting every measurement. */
+    private PowerManager.WakeLock wakeLock;
     private int loggingConfigVersion = 1;
     private JSONObject loggingConfig; // latest server-pushed config (SET_LOGGING_CONFIG)
 
@@ -76,15 +89,49 @@ public final class LoggerService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        if (worker != null && worker.isAlive()) {
-            return START_STICKY; // already running (duplicate start / resume)
-        }
+        acquireWakeLock();
         running = true;
         final String s = server;
         final String t = token;
-        worker = new Thread(() -> run(s, t), "logger-worker");
-        worker.start();
+        // A duplicate start / resume leaves live threads alone, but restarts
+        // either one that has died.
+        if (worker == null || !worker.isAlive()) {
+            worker = new Thread(() -> run(s, t), "logger-worker");
+            worker.start();
+        }
+        if (uploader == null || !uploader.isAlive()) {
+            uploader = new Thread(() -> uploadLoop(s), "logger-uploader");
+            uploader.start();
+        }
         return START_STICKY;
+    }
+
+    private void acquireWakeLock() {
+        if (wakeLock == null) {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mp:logger");
+            wakeLock.setReferenceCounted(false);
+        }
+        if (!wakeLock.isHeld()) {
+            wakeLock.acquire();
+        }
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+    }
+
+    private void stopThreads() {
+        running = false;
+        if (worker != null) {
+            worker.interrupt();
+        }
+        if (uploader != null) {
+            uploader.interrupt();
+        }
+        releaseWakeLock();
     }
 
     // Android 14+ time-limits a dataSync foreground service; when the budget is
@@ -103,20 +150,14 @@ public final class LoggerService extends Service {
 
     private void stopForDataSyncTimeout() {
         setState("STOPPED: foreground-service time limit reached — restart to resume");
-        running = false;
-        if (worker != null) {
-            worker.interrupt();
-        }
+        stopThreads();
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
 
     @Override
     public void onDestroy() {
-        running = false;
-        if (worker != null) {
-            worker.interrupt();
-        }
+        stopThreads();
         super.onDestroy();
     }
 
@@ -151,10 +192,13 @@ public final class LoggerService extends Service {
 
                 setState("IDLE");
                 backoff = BACKOFF_MIN_MS; // connected → reset backoff
+                currentSession = session;
+                wakeUploader();
                 pollLoop(client, session, deviceId);
             } catch (InterruptedException ignored) {
                 return; // stopping
             } catch (Exception e) {
+                currentSession = null;
                 if (!running) {
                     return;
                 }
@@ -241,10 +285,19 @@ public final class LoggerService extends Service {
         JSONObject payload = cmd.getJSONObject("payload");
         String testId = payload.getString("test_id");
         String sessionId = payload.getString("session_id");
+        long commandId = cmd.getLong("command_id");
+
+        // Delivery is at-least-once: a RUN_TEST comes back if its ack was lost
+        // or the app died mid-test. Never run a test twice — just re-ack.
+        if (isHandled(testId)) {
+            ack(client, session, deviceId, commandId);
+            return;
+        }
 
         if (freeBytes() < MIN_FREE_BYTES) {
             setState("ERROR: low storage, refusing " + testId);
-            client.ackCommand(session, deviceId, cmd.getLong("command_id"));
+            markHandled(testId);
+            ack(client, session, deviceId, commandId);
             return;
         }
 
@@ -256,10 +309,34 @@ public final class LoggerService extends Service {
         String ueConfig = buildUeConfig(payload, deviceId, sessionId, mobileDir.getAbsolutePath());
 
         long h = RustCore.coreNew();
-        if (RustCore.startTest(h, ueConfig) != 0) {
-            RustCore.destroy(h);
-            throw new Exception("startTest failed");
+        // The core reports a failed start either as a non-zero return or as a
+        // thrown exception (e.g. "start failed: Connection refused").
+        String startError = null;
+        try {
+            if (RustCore.startTest(h, ueConfig) != 0) {
+                startError = "startTest returned non-zero";
+            }
+        } catch (Exception e) {
+            startError = e.getMessage();
         }
+        if (startError != null) {
+            RustCore.destroy(h);
+            // Leave it unacked so the server redelivers it (coverage may be
+            // back by then), but give up after a few tries so one bad test
+            // can't block the command queue forever.
+            int attempts = startAttempts.merge(testId, 1, Integer::sum);
+            if (attempts < MAX_START_ATTEMPTS) {
+                throw new Exception("start of " + testId + " failed (attempt " + attempts + "): " + startError);
+            }
+            markHandled(testId);
+            ack(client, session, deviceId, commandId);
+            setState("ERROR: could not start " + testId + ": " + startError);
+            return;
+        }
+        // Durably mark the test as taken before measuring, so a crash mid-test
+        // plus a redelivery can't start it again.
+        markHandled(testId);
+
         GpsSampler gps = new GpsSampler(this, h);
         RadioSampler radio = new RadioSampler(this, h);
         ClockSampler clock = new ClockSampler(client, h);
@@ -269,22 +346,65 @@ public final class LoggerService extends Service {
 
         setState("RUNNING_TEST " + testId);
         int durationSec = payload.getJSONObject("test_plan").optInt("duration_sec", 30);
-        for (int i = 0; i < durationSec && running; i++) {
-            Thread.sleep(1000);
+        try {
+            for (int i = 0; i < durationSec && running; i++) {
+                Thread.sleep(1000);
+            }
+        } finally {
+            // Always seal and queue what was recorded — even if the test is cut
+            // short — so no measured data is ever stranded on the device.
+            gps.stop();
+            radio.stop();
+            clock.stop();
+            RustCore.stopTest(h);
+            JSONArray sealed = new JSONArray(RustCore.sealedFiles(h));
+            RustCore.destroy(h);
+            queueUpload(testRoot, testId, sealed);
         }
 
-        gps.stop();
-        radio.stop();
-        clock.stop();
-        RustCore.stopTest(h);
-        JSONArray sealed = new JSONArray(RustCore.sealedFiles(h));
-        RustCore.destroy(h);
-
-        setState("UPLOADING " + testId);
-        upload(client, session, testId, testRoot, sealed);
-
-        client.ackCommand(session, deviceId, cmd.getLong("command_id"));
+        // The upload is queued on disk: ack now (the server stops its
+        // generators) and leave the upload to the uploader thread, so it never
+        // blocks the next test.
+        ack(client, session, deviceId, commandId);
         setState("IDLE");
+    }
+
+    /** Ack a command; a 404 means it was already acked (our earlier ack landed
+     *  but its response was lost), which is success. */
+    private static void ack(ServerClient client, String session, String deviceId, long commandId)
+            throws Exception {
+        try {
+            client.ackCommand(session, deviceId, commandId);
+        } catch (java.io.IOException e) {
+            if (!"HTTP 404".equals(e.getMessage())) {
+                throw e;
+            }
+        }
+    }
+
+    // --- RUN_TEST de-duplication (persisted: survives process death) ---
+
+    private static final String KEY_HANDLED = "handled_tests";
+    private static final int MAX_HANDLED = 500;
+    private static final int MAX_START_ATTEMPTS = 3;
+    private final java.util.Map<String, Integer> startAttempts = new java.util.HashMap<>();
+
+    private boolean isHandled(String testId) {
+        String raw = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_HANDLED, "");
+        return java.util.Arrays.asList(raw.split("\n")).contains(testId);
+    }
+
+    private void markHandled(String testId) {
+        SharedPreferences prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        java.util.List<String> ids = new java.util.ArrayList<>(
+                java.util.Arrays.asList(prefs.getString(KEY_HANDLED, "").split("\n")));
+        ids.remove("");
+        ids.add(testId);
+        while (ids.size() > MAX_HANDLED) {
+            ids.remove(0);
+        }
+        // commit (not apply): this must be on disk before the test starts.
+        prefs.edit().putString(KEY_HANDLED, String.join("\n", ids)).commit();
     }
 
     /** Merge RUN_TEST payload (port-less plan + bindings) into the engine's lean
@@ -330,14 +450,142 @@ public final class LoggerService extends Service {
                 .toString();
     }
 
-    private void upload(ServerClient client, String session, String testId, File testRoot, JSONArray sealed)
+    // --- persistent upload queue ---
+    //
+    // Each finished test leaves an upload_pending.json marker (test id + sealed
+    // file paths) in its test directory. The uploader thread works through the
+    // markers oldest-first whenever a session is available, retrying with
+    // backoff through any outage; the marker is renamed to upload_done.json once
+    // the server confirms. The server side is resumable per file (re-posting
+    // the summary returns only the files it still needs), so a retry after a
+    // partial upload only sends what is missing.
+
+    private static final String UPLOAD_PENDING = "upload_pending.json";
+    private static final String UPLOAD_DONE = "upload_done.json";
+    private static final String UPLOAD_REJECTED = "upload_rejected.json";
+    private static final long UPLOAD_BACKOFF_MIN_MS = 5_000;
+    private static final long UPLOAD_BACKOFF_MAX_MS = 300_000;
+
+    private void queueUpload(File testRoot, String testId, JSONArray sealed) {
+        try {
+            JSONArray rel = new JSONArray();
+            for (int i = 0; i < sealed.length(); i++) {
+                rel.put(relPath(testRoot, new File(sealed.getString(i))));
+            }
+            JSONObject marker = new JSONObject().put("test_id", testId).put("files", rel);
+            File tmp = new File(testRoot, UPLOAD_PENDING + ".tmp");
+            Files.write(tmp.toPath(), marker.toString().getBytes(StandardCharsets.UTF_8));
+            // atomic publish: the uploader never sees a half-written marker
+            Files.move(tmp.toPath(), new File(testRoot, UPLOAD_PENDING).toPath(),
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception e) {
+            // Logging-first: the data is on disk regardless; only the automatic
+            // upload is lost.
+            setState("ERROR: could not queue upload for " + testId + ": " + e.getMessage());
+        }
+        wakeUploader();
+    }
+
+    private void wakeUploader() {
+        synchronized (uploadSignal) {
+            uploadSignal.notifyAll();
+        }
+    }
+
+    /** Pending markers, oldest first. Layout: files/<session>/<test>/marker. */
+    private List<File> pendingUploads() {
+        List<File> out = new ArrayList<>();
+        File[] sessions = getFilesDir().listFiles(File::isDirectory);
+        if (sessions == null) {
+            return out;
+        }
+        for (File s : sessions) {
+            File[] tests = s.listFiles(File::isDirectory);
+            if (tests == null) {
+                continue;
+            }
+            for (File t : tests) {
+                File m = new File(t, UPLOAD_PENDING);
+                if (m.isFile()) {
+                    out.add(m);
+                }
+            }
+        }
+        out.sort((a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+        return out;
+    }
+
+    private void uploadLoop(String server) {
+        ServerClient client = new ServerClient(server);
+        long backoff = UPLOAD_BACKOFF_MIN_MS;
+        while (running) {
+            try {
+                List<File> pending = pendingUploads();
+                String session = currentSession;
+                if (pending.isEmpty() || session == null) {
+                    synchronized (uploadSignal) {
+                        uploadSignal.wait(pending.isEmpty() ? 60_000 : 2_000);
+                    }
+                    continue;
+                }
+                for (File marker : pending) {
+                    if (!running) {
+                        return;
+                    }
+                    uploadOne(client, session, marker);
+                }
+                backoff = UPLOAD_BACKOFF_MIN_MS;
+            } catch (InterruptedException e) {
+                return;
+            } catch (Throwable e) {
+                // Any failure (no coverage, timeout, expired session, server
+                // down): keep the marker and retry later.
+                try {
+                    Thread.sleep(backoff);
+                } catch (InterruptedException ie) {
+                    return;
+                }
+                backoff = Math.min(backoff * 2, UPLOAD_BACKOFF_MAX_MS);
+            }
+        }
+    }
+
+    private void uploadOne(ServerClient client, String session, File marker) throws Exception {
+        File testRoot = marker.getParentFile();
+        JSONObject m = new JSONObject(new String(Files.readAllBytes(marker.toPath()), StandardCharsets.UTF_8));
+        String testId = m.getString("test_id");
+        try {
+            upload(client, session, testId, testRoot, m.getJSONArray("files"));
+        } catch (java.nio.file.NoSuchFileException e) {
+            reject(marker, testId, "file missing: " + e.getMessage());
+            return;
+        } catch (java.io.IOException e) {
+            // The server doesn't know this test (or it isn't ours) — retrying
+            // can never succeed. Keep the data, stop retrying.
+            String msg = String.valueOf(e.getMessage());
+            if (msg.startsWith("HTTP 404") || msg.startsWith("HTTP 403")) {
+                reject(marker, testId, msg);
+                return;
+            }
+            throw e;
+        }
+        marker.renameTo(new File(testRoot, UPLOAD_DONE));
+    }
+
+    private void reject(File marker, String testId, String why) {
+        marker.renameTo(new File(marker.getParentFile(), UPLOAD_REJECTED));
+        setState("ERROR: upload of " + testId + " rejected (" + why + "); data kept on device");
+    }
+
+    private void upload(ServerClient client, String session, String testId, File testRoot, JSONArray relPaths)
             throws Exception {
         JSONArray files = new JSONArray();
-        for (int i = 0; i < sealed.length(); i++) {
-            File f = new File(sealed.getString(i));
-            byte[] bytes = Files.readAllBytes(f.toPath());
+        for (int i = 0; i < relPaths.length(); i++) {
+            String rel = relPaths.getString(i);
+            byte[] bytes = Files.readAllBytes(new File(testRoot, rel).toPath());
             files.put(new JSONObject()
-                    .put("path", relPath(testRoot, f))
+                    .put("path", rel)
                     .put("size_bytes", bytes.length)
                     .put("sha256", sha256Hex(bytes))
                     .put("encoding", "identity"));
@@ -378,6 +626,7 @@ public final class LoggerService extends Service {
             if (stor != null) {
                 status.put("storage", stor);
             }
+            status.put("pending_uploads", pendingUploads().size());
             if (currentTestId != null) {
                 status.put("current_test_id", currentTestId);
             }
