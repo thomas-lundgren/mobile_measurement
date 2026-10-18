@@ -375,6 +375,16 @@ Example commands:
 - SET_UPLOAD_POLICY
 - SET_LOGGING_CONFIG (update logging configuration dynamically)
 
+**Delivery is at-least-once.** A poll claims the oldest pending command and
+marks it delivered; a delivered command not acked within 30 s is handed out
+again, so a poll response lost in a coverage gap never drops a command. The UE
+de-duplicates (RUN_TEST by `test_id`, persisted before the test starts) and
+re-acks duplicates; an ack of an already-acked command (404) counts as success.
+The UE acks RUN_TEST when measuring is finished and its upload is durably
+queued on the device — not when the upload completes — and server-main stops
+the test's server-side generators on that ack. The test reaches DONE when the
+upload completes.
+
 ---
 
 ### Upload Handling

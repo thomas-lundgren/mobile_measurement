@@ -185,6 +185,59 @@ async fn command_enqueue_poll_ack_cycle() {
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
 
+/// A delivered-but-unacked command (poll response lost in a coverage gap, or
+/// the UE died before acking) is handed out again once the redelivery window
+/// passes; an acked one never is.
+#[tokio::test]
+async fn unacked_command_is_redelivered_after_window() {
+    let st = state().await;
+    let (device_id, session) = enrolled_session(&st).await;
+    let path = format!("/api/v1/devices/{device_id}/command");
+
+    let payload = json!({ "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5" });
+    let id = commands::enqueue(&st.pool, &device_id, Command::RunTest, Some(&payload))
+        .await
+        .unwrap();
+    let (s, body) = send(&st, "GET", &path, Some(&session), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["command_id"].as_i64(), Some(id));
+
+    // inside the window: not redelivered
+    let (s, _) = send(&st, "GET", &path, Some(&session), None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+
+    // window elapsed without an ack → same command again
+    sqlx::query("UPDATE commands SET delivered_at = delivered_at - ? WHERE id = ?")
+        .bind(commands::REDELIVER_AFTER_NS + 1)
+        .bind(id)
+        .execute(&st.pool)
+        .await
+        .unwrap();
+    let (s, body) = send(&st, "GET", &path, Some(&session), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["command_id"].as_i64(), Some(id));
+    assert_eq!(
+        commands::run_test_id(&st.pool, &device_id, id)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5")
+    );
+
+    // acked → never again, even after the window
+    let ack = format!("/api/v1/devices/{device_id}/command/{id}/ack");
+    let (s, _) = send(&st, "POST", &ack, Some(&session), None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    sqlx::query("UPDATE commands SET delivered_at = delivered_at - ? WHERE id = ?")
+        .bind(commands::REDELIVER_AFTER_NS + 1)
+        .bind(id)
+        .execute(&st.pool)
+        .await
+        .unwrap();
+    let (s, _) = send(&st, "GET", &path, Some(&session), None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+}
+
 #[tokio::test]
 async fn run_test_payload_round_trips_through_queue() {
     let st = state().await;

@@ -145,6 +145,52 @@ async fn coordinate_probe_test() {
     assert_eq!(s, StatusCode::OK);
     assert_eq!(body["state"], "DONE");
     assert_eq!(body["result"], "COMPLETED");
+
+    // A second test reuses the freed port. Stopping the first test again (as
+    // server-main does on RUN_TEST ack and again on upload complete) must be a
+    // no-op — it must not free the port the second test now holds.
+    let start_probe = |test_id: &'static str| {
+        json!({
+            "test_id": test_id,
+            "device_id": "dev_01HZ8PQRS0000000000000001",
+            "session_id": "ses_2026_05_23_001",
+            "server_host": "127.0.0.1",
+            "plan": { "name": "probe_only_v1", "version": 1, "duration_sec": 60,
+                      "flows": [{ "flow_id": 1, "type": "probe", "rate_pps": 10 }] }
+        })
+    };
+    let port_of = |b: &serde_json::Value| b["flow_bindings"][0]["server_port"].as_u64().unwrap();
+    let ready = |st: AppState, test_id: &'static str| async move {
+        for _ in 0..50 {
+            let (_, b) = call(&st, "GET", &format!("/internal/tests/{test_id}"), None).await;
+            if b["state"] == "WAITING_FOR_CLIENT" {
+                return b;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        panic!("{test_id} never reached WAITING_FOR_CLIENT");
+    };
+
+    let b_id = "tst_01HZ8R9F0J2YK3P5Q7S9V1W3XB";
+    let (s, _) = call(&st, "POST", "/internal/tests", Some(start_probe(b_id))).await;
+    assert_eq!(s, StatusCode::ACCEPTED);
+    let port_b = port_of(&ready(st.clone(), b_id).await);
+
+    let (s, body) = call(
+        &st,
+        "POST",
+        "/internal/tests/tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5/stop",
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["state"], "DONE");
+
+    let c_id = "tst_01HZ8R9F0J2YK3P5Q7S9V1W3XC";
+    let (s, _) = call(&st, "POST", "/internal/tests", Some(start_probe(c_id))).await;
+    assert_eq!(s, StatusCode::ACCEPTED);
+    let port_c = port_of(&ready(st.clone(), c_id).await);
+    assert_ne!(port_b, port_c, "repeat stop released a port still in use");
 }
 
 #[tokio::test]

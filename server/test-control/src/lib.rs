@@ -268,7 +268,15 @@ async fn stop(
     let entry = st
         .get(&test_id)
         .ok_or((StatusCode::NOT_FOUND, "unknown test".into()))?;
-    entry.lock().unwrap().state = TestControlState::Stopping;
+    // Idempotent: server-main stops on RUN_TEST ack and again on upload
+    // complete. A repeat must not re-release ports another test may now hold.
+    {
+        let mut e = entry.lock().unwrap();
+        if matches!(e.state, TestControlState::Done | TestControlState::Failed) {
+            return Ok(Json(snapshot(&e)));
+        }
+        e.state = TestControlState::Stopping;
+    }
 
     let (gens, bindings): (Vec<GeneratorRef>, Vec<FlowBinding>) = {
         let e = entry.lock().unwrap();

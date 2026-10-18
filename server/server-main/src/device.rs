@@ -13,6 +13,7 @@ use crate::auth::authed_device;
 use crate::error::AppError;
 use crate::resolve::resolve_effective_config;
 use crate::state::AppState;
+use crate::tc_client::TcClient;
 use crate::util::now_utc_ns;
 use crate::{commands, registry};
 
@@ -125,11 +126,21 @@ pub async fn ack_command(
     Path((device_id, command_id)): Path<(String, i64)>,
 ) -> Result<StatusCode, AppError> {
     let device_id = authed_for(&st, &headers, Some(&device_id)).await?;
-    if commands::ack(&st.pool, &device_id, command_id).await? {
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Err(AppError::NotFound)
+    if !commands::ack(&st.pool, &device_id, command_id).await? {
+        return Err(AppError::NotFound);
     }
+    // A RUN_TEST ack means the UE has finished measuring and queued its upload
+    // locally. Stop the server-side generators now (flushing server/ Parquet)
+    // rather than at upload-complete, which may be hours later when uploads
+    // are deferred through a coverage gap. Best-effort: never fails the ack.
+    if let Some(test_id) = commands::run_test_id(&st.pool, &device_id, command_id).await? {
+        if let Some(url) = st.test_control_url.as_ref() {
+            if let Err(e) = TcClient::new(url.clone()).stop_test(&test_id).await {
+                tracing::warn!("stop_test on RUN_TEST ack ({test_id}): {e}");
+            }
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
