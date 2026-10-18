@@ -290,30 +290,79 @@ fn probe_ue(
                 bytes.len() as u32,
             ));
         }
-        if let Ok(n) = socket.recv(&mut recv_buf) {
-            let recv_ts = Timestamp::now();
-            if let Ok(echo) = ProbePacket::decode(&recv_buf[..n]) {
-                counters.received.fetch_add(1, Ordering::Relaxed);
-                counters
-                    .bytes_received
-                    .fetch_add(n as u64, Ordering::Relaxed);
-                sink.push(PacketRow::probe(
-                    flow.flow_id,
-                    echo.sequence_number,
-                    Direction::Received,
-                    recv_ts,
-                    n as u32,
-                ));
-            }
-        }
         seq += 1;
-        next += period;
-        let now = Instant::now();
-        if next > now {
-            thread::sleep(next - now);
-        } else {
-            next = now;
+        next = (next + period).max(Instant::now());
+        recv_until(
+            &socket,
+            next,
+            &mut recv_buf,
+            |buf| socket.recv(buf).map(|n| (n, ())),
+            |pkt, (), recv_ts| {
+                if let Ok(echo) = ProbePacket::decode(pkt) {
+                    counters.received.fetch_add(1, Ordering::Relaxed);
+                    counters
+                        .bytes_received
+                        .fetch_add(pkt.len() as u64, Ordering::Relaxed);
+                    sink.push(PacketRow::probe(
+                        flow.flow_id,
+                        echo.sequence_number,
+                        Direction::Received,
+                        recv_ts,
+                        pkt.len() as u32,
+                    ));
+                }
+            },
+        );
+        sleep_until(next);
+    }
+}
+
+/// Spend the gap until the next send receiving: read each echo the moment it
+/// arrives (so its timestamp is its arrival) until `deadline`, then sweep
+/// whatever is already queued without blocking.
+///
+/// Reading one echo per send instead leaves a permanent backlog after a single
+/// late echo (a stall longer than the read timeout): every later echo is then
+/// read — and timestamped — one or more send periods after it arrived, so RTT
+/// comes out as true RTT + k × period.
+fn recv_until<X>(
+    socket: &UdpSocket,
+    deadline: Instant,
+    buf: &mut [u8],
+    mut recv: impl FnMut(&mut [u8]) -> std::io::Result<(usize, X)>,
+    mut on_recv: impl FnMut(&[u8], X, Timestamp),
+) {
+    loop {
+        let wait = deadline.saturating_duration_since(Instant::now());
+        // A zero read timeout would block forever, so once due, only sweep.
+        if wait < Duration::from_micros(100) {
+            if socket.set_nonblocking(true).is_ok() {
+                while let Ok((n, x)) = recv(buf) {
+                    on_recv(&buf[..n], x, Timestamp::now());
+                }
+                let _ = socket.set_nonblocking(false);
+            }
+            return;
         }
+        if socket.set_read_timeout(Some(wait)).is_err() {
+            return;
+        }
+        match recv(buf) {
+            Ok((n, x)) => {
+                let ts = Timestamp::now();
+                on_recv(&buf[..n], x, ts);
+            }
+            // timed out at the deadline, or an immediate error (e.g. ICMP
+            // refused during an outage) — the caller sleeps out the remainder
+            Err(_) => return,
+        }
+    }
+}
+
+fn sleep_until(deadline: Instant) {
+    let now = Instant::now();
+    if deadline > now {
+        thread::sleep(deadline - now);
     }
 }
 
@@ -630,10 +679,16 @@ fn dscp_probe_ue(
             });
         }
 
-        match recv_with_tos_connected(fd, &mut recv_buf) {
-            Ok((n, tos_byte)) => {
-                let recv_ts = Timestamp::now();
-                if let Ok(echo) = DscpProbePacket::decode(&recv_buf[..n]) {
+        seq += 1;
+        next = (next + period).max(Instant::now());
+        recv_until(
+            &socket,
+            next,
+            &mut recv_buf,
+            |buf| recv_with_tos_connected(fd, buf),
+            |pkt, tos_byte, recv_ts| {
+                let n = pkt.len();
+                if let Ok(echo) = DscpProbePacket::decode(pkt) {
                     counters.received.fetch_add(1, Ordering::Relaxed);
                     counters.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
                     let dscp_actual_dl = tos_byte.map(|t| t >> 2).unwrap_or(DSCP_UNKNOWN);
@@ -653,19 +708,9 @@ fn dscp_probe_ue(
                         dscp_recv: Some(dscp_actual_dl),
                     });
                 }
-            }
-            Err(ref e) if would_block(e) => {}
-            Err(_) => {}
-        }
-
-        seq += 1;
-        next += period;
-        let now = Instant::now();
-        if next > now {
-            thread::sleep(next - now);
-        } else {
-            next = now;
-        }
+            },
+        );
+        sleep_until(next);
     }
 }
 

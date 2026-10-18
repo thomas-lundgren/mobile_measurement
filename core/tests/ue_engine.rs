@@ -96,6 +96,115 @@ fn probe_against_echo_peer() {
     );
 }
 
+/// (sequence_number → mono_ns) for SENT and RECEIVED rows of one flow.
+fn probe_times(
+    dir: &std::path::Path,
+) -> (
+    std::collections::HashMap<u64, u64>,
+    std::collections::HashMap<u64, u64>,
+) {
+    use arrow::array::{Array, StringArray, UInt64Array};
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    let (mut sent, mut recv) = (Default::default(), Default::default());
+    for e in std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok()) {
+        let p = e.path();
+        if p.extension().map(|x| x == "parquet") != Some(true) {
+            continue;
+        }
+        let r = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(&p).unwrap())
+            .unwrap()
+            .build()
+            .unwrap();
+        for b in r {
+            let b = b.unwrap();
+            let col = |n: &str| b.column(b.schema().index_of(n).unwrap()).clone();
+            let seq = col("sequence_number");
+            let seq = seq.as_any().downcast_ref::<UInt64Array>().unwrap();
+            let dir = col("direction");
+            let dir = dir.as_any().downcast_ref::<StringArray>().unwrap();
+            let mono = col("mono_ns");
+            let mono = mono.as_any().downcast_ref::<UInt64Array>().unwrap();
+            for i in 0..b.num_rows() {
+                let m: &mut std::collections::HashMap<u64, u64> = if dir.value(i) == "SENT" {
+                    &mut sent
+                } else {
+                    &mut recv
+                };
+                m.insert(seq.value(i), mono.value(i));
+            }
+        }
+    }
+    (sent, recv)
+}
+
+/// Regression: one late echo (a radio stall longer than the read timeout) used
+/// to leave a permanent one-deep backlog — the probe read one echo per send, so
+/// every later echo was timestamped a whole send period late and RTT came out
+/// as true RTT + k × period. Echoes must be drained as they arrive.
+#[test]
+fn probe_rtt_not_inflated_after_late_echo() {
+    use fieldtest_core::packet::ProbePacket;
+    const LATE_SEQ: u64 = 10;
+
+    let port = udp_port();
+    let sock = UdpSocket::bind(("127.0.0.1", port)).unwrap();
+    sock.set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    let peer = thread::spawn(move || {
+        let mut buf = [0u8; 2048];
+        let deadline = std::time::Instant::now() + Duration::from_millis(1800);
+        while std::time::Instant::now() < deadline {
+            if let Ok((n, from)) = sock.recv_from(&mut buf) {
+                if matches!(ProbePacket::decode(&buf[..n]), Ok(p) if p.sequence_number == LATE_SEQ) {
+                    // hold this one echo back for longer than the UE's read timeout
+                    let s = sock.try_clone().unwrap();
+                    let pkt = buf[..n].to_vec();
+                    thread::spawn(move || {
+                        thread::sleep(Duration::from_millis(150));
+                        let _ = s.send_to(&pkt, from);
+                    });
+                } else {
+                    let _ = sock.send_to(&buf[..n], from);
+                }
+            }
+        }
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    let eng = UeEngine::start(cfg(
+        dir.path(),
+        UeFlow {
+            flow_id: 1,
+            flow_type: "probe".into(),
+            direction: None,
+            server_port: Some(port),
+            rate_pps: Some(50), // 20 ms period
+            packet_size_bytes: None,
+            target_bytes: None,
+            dscp_values: None,
+        },
+    ))
+    .unwrap();
+    thread::sleep(Duration::from_millis(1500));
+    eng.stop();
+    peer.join().unwrap();
+
+    let (sent, recv) = probe_times(dir.path());
+    let mut after: Vec<u64> = recv
+        .iter()
+        .filter(|(seq, _)| **seq > LATE_SEQ + 10)
+        .filter_map(|(seq, r)| sent.get(seq).map(|s| r - s))
+        .collect();
+    after.sort_unstable();
+    assert!(after.len() >= 20, "too few echoes after the late one: {}", after.len());
+    let median_ms = after[after.len() / 2] as f64 / 1e6;
+    // localhost echo is sub-millisecond; the backlog bug adds a whole 20 ms period
+    assert!(median_ms < 10.0, "RTT inflated after late echo: median {median_ms:.1} ms");
+    // the late echo itself is still matched to its own send
+    let late_rtt = (recv[&LATE_SEQ] - sent[&LATE_SEQ]) as f64 / 1e6;
+    assert!((140.0..400.0).contains(&late_rtt), "late echo RTT {late_rtt:.1} ms");
+}
+
 #[test]
 fn realtime_to_server_send() {
     let port = udp_port();
