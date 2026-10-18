@@ -3,6 +3,7 @@ package com.measurement.logger;
 import android.Manifest;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -19,6 +20,7 @@ import android.widget.TextView;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -156,6 +158,19 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void requestPermissions() {
+        // Background location keeps GPS + cell info alive after a background
+        // restart of the service. Android only lets it be asked for once
+        // foreground location is granted (on 11+ it opens a settings page:
+        // choose "Allow all the time").
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                        == PackageManager.PERMISSION_GRANTED
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                        != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[] {Manifest.permission.ACCESS_BACKGROUND_LOCATION}, 2);
+            return;
+        }
         java.util.List<String> perms = new java.util.ArrayList<>();
         perms.add(Manifest.permission.ACCESS_FINE_LOCATION);
         perms.add(Manifest.permission.READ_PHONE_STATE);

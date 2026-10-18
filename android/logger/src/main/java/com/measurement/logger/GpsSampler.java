@@ -6,6 +6,8 @@ import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.location.LocationRequest;
+import android.os.Build;
 import android.os.Looper;
 
 import androidx.core.content.ContextCompat;
@@ -33,7 +35,22 @@ public final class GpsSampler {
         lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
         listener = this::onLocation;
         try {
-            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, listener, Looper.getMainLooper());
+            // GPS_PROVIDER is GNSS only: no fix indoors, in trains or tunnels,
+            // so whole tests got no position. The fused provider uses GNSS when
+            // it has it and Wi-Fi/cell positioning otherwise; accuracy_m tells
+            // the two apart.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    && lm.hasProvider(LocationManager.FUSED_PROVIDER)) {
+                LocationRequest req = new LocationRequest.Builder(1000L)
+                        .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY)
+                        .setMinUpdateIntervalMillis(1000L)
+                        .build();
+                lm.requestLocationUpdates(LocationManager.FUSED_PROVIDER, req,
+                        ctx.getMainExecutor(), listener);
+            } else {
+                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, listener,
+                        Looper.getMainLooper());
+            }
         } catch (SecurityException | IllegalArgumentException ignored) {
         }
     }

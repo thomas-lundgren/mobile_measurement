@@ -63,15 +63,26 @@ public final class LoggerService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // A dataSync FGS can't always (re)start — e.g. right after the system
-        // timed it out. Guard so we stop cleanly instead of crash-looping.
+        // The location type is what lets GPS and cell info (which needs
+        // location permission) keep working while the app is not on screen —
+        // a specialUse-only service gets location denied in the background.
+        // Android refuses the location type when started from the background
+        // without background-location permission (e.g. a sticky restart); then
+        // fall back to specialUse so measuring continues, just without
+        // location. Guard both so we stop cleanly instead of crash-looping.
+        int special = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+        int location = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
         try {
-            startForeground(1, notification("starting"),
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
-        } catch (Exception e) {
-            setState("STOPPED: cannot start foreground (" + e.getClass().getSimpleName() + ")");
-            stopSelf();
-            return START_NOT_STICKY;
+            startForeground(1, notification("starting"), special | location);
+        } catch (Exception withLocation) {
+            try {
+                startForeground(1, notification("starting"), special);
+                setState("WARNING: no background location (open the app to restore GPS/radio)");
+            } catch (Exception e) {
+                setState("STOPPED: cannot start foreground (" + e.getClass().getSimpleName() + ")");
+                stopSelf();
+                return START_NOT_STICKY;
+            }
         }
 
         // START_STICKY restarts deliver a null intent — resume from the last
