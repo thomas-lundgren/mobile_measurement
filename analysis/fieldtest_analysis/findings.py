@@ -4,8 +4,11 @@
   with flags for link pauses, one-way gaps and a server-side bottleneck.
 - ``regime_changes``: moments where the delay in a bulk direction drops by
   at least half while that direction's throughput rises, each classified.
-- ``link_pauses``: both-direction stall episodes, with the recurrence
-  period that best fits their spacing.
+- ``link_pauses``: both-direction stall episodes with the device-side pause
+  signature (stalls.PAUSE_STALL_MS), with the recurrence period that best
+  fits their spacing.
+- ``congestion_stalls``: both-direction episodes of shorter stalls (an
+  overloaded uplink), kept out of the period fit.
 - ``gap_episodes``: one-way stall episodes.
 
 Classifications are heuristics from the 200 ms bins and say so in their
@@ -154,6 +157,12 @@ def regime_changes(day: dict) -> list[dict]:
 PAUSE_FIT_S = 5.0
 
 
+def is_link_pause(e: dict) -> bool:
+    """Both-direction episode with the device-side pause signature (older
+    cached episodes carry no kind and count as pauses)."""
+    return e["directions"] == "both" and e.get("kind", "link_pause") == "link_pause"
+
+
 def pause_period(starts: list[float]) -> dict | None:
     """Period P that best explains the spacing of link pauses as whole
     multiples of P (pauses can fall outside tests, so one gap may span
@@ -193,7 +202,8 @@ def pause_period(starts: list[float]) -> dict | None:
 
 def day_findings(day: dict) -> dict:
     episodes = day.get("stall_episodes", [])
-    pauses = [e for e in episodes if e["directions"] == "both"]
+    pauses = [e for e in episodes if is_link_pause(e)]
+    congestion = [e for e in episodes if e["directions"] == "both" and not is_link_pause(e)]
     tests = []
     for test in day["tests"]:
         df = _frame(day, test)
@@ -212,7 +222,8 @@ def day_findings(day: dict) -> dict:
                 radio=_radio_label(day, df),
                 stats=test.get("stats"),
                 peers=test.get("peers", []),
-                link_pauses=sum(e["directions"] == "both" for e in in_test),
+                link_pauses=sum(is_link_pause(e) for e in in_test),
+                congestion_stalls=sum(e["directions"] == "both" and not is_link_pause(e) for e in in_test),
                 gap_episodes=sum(e["directions"] != "both" for e in in_test),
                 server_side_share=server_side,
             )
@@ -222,6 +233,7 @@ def day_findings(day: dict) -> dict:
         "tests": tests,
         "regime_changes": regime_changes(day),
         "link_pauses": pauses,
+        "congestion_stalls": congestion,
         "pause_period": pause_period([e["start"] for e in pauses]),
         "gap_episodes": [e for e in episodes if e["directions"] != "both"],
         "timing_summary": timing.day_summary(tests),

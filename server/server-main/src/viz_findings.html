@@ -210,6 +210,13 @@
       <div class="scroll"><table id="pauses"></table></div>
     </section>
     <section>
+      <h2>Congestion stalls (both directions)</h2>
+      <p class="intro">Both-direction stall bursts with shorter stalls (~95–100 ms) than a link pause (~120–130 ms):
+        an overloaded uplink delivering in 100 ms bursts, which stalls the echoed and downlink traffic too. Kept out
+        of the link-pause period.</p>
+      <div class="scroll"><table id="congestion"></table></div>
+    </section>
+    <section>
       <h2>One-way gap episodes</h2>
       <p class="intro">Repeated gaps (&gt; 80 ms) in one direction only, while the other direction flows normally.</p>
       <div class="scroll"><table id="gaps"></table></div>
@@ -305,6 +312,7 @@ function renderTests() {
     const loss = s.loss || {};
     const flags = [];
     if (t.link_pauses) flags.push(badge(`link pause ×${t.link_pauses}`, "b-red"));
+    if (t.congestion_stalls) flags.push(badge(`congestion stalls ×${t.congestion_stalls}`, "b-orange"));
     if (t.gap_episodes) flags.push(badge(`one-way gaps ×${t.gap_episodes}`, "b-purple"));
     if (t.server_side_share >= 0.2) flags.push(badge(`server-side DL ${Math.round(100 * t.server_side_share)} %`, "b-orange"));
     return [
@@ -382,6 +390,19 @@ function renderGaps() {
   table($("gaps"), [
     ["Time"], ["Test"], ["Dir"], ["Gaps", "num"], ["Gap median / max ms", "num"], ["Duration s", "num"],
   ], rows, "No one-way gap episodes this day.");
+}
+
+function renderCongestion() {
+  const rows = (data.congestion_stalls || []).map((e) => [
+    chartsLink(hms(e.start), e.start - 3, e.end + 3),
+    esc(e.plan || e.test_id),
+    `${e.stalls_downlink} / ${e.stalls_uplink}`,
+    `${num(e.stall_ms_median)} / ${num(e.stall_ms_max)}`,
+    num(e.end - e.start, 1),
+  ]);
+  table($("congestion"), [
+    ["Time"], ["Test"], ["Stalls DL / UL", "num"], ["Stall median / max ms", "num"], ["Duration s", "num"],
+  ], rows, "None this day.");
 }
 
 function renderServerSide() {
@@ -702,7 +723,8 @@ function drawOverview() {
     ["Hidden rhythm", top ? `${num(top.hz)} Hz` : "–", top ? `${num(1000 / top.hz, 2)} ms period · ${top.uplink} UL / ${top.downlink} DL streams` : "none found", "freq"],
     ["Modem queue limit", bp.held_packets_median ? `≈ ${num(bp.held_packets_median)} pkts` : "–", bp.streams ? `back pressure in ${bp.streams} streams (${bp.held_packets_range.join("–")})` : "no back pressure seen", "sat"],
     ["Uplink delay ceiling", ceil.length ? `${ceil[0]}–${ceil[ceil.length - 1]} ms` : "–", ceil.length ? `${ceil.length} overloaded streams; dropped by age` : "no overload without back pressure", "sat"],
-    ["Link pauses", pauses.length, per ? `every ${dur(per.period_s)} (${per.fits}/${per.intervals} fit)` : "", "events"],
+    ["Link pauses", pauses.length, (per ? `every ${dur(per.period_s)} (${per.fits}/${per.intervals} fit)` : "") +
+      ((data.congestion_stalls || []).length ? ` · ${data.congestion_stalls.length} congestion stalls apart` : ""), "events"],
     ["Delay-down events", (data.regime_changes || []).length, "delay halves while throughput rises", "events"],
   ];
   $("cards").innerHTML = cards.map(([k, v, s, tab]) =>
@@ -852,7 +874,7 @@ async function loadDay() {
     for (const t of data.tests) for (const s of t.timing || []) streams.push({ t, s });
     detailOpen = false; placeDetail();
     renderTimingSummary(); renderTiming();
-    renderTests(); renderRegimes(); renderPauses(); renderGaps(); renderServerSide();
+    renderTests(); renderRegimes(); renderPauses(); renderGaps(); renderCongestion(); renderServerSide();
     drawTab(curTab);
     $("status").textContent = `${data.tests.length} tests · ${streams.length} fast streams`;
   } catch (e) {

@@ -55,6 +55,7 @@
   <a href="/viz/findings">Findings</a>
   <span class="key" id="modeKey"></span>
   <span class="key"><i style="background:#ff375f55"></i>link pause (both directions)</span>
+  <span class="key"><i style="background:#ff9f0a55"></i>congestion stalls (both directions)</span>
   <span class="key"><i style="background:#af52de44"></i>one-way gaps</span>
   <span id="status"></span>
   <span class="hint">Drag across a graph to zoom all of them; double-click to zoom out.</span>
@@ -123,7 +124,8 @@ function axes(yLabel, extra) {
 }
 
 // Stall episodes (from the analysis): shaded in every graph, explained on hover.
-const EP_FILL = { both: "#ff375f30", uplink: "#af52de22", downlink: "#af52de22" };
+const EP_FILL = { link_pause: "#ff375f30", congestion: "#ff9f0a30", gap: "#af52de22" };
+const epKind = (e) => e.kind || (e.directions === "both" ? "link_pause" : "gap");
 
 function shadeEpisodes(u) {
   const eps = (data && data.stall_episodes) || [];
@@ -135,7 +137,7 @@ function shadeEpisodes(u) {
     if (e.end < min || e.start > max) continue;
     const x0 = u.valToPos(Math.max(e.start, min), "x", true);
     const x1 = u.valToPos(Math.min(e.end, max), "x", true);
-    ctx.fillStyle = EP_FILL[e.directions] || EP_FILL.uplink;
+    ctx.fillStyle = EP_FILL[epKind(e)] || EP_FILL.gap;
     ctx.fillRect(x0, top, Math.max(x1 - x0, 2 * (devicePixelRatio || 1)), h);
   }
   ctx.restore();
@@ -151,6 +153,12 @@ function episodeNote(e) {
   const dur = (e.end - e.start).toFixed(1);
   const when = new Date(e.start * 1000).toLocaleTimeString();
   const since = ago(e.since_prev_s);
+  if (epKind(e) === "congestion") {
+    return `<b>Congestion stalls, both directions</b> · ${when}<br>
+      ${e.stalls_downlink} downlink / ${e.stalls_uplink} uplink stalls of ~${e.stall_ms_median.toFixed(0)} ms
+      (max ${e.stall_ms_max.toFixed(0)} ms) over ${dur} s. Shorter than a link pause's ~120 ms: the overloaded uplink
+      delivers in ~100 ms bursts, which also stalls the echoed / downlink traffic. Queueing, not a device pause.`;
+  }
   if (e.directions === "both") {
     return `<b>Link pause, both directions</b> · ${when}<br>
       ${e.stalls_downlink} downlink / ${e.stalls_uplink} uplink stalls of ~${e.stall_ms_median.toFixed(0)} ms

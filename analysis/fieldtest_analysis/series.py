@@ -34,7 +34,7 @@ from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 10
+SERIES_VERSION = 11
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -343,9 +343,10 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
         for t in day_tests:
             for e in t.get("stalls", []):
                 e = dict(e, test_id=t["test_id"], plan=t["plan"])
-                p = prev.get(e["directions"])
+                key = e.get("kind") or e["directions"]
+                p = prev.get(key)
                 e["since_prev_s"] = round(e["start"] - p, 1) if p is not None else None
-                prev[e["directions"]] = e["start"]
+                prev[key] = e["start"]
                 episodes.append(e)
         # Clear-text band + frequency for every channel seen that day.
         channels = {

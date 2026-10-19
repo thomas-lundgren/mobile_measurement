@@ -55,3 +55,12 @@ def test_change_after_handover_is_attributed_to_it():
 
 def test_no_change_without_throughput_gain():
     assert day_findings(_day(120.0, 30.0, 50.0, 50.0))["regime_changes"] == []
+
+
+def test_congestion_stalls_stay_out_of_link_pauses():
+    from fieldtest_analysis.findings import is_link_pause
+
+    assert is_link_pause({"directions": "both", "kind": "link_pause"})
+    assert is_link_pause({"directions": "both"})  # older cache without kind
+    assert not is_link_pause({"directions": "both", "kind": "congestion"})
+    assert not is_link_pause({"directions": "uplink", "kind": "gap"})

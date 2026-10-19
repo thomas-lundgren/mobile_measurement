@@ -13,6 +13,12 @@ than ``EPISODE_JOIN_S`` form an *episode*; one with at least
 - ``uplink`` / ``downlink``: gaps in one direction only (e.g. uplink packets
   arriving in ~100 ms bursts under load).
 
+``kind`` separates the two causes of both-direction episodes by stall length:
+``link_pause`` (stalls of ``PAUSE_STALL_MS``, the device-side pause above) or
+``congestion`` (shorter, ~95–100 ms stalls: an overloaded uplink delivering
+in 100 ms bursts, which stalls the echo / downlink too). One-way episodes are
+``gap``.
+
 Times are on the server clock: mobile arrival times minus the estimated
 offset O = mobile - server.
 """
@@ -27,6 +33,8 @@ from .clock import OffsetEstimate, estimate_offset
 from .loader import TestData
 
 STALL_MS = 80.0
+#: Median stall length (ms) of a link pause; shorter both-way stalls are congestion.
+PAUSE_STALL_MS = (108.0, 200.0)
 EPISODE_JOIN_S = 1.0
 MIN_STALLS = 3
 #: Only streams this dense can show a stall (median inter-arrival, ms).
@@ -88,15 +96,20 @@ def detect(td: TestData, offset: OffsetEstimate | None = None) -> list[dict]:
             ends = np.array([e for _, e in ul])
             hits = sum(np.min(np.abs(ends - e)) * 1000 <= COINCIDE_MS for _, e in dl)
             both = hits >= 0.5 * min(len(dl), len(ul))
+        median = float(np.median(durations))
+        kind = "gap"
+        if both:
+            kind = "link_pause" if PAUSE_STALL_MS[0] <= median <= PAUSE_STALL_MS[1] else "congestion"
         out.append(
             {
                 "start": round(min(s for s, _, _ in ep), 3),
                 "end": round(max(e for _, e, _ in ep), 3),
                 "stalls_downlink": len(dl),
                 "stalls_uplink": len(ul),
-                "stall_ms_median": round(float(np.median(durations)), 1),
+                "stall_ms_median": round(median, 1),
                 "stall_ms_max": round(float(np.max(durations)), 1),
                 "directions": "both" if both else ("downlink" if len(dl) >= len(ul) else "uplink"),
+                "kind": kind,
             }
         )
     return out
