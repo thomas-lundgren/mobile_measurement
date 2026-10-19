@@ -65,3 +65,13 @@ def test_unknown_columns_preserved_and_missing_filled(tmp_path):
     # time columns coerced to signed nullable Int64
     assert str(td.packets["mono_ns"].dtype) == "Int64"
     assert td.packets["node"].tolist() == ["mobile", "mobile"]
+
+
+def test_unclosed_segment_is_skipped(twonode_test_dir, tmp_path):
+    import shutil
+
+    d = tmp_path / "t"
+    shutil.copytree(twonode_test_dir, d)
+    (d / "server" / "packets_f9_0000.parquet").write_bytes(b"PAR1")
+    td = load_test(d)
+    assert set(td.nodes) == {"mobile", "server"}

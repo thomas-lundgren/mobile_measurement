@@ -27,6 +27,10 @@ import pyarrow.parquet as pq
 from . import schema
 
 
+#: "PAR1" + footer length + "PAR1": the smallest file that can be valid parquet.
+MIN_PARQUET_BYTES = 12
+
+
 def _normalize(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     """Guarantee `columns` exist (NA if absent), cast time columns to int64,
     and keep any extra columns the file happened to carry."""
@@ -53,7 +57,9 @@ def _read_segmented(node_dir: Path, stem: str, columns: list[str]) -> pd.DataFra
     server's flow-scoped ``<stem>_fN_NNNN.parquet`` segments."""
     if not node_dir.is_dir():
         return None
-    parts = sorted(node_dir.glob(f"{stem}*.parquet"))
+    # A segment shorter than a parquet header + footer was never closed by its
+    # writer (e.g. a cancelled test); skip it rather than lose the whole test.
+    parts = [p for p in sorted(node_dir.glob(f"{stem}*.parquet")) if p.stat().st_size >= MIN_PARQUET_BYTES]
     if not parts:
         return None
     frames = [pq.read_table(p).to_pandas() for p in parts]

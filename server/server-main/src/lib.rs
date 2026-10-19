@@ -14,18 +14,20 @@ pub mod tests_api;
 pub mod time_sync;
 pub mod uploads;
 pub mod util;
+pub mod viz;
 
 pub use state::AppState;
 
 use axum::Router;
 
 /// Build the full application router: auth + device control plane + uploads +
-/// operator test orchestration.
+/// operator test orchestration + coverage map.
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .merge(auth::routes())
         .merge(device::routes())
         .merge(uploads::routes())
         .merge(tests_api::routes())
+        .merge(viz::routes())
         .with_state(state)
 }

@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Measurement Charts</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.min.css">
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --muted:#6e6e73; --panel:#f5f5f7; --border:#d2d2d7; --accent:#0a66c2; --grid:#0000001a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1c1c1e; --fg:#f2f2f7; --muted:#a1a1a6; --panel:#2c2c2e; --border:#3a3a3c; --accent:#4c9aff; --grid:#ffffff1f; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--fg);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position:sticky; top:0; z-index:10; background:var(--panel); border-bottom:1px solid var(--border);
+    padding:8px 16px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  header h1 { font-size:16px; margin:0 8px 0 0; }
+  header label { color:var(--muted); font-size:12px; }
+  header a { color:var(--accent); }
+  select, input, button { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--border);
+    border-radius:6px; padding:4px 6px; }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  #status, .hint { color:var(--muted); font-size:12px; }
+  main { padding:8px 16px 24px; }
+  .chart { margin:6px 0 14px; }
+  .chart h2 { font-size:13px; font-weight:600; margin:0 0 2px; }
+  .u-legend { font-size:12px; }
+  .u-legend .u-marker { border-radius:50%; }
+  #login { max-width:320px; margin:15vh auto; padding:16px; background:var(--panel); border:1px solid var(--border);
+    border-radius:10px; display:none; }
+  #login h2 { font-size:16px; margin:0 0 8px; }
+  #login input { width:100%; margin:4px 0; }
+  #login .err { color:#d70015; min-height:1.2em; font-size:12px; }
+  #tests { font-size:12px; color:var(--muted); display:flex; flex-wrap:wrap; gap:4px 12px; }
+  #tests button { font-size:12px; padding:1px 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Measurements</h1>
+  <label>Day <select id="day"></select></label>
+  <label><input type="checkbox" id="logy"> log delay axis</label>
+  <button id="reset">Reset zoom</button>
+  <button id="reload">Reload</button>
+  <a href="/viz">Map</a>
+  <span id="status"></span>
+  <span class="hint">Drag across a graph to zoom all of them; double-click to zoom out.</span>
+</header>
+
+<form id="login">
+  <h2>Operator login</h2>
+  <input id="user" autocomplete="username" placeholder="Username" required>
+  <input id="pass" type="password" autocomplete="current-password" placeholder="Password" required>
+  <div class="err" id="loginErr"></div>
+  <button class="primary" type="submit">Log in</button>
+</form>
+
+<main id="main">
+  <div id="tests"></div>
+  <div class="chart"><h2>Round-trip time (UDP probe), ms</h2><div id="c_rtt"></div></div>
+  <div class="chart"><h2>One-way delay (UDP, clock-corrected), ms</h2><div id="c_owd"></div></div>
+  <div class="chart"><h2>TCP throughput, Mbit/s</h2><div id="c_tput"></div></div>
+  <div class="chart"><h2>Signal (RSRP), dBm, and network mode</h2><div id="c_radio"></div></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const MODE_LEVEL = { LTE: 1, LTE_ADVANCED_PRO: 1.5, LTE_CA: 2, NR_NSA: 3, NR_ADVANCED: 3.5, NR_SA: 4 };
+const MODE_NAME = Object.fromEntries(Object.entries(MODE_LEVEL).map(([k, v]) => [v, k]));
+const COL = {
+  med1: "#0a84ff", max1: "#0a84ff66", med2: "#ff6b00", max2: "#ff6b0066",
+  down: "#1fb954", up: "#af52de", lte: "#ff9f0a", nr: "#30b0c7", mode: "#8e8e93",
+};
+
+let data = null;
+let plots = [];
+
+function token() { try { return sessionStorage.getItem("mp_jwt"); } catch { return null; } }
+function setToken(t) { try { t ? sessionStorage.setItem("mp_jwt", t) : sessionStorage.removeItem("mp_jwt"); } catch {} }
+
+async function api(path) {
+  const r = await fetch(path, { headers: { authorization: "Bearer " + token() } });
+  if (r.status === 401) { setToken(null); showLogin(); throw new Error("login"); }
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function width() { return Math.max(300, $("main").clientWidth); }
+
+// Zooming one chart's x range zooms all of them.
+let syncing = false;
+function syncX(u) {
+  if (syncing) return;
+  syncing = true;
+  const { min, max } = u.scales.x;
+  for (const p of plots) if (p !== u) p.setScale("x", { min, max });
+  syncing = false;
+}
+
+function axes(yLabel, extra) {
+  const grid = { stroke: css("--grid"), width: 1 };
+  const fg = css("--fg");
+  return [
+    { stroke: fg, grid, ticks: grid },
+    Object.assign({ stroke: fg, grid, ticks: grid, label: yLabel, size: 56 }, extra || {}),
+  ];
+}
+
+function opts(series, yLabel, extra) {
+  return Object.assign({
+    width: width(), height: 220,
+    cursor: { sync: { key: "mp" }, drag: { x: true, y: false } },
+    scales: { x: { time: true } },
+    axes: axes(yLabel),
+    series: [{}].concat(series),
+    hooks: { setScale: [(u, key) => { if (key === "x") syncX(u); }] },
+  }, extra || {});
+}
+
+function line(label, stroke, extra) {
+  return Object.assign({ label, stroke, width: 1.5, spanGaps: false,
+    value: (u, v) => v == null ? "–" : v.toFixed(1) }, extra || {});
+}
+
+function build() {
+  for (const p of plots) p.destroy();
+  plots = [];
+  if (!data || !data.t.length) return;
+  const t = data.t;
+  const logy = $("logy").checked;
+  const ydelay = logy ? { y: { distr: 3 } } : {};
+  const pos = (arr) => logy ? arr.map((v) => v == null || v <= 0 ? null : v) : arr;
+
+  plots.push(new uPlot(opts([
+    line("median", COL.med1, { width: 2 }),
+    line("max", COL.max1),
+  ], "ms", { scales: Object.assign({ x: { time: true } }, ydelay) }),
+  [t, pos(data.rtt_med), pos(data.rtt_max)], $("c_rtt")));
+
+  plots.push(new uPlot(opts([
+    line("uplink median", COL.med2, { width: 2 }),
+    line("uplink max", COL.max2),
+    line("downlink median", COL.med1, { width: 2 }),
+    line("downlink max", COL.max1),
+  ], "ms", { scales: Object.assign({ x: { time: true } }, ydelay) }),
+  [t, pos(data.ul_med), pos(data.ul_max), pos(data.dl_med), pos(data.dl_max)], $("c_owd")));
+
+  plots.push(new uPlot(opts([
+    line("download", COL.down, { fill: COL.down + "22" }),
+    line("upload", COL.up, { fill: COL.up + "22" }),
+  ], "Mbit/s"), [t, data.down_mbps, data.up_mbps], $("c_tput")));
+
+  const modeLevel = data.mode.map((m) => m == null ? null : (MODE_LEVEL[m] ?? 0.5));
+  const radioOpts = opts([
+    line("LTE RSRP", COL.lte, { scale: "dbm" }),
+    line("5G RSRP", COL.nr, { scale: "dbm" }),
+    line("mode", COL.mode, { scale: "mode", width: 2, paths: uPlot.paths.stepped({ align: 1 }),
+      value: (u, v) => v == null ? "–" : (MODE_NAME[v] || "other") }),
+  ], "dBm");
+  radioOpts.scales = { x: { time: true }, dbm: { range: [-130, -60] }, mode: { range: [0, 4.5] } };
+  radioOpts.axes = axes("dBm", { scale: "dbm" }).concat([{
+    scale: "mode", side: 1, stroke: css("--fg"), grid: { show: false }, size: 110,
+    splits: () => [1, 2, 3, 4], values: (u, vals) => vals.map((v) => MODE_NAME[v] || ""),
+  }]);
+  plots.push(new uPlot(radioOpts, [t, data.lte_rsrp, data.nr_rsrp, modeLevel], $("c_radio")));
+
+  // Test list: click to zoom to one test.
+  $("tests").innerHTML = data.tests.map((x, i) => {
+    const s = new Date(x.start * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return `<button data-i="${i}">${s} ${x.plan || x.test_id}</button>`;
+  }).join("");
+}
+
+$("tests").addEventListener("click", (e) => {
+  const i = e.target.dataset && e.target.dataset.i;
+  if (i == null) return;
+  const x = data.tests[+i];
+  plots[0].setScale("x", { min: x.start - 2, max: x.end + 2 });
+});
+
+async function loadDay() {
+  const day = $("day").value;
+  if (!day) return;
+  $("status").textContent = "Loading…";
+  try {
+    data = await api("/api/v1/viz/series/" + day);
+    build();
+    $("status").textContent = `${data.tests.length} tests`;
+  } catch (e) {
+    if (e.message !== "login") $("status").textContent = "Error: " + e.message;
+  }
+}
+
+async function load() {
+  if (!token()) { showLogin(); return; }
+  try {
+    const { days } = await api("/api/v1/viz/series");
+    const sel = $("day");
+    const prev = sel.value;
+    sel.innerHTML = days.slice().reverse().map((d) => `<option>${d}</option>`).join("");
+    if (days.includes(prev)) sel.value = prev;
+    await loadDay();
+  } catch (e) {
+    if (e.message !== "login") $("status").textContent = e.message === "HTTP 404" ? "No data yet" : "Error: " + e.message;
+  }
+}
+
+function showLogin() { $("main").style.display = "none"; $("login").style.display = "block"; $("user").focus(); }
+
+$("login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("loginErr").textContent = "";
+  const r = await fetch("/api/v1/auth/login", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: $("user").value, password: $("pass").value }),
+  });
+  if (!r.ok) { $("loginErr").textContent = "Login failed"; return; }
+  setToken((await r.json()).jwt);
+  $("pass").value = "";
+  $("login").style.display = "none";
+  $("main").style.display = "block";
+  load();
+});
+$("day").addEventListener("change", loadDay);
+$("logy").addEventListener("change", build);
+$("reload").addEventListener("click", load);
+$("reset").addEventListener("click", () => {
+  if (data && plots.length) plots[0].setScale("x", { min: data.t[0], max: data.t[data.t.length - 1] });
+});
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => plots.forEach((p) => p.setSize({ width: width(), height: 220 })), 150);
+});
+
+load();
+</script>
+</body>
+</html>
