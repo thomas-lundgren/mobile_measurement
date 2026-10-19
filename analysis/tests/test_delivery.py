@@ -57,3 +57,43 @@ def test_harq_like_step_shows_as_excess_delay_peak():
     [e] = delivery.analyze(_uplink(grant_ms=1, harq_every=20))
     peaks = [p["at"] for p in e["delivery"]["excess_delay_peaks_ms"]]
     assert any(7.5 <= p <= 9.5 for p in peaks), peaks
+
+
+def _overloaded(drain_every: int, wait_ms: int, n: int = 4000):
+    """Phone offers 1 packet/ms; the uplink delivers only every
+    `drain_every`-th one, each after `wait_ms` (the rest are dropped)."""
+    rows = []
+    for i in range(n):
+        t = i * MS
+        rows.append({"node": "mobile", "flow_id": 2, "sequence_number": i, "direction": "SENT", "protocol": "UDP",
+                     "mono_ns": t, "utc_ns": t, "payload_size": 1000, "send_status": "OK"})
+        if i % drain_every:
+            continue
+        rx = t + 10 * MS + (wait_ms * MS if i > 200 else 0)
+        rows.append({"node": "server", "flow_id": 2, "sequence_number": i, "direction": "RECEIVED", "protocol": "UDP",
+                     "mono_ns": rx, "utc_ns": rx, "kernel_rx_utc_ns": rx,
+                     "sender_mono_ns": t, "sender_utc_ns": t, "payload_size": 1000})
+    return synthetic_test(packets=make_packets(rows))
+
+
+def test_queue_limit_from_drain_rate_and_wait():
+    [e] = delivery.analyze(_overloaded(drain_every=4, wait_ms=300))
+    q = e["queue_limit"]
+    assert q["loss_share"] == 0.75
+    assert abs(q["drained_mbps"] - 2.0) < 0.05 and abs(q["wait_ms"] - 300) < 1
+    assert abs(q["queue_kb"] - 75) < 2  # 2 Mbit/s × 0.3 s
+
+
+def test_no_queue_limit_when_not_overloaded():
+    [e] = delivery.analyze(_uplink())
+    assert e["queue_limit"] is None
+
+
+def test_backpressure_counts_as_overload_without_loss():
+    td = _uplink()
+    pk = td.packets
+    sent = pk["direction"] == "SENT"
+    pk.loc[sent, "sock_outq_bytes"] = 300_000  # OS queue full on every send
+    [e] = delivery.analyze(td)
+    q = e["queue_limit"]
+    assert q is not None and q["backpressure_share"] == 1.0 and q["loss_share"] < 0.01

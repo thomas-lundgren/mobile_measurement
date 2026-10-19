@@ -50,6 +50,12 @@ EXCESS_BIN_MS = 1.0
 EXCESS_MAX_MS = 40.0
 #: A histogram peak must hold at least this share of packets to be listed.
 PEAK_MIN_SHARE = 0.01
+#: Loss above this marks a stream as overloaded for the queue-limit estimate…
+OVERLOAD_LOSS = 0.05
+#: …as does the OS queue below the socket being this full (back pressure:
+#: the modem flow-controls the host instead of dropping) for this share of sends.
+BACKPRESSURE_OUTQ_BYTES = 100_000
+BACKPRESSURE_SHARE = 0.05
 
 
 def _pct(s: pd.Series | np.ndarray, q: float) -> float | None:
@@ -155,6 +161,55 @@ def _delivery_stats(recv: pd.DataFrame) -> dict:
     return out
 
 
+def queue_limit(sent: pd.DataFrame, recv: pd.DataFrame) -> dict | None:
+    """For an overloaded stream: where does the sender-side queue (in the
+    uplink: the modem) stop growing? Over the second half of the test
+    (steady state):
+
+    - ``queue_*``: delivered backlog ≈ drain rate × median wait;
+    - ``held_packets``: what the queue holds including packets it will
+      drop, ≈ accepted send rate × p90 wait (the age packets reach).
+
+    Across tests, a constant wait means a time limit (e.g. a discard
+    timer); a constant byte backlog, a byte limit; a constant
+    ``held_packets``, a packet-count limit. ``backpressure_share`` is the
+    share of sends that found the OS queue full."""
+    ts = sent.set_index("sequence_number")["utc_ns"].astype("int64")
+    kernel = pd.to_numeric(recv["kernel_rx_utc_ns"], errors="coerce") if "kernel_rx_utc_ns" in recv else None
+    rx = (kernel.fillna(pd.to_numeric(recv["utc_ns"])) if kernel is not None else pd.to_numeric(recv["utc_ns"])).astype("int64")
+    tr = pd.Series(rx.to_numpy(), index=recv["sequence_number"].astype("int64").to_numpy())
+    owd = (tr - ts.reindex(tr.index)).dropna()
+    if len(owd) < 50:
+        return None
+    lo, hi = tr.index.min(), tr.index.max()
+    mid = (lo + hi) / 2
+    sent_half = ts[(ts.index > mid) & (ts.index <= hi)]
+    got_half = owd[owd.index > mid]
+    if len(sent_half) < 50:
+        return None
+    loss = 1 - len(got_half) / len(sent_half)
+    outq = pd.to_numeric(sent["sock_outq_bytes"], errors="coerce") if "sock_outq_bytes" in sent else pd.Series(dtype=float)
+    backpressure = float((outq > BACKPRESSURE_OUTQ_BYTES).mean()) if outq.notna().any() else 0.0
+    if loss < OVERLOAD_LOSS and backpressure < BACKPRESSURE_SHARE:
+        return None
+    dur_s = float(sent_half.max() - sent_half.min()) / 1e9
+    size = float(sent["payload_size"].median())
+    drain_bps = len(got_half) * size * 8 / dur_s
+    waits = (got_half - np.percentile(owd, 0.5)) / 1e9
+    wait_s = float(waits.median())
+    queue_bytes = drain_bps / 8 * wait_s
+    return {
+        "offered_mbps": round(len(sent_half) * size * 8 / dur_s / 1e6, 2),
+        "drained_mbps": round(drain_bps / 1e6, 2),
+        "loss_share": round(loss, 3),
+        "wait_ms": round(wait_s * 1e3, 1),
+        "queue_kb": round(queue_bytes / 1e3, 1),
+        "queue_packets": round(queue_bytes / size),
+        "held_packets": round(len(sent_half) / dur_s * float(waits.quantile(0.9))),
+        "backpressure_share": round(backpressure, 3),
+    }
+
+
 def analyze(td: TestData) -> list[dict]:
     """One entry per realtime stream (a flow with embedded sender times)."""
     pk = td.packets
@@ -179,6 +234,7 @@ def analyze(td: TestData) -> list[dict]:
             lo, hi = min(got), max(got)
             sent_ok = {q for q in ok["sequence_number"].astype("int64") if lo <= q <= hi}
             entry["network_loss_share"] = round(len(sent_ok - got) / len(sent_ok), 4) if sent_ok else None
+            entry["queue_limit"] = queue_limit(ok, recv)
         entry["delivery"] = _delivery_stats(recv)
         out.append(entry)
     return sorted(out, key=lambda e: e["flow_id"])
@@ -191,6 +247,8 @@ def _fmt(e: dict) -> str:
         lines.append(f"  sender: {s['attempts']} attempts, status {s.get('status')}, pacing µs {s.get('pacing_us')}")
         lines.append(f"          send call µs {s.get('send_call_us')}, queued below socket (bytes) {s.get('outq_bytes')}")
         lines.append(f"  network loss: {e.get('network_loss_share')}")
+        if e.get("queue_limit"):
+            lines.append(f"  overloaded, steady state: {e['queue_limit']}")
     d = e["delivery"]
     lines.append(f"  delivery ({d['clock']} clock): {d['received']} packets, batches {d.get('batches')}")
     lines.append(f"          batch spacing µs {d.get('batch_interval_us')}, peaks (ms) {d.get('batch_interval_peaks_ms')}")
