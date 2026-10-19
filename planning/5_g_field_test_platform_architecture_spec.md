@@ -1163,6 +1163,7 @@ Fields (standard Android Telephony APIs, Pixel 9 Pro reference):
 - `lte_rsrp` — LTE RSRP (if NSA)
 - `bandwidth_mhz` — Cell bandwidth (if available)
 - `cell_connection_status` — PRIMARY / SECONDARY / UNKNOWN
+- `network_type` — radio mode the device reports (Android `TelephonyDisplayInfo`): `LTE`, `LTE_CA`, `NR_NSA`, `NR_ADVANCED`, `NR_SA`, or `OTHER_<n>` for other `TelephonyManager` network types; null when unknown. The NR columns (`pci`…`sinr`) describe a serving 5G cell only while this is `NR_*`; otherwise NR cells the modem measures are listed as neighbors. In NSA the modem often drops the 5G leg (LTE / LTE_CA) while still listing NR cells.
 - `neighbor_cells` — array of visible neighbor cell PCIs with RSRP (directly available via `getAllCellInfo()`, logged at the serving-cell sample rate)
 
 Derived fields (post-processing):

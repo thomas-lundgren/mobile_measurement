@@ -24,8 +24,17 @@ def _radio_stats(td: TestData) -> dict:
     serving_rsrp = r["rsrp"].where(r["rsrp"].notna(), r["lte_rsrp"])
     pci = pd.to_numeric(serving_pci, errors="coerce").dropna()
     rat = "NR" if r["pci"].notna().any() else ("LTE" if r["lte_pci"].notna().any() else "UNKNOWN")
+    # Share of samples per reported radio mode (e.g. NR_NSA vs LTE_CA);
+    # absent in logs written before network_type existed.
+    nt = r["network_type"].dropna() if "network_type" in r else pd.Series(dtype=object)
+    network_type_share = (
+        {k: round(float(v), 3) for k, v in nt.value_counts(normalize=True).items()}
+        if not nt.empty
+        else None
+    )
     return {
         "rat": rat,
+        "network_type_share": network_type_share,
         "serving_rsrp_dbm": mmm(serving_rsrp),
         "nr_rsrp_dbm": mmm(r["rsrp"]),
         "lte_rsrp_dbm": mmm(r["lte_rsrp"]),

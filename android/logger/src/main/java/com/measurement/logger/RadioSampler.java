@@ -12,8 +12,11 @@ import android.telephony.CellSignalStrengthNr;
 import android.telephony.CellIdentityNr;
 import android.telephony.CellIdentityLte;
 import android.telephony.SignalStrength;
+import android.telephony.TelephonyCallback;
+import android.telephony.TelephonyDisplayInfo;
 import android.telephony.TelephonyManager;
 
+import androidx.annotation.RequiresApi;
 import androidx.core.content.ContextCompat;
 
 import org.json.JSONArray;
@@ -31,6 +34,9 @@ public final class RadioSampler {
     private final long handle;
     private volatile boolean running;
     private Thread thread;
+    /** Radio mode from TelephonyDisplayInfo (null until reported, or before API 31). */
+    private volatile String networkType;
+    private TelephonyCallback displayCallback;
 
     public RadioSampler(Context ctx, long handle) {
         this.ctx = ctx;
@@ -42,18 +48,77 @@ public final class RadioSampler {
                 != PackageManager.PERMISSION_GRANTED) {
             return;
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listenDisplayInfo();
+        }
         running = true;
         thread = new Thread(this::loop, "radio-sampler");
         thread.start();
     }
 
     public void stop() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && displayCallback != null) {
+            TelephonyManager tm = (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
+            tm.unregisterTelephonyCallback(displayCallback);
+            displayCallback = null;
+        }
         running = false;
         if (thread != null) {
             try {
                 thread.join(1500);
             } catch (InterruptedException ignored) {
             }
+        }
+    }
+
+    /** In NSA the modem adds and drops the 5G leg all the time (LTE_CA for
+     *  minutes on a walk) while CellInfo keeps listing NR cells as secondary
+     *  serving. TelephonyDisplayInfo says which mode the device is in; it
+     *  is reported on registration and on every change. */
+    @RequiresApi(Build.VERSION_CODES.S)
+    private void listenDisplayInfo() {
+        TelephonyManager tm = (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
+        DisplayInfoCallback cb = new DisplayInfoCallback();
+        try {
+            tm.registerTelephonyCallback(Runnable::run, cb);
+            displayCallback = cb;
+        } catch (RuntimeException ignored) {
+            // no READ_PHONE_STATE: network_type stays null, NR handled as before
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    private final class DisplayInfoCallback extends TelephonyCallback
+            implements TelephonyCallback.DisplayInfoListener {
+        @Override
+        public void onDisplayInfoChanged(TelephonyDisplayInfo info) {
+            networkType = describe(info);
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    static String describe(TelephonyDisplayInfo info) {
+        switch (info.getOverrideNetworkType()) {
+            case TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA:
+                return "NR_NSA";
+            case TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED:
+                return "NR_ADVANCED";
+            case TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_CA:
+                return "LTE_CA";
+            case TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_ADVANCED_PRO:
+                return "LTE_ADVANCED_PRO";
+            default:
+                break;
+        }
+        switch (info.getNetworkType()) {
+            case TelephonyManager.NETWORK_TYPE_NR:
+                return "NR_SA";
+            case TelephonyManager.NETWORK_TYPE_LTE:
+                return "LTE";
+            case TelephonyManager.NETWORK_TYPE_UNKNOWN:
+                return null;
+            default:
+                return "OTHER_" + info.getNetworkType();
         }
     }
 
@@ -119,6 +184,12 @@ public final class RadioSampler {
             row.put("utc_ns", t[1]);
             boolean haveNr = false;
             boolean haveLte = false;
+            // Unknown mode (no callback yet / old API): trust CellInfo as before.
+            String mode = networkType;
+            boolean nrActive = mode == null || mode.startsWith("NR");
+            if (mode != null) {
+                row.put("network_type", mode);
+            }
 
             for (CellInfo ci : cells) {
                 int status = ci.getCellConnectionStatus();
@@ -131,7 +202,7 @@ public final class RadioSampler {
                     // still the 5G leg the device is using, not a neighbor.
                     boolean primary = ci.isRegistered();
                     boolean secondary = status == CellInfo.CONNECTION_SECONDARY_SERVING;
-                    if ((primary || secondary) && !haveNr) {
+                    if ((primary || secondary) && nrActive && !haveNr) {
                         haveNr = true;
                         putIfValid(row, "pci", id.getPci());
                         putIfValid(row, "nci", id.getNci());
@@ -161,7 +232,7 @@ public final class RadioSampler {
             // when the 5G leg was added and never refreshes (one value for
             // hours), or is unavailable with a placeholder SINR of 0. Use
             // CellInfoNr's signal only when SignalStrength has none.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && nrActive) {
                 SignalStrength sig = tm.getSignalStrength();
                 if (sig != null) {
                     for (CellSignalStrengthNr ss : sig.getCellSignalStrengths(CellSignalStrengthNr.class)) {

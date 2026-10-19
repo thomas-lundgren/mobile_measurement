@@ -35,6 +35,7 @@ columns:
 
   - { name: bandwidth_mhz,          type: uint32, nullable: true }
   - { name: cell_connection_status, type: utf8,   nullable: true, doc: "PRIMARY | SECONDARY | UNKNOWN." }
+  - { name: network_type,           type: utf8,   nullable: true, doc: "Radio mode the device reports: LTE | LTE_CA | NR_NSA | NR_ADVANCED | NR_SA (OTHER_<n> for other TelephonyManager network types). NR columns describe a serving 5G cell only when this is NR_*." }
 
   # Neighbor cells from getAllCellInfo(), logged at the serving-cell rate.
   - name: neighbor_cells

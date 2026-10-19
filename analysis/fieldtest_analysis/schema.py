@@ -88,6 +88,7 @@ RADIO = [
     "lte_rsrp",
     "bandwidth_mhz",
     "cell_connection_status",
+    "network_type",
     "neighbor_cells",
 ]
 

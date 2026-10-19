@@ -86,6 +86,9 @@ pub struct RadioRow {
     pub bandwidth_mhz: Option<u32>,
     #[serde(default)]
     pub cell_connection_status: Option<String>,
+    /// Radio mode the device reports (LTE, LTE_CA, NR_NSA, NR_ADVANCED, NR_SA, ...).
+    #[serde(default)]
+    pub network_type: Option<String>,
     #[serde(default)]
     pub neighbor_cells: Option<Vec<Neighbor>>,
 }
@@ -279,6 +282,7 @@ pub fn write_radio(path: &Path, ctx: &AuxContext, rows: &[RadioRow]) -> std::io:
         Field::new("lte_rsrp", DataType::Int32, true),
         Field::new("bandwidth_mhz", DataType::UInt32, true),
         Field::new("cell_connection_status", DataType::Utf8, true),
+        Field::new("network_type", DataType::Utf8, true),
         Field::new("neighbor_cells", neighbors.data_type().clone(), true),
     ]));
     let u32c =
@@ -313,6 +317,11 @@ pub fn write_radio(path: &Path, ctx: &AuxContext, rows: &[RadioRow]) -> std::io:
             Arc::new(StringArray::from(
                 rows.iter()
                     .map(|r| r.cell_connection_status.clone())
+                    .collect::<Vec<_>>(),
+            )) as _,
+            Arc::new(StringArray::from(
+                rows.iter()
+                    .map(|r| r.network_type.clone())
                     .collect::<Vec<_>>(),
             )) as _,
             neighbors,
@@ -394,6 +403,7 @@ mod tests {
                 lte_rsrp: None,
                 bandwidth_mhz: Some(100),
                 cell_connection_status: Some("PRIMARY".into()),
+                network_type: Some("NR_SA".into()),
                 neighbor_cells: Some(vec![
                     Neighbor {
                         pci: 302,
@@ -420,6 +430,7 @@ mod tests {
                 lte_rsrp: None,
                 bandwidth_mhz: None,
                 cell_connection_status: None,
+                network_type: None,
                 neighbor_cells: None,
             },
         ];
@@ -439,6 +450,14 @@ mod tests {
             "row0 has 2 neighbors"
         );
         assert!(list.is_null(1), "row1 has null neighbor_cells");
+        let nt = batch
+            .column_by_name("network_type")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(nt.value(0), "NR_SA");
+        assert!(nt.is_null(1));
     }
 
     #[test]
