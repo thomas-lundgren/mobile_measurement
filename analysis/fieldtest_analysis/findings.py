@@ -209,6 +209,7 @@ def day_findings(day: dict) -> dict:
                 test,
                 radio=_radio_label(day, df),
                 stats=test.get("stats"),
+                peers=test.get("peers", []),
                 link_pauses=sum(e["directions"] == "both" for e in in_test),
                 gap_episodes=sum(e["directions"] != "both" for e in in_test),
                 server_side_share=server_side,

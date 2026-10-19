@@ -15,6 +15,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use fieldtest_core::aux_log::{write_events, AuxContext, EventRow};
 use fieldtest_core::log_writer::{packet_channel, spawn_packet_writer, LogContext};
 use mp_contracts::{
     Flow, GeneratorCounters, GeneratorState, InternalGeneratorPrepare, InternalGeneratorStatus,
@@ -36,6 +37,10 @@ fn bind_udp(port: u16) -> Result<UdpSocket, (StatusCode, String)> {
 struct GeneratorEntry {
     test_id: String,
     flow_id: u32,
+    /// Where this flow's server logs go, and their join keys (for events).
+    log_dir: std::path::PathBuf,
+    log_ctx: AuxContext,
+    protocol: &'static str,
     bound_port: u16,
     state: Arc<Mutex<GeneratorState>>,
     counters: Arc<Counters>,
@@ -194,8 +199,20 @@ async fn prepare(
         }
     };
 
+    let protocol = match &req.flow {
+        Flow::BulkTcp { .. } => "TCP",
+        _ => "UDP",
+    };
     let generator_id = format!("gen_{}", ulid::Ulid::new());
     let entry = Arc::new(GeneratorEntry {
+        log_dir: std::path::PathBuf::from(&req.node_log_dir),
+        log_ctx: AuxContext {
+            device_id: req.device_id.clone(),
+            session_id: req.session_id.clone(),
+            test_id: req.test_id.clone(),
+            node: "server".to_string(),
+        },
+        protocol,
         test_id: req.test_id,
         flow_id,
         bound_port,
@@ -238,7 +255,35 @@ async fn stop(
         // flow thread finalizes the writer; brief blocking join is acceptable.
         let _ = tokio::task::spawn_blocking(move || h.join()).await;
     }
+    write_peer_event(&e);
     Ok(Json(status_of(&generator_id, &e)))
+}
+
+/// CLIENT_CONNECTED with the UE's address as the server saw it (after NAT),
+/// so every test records which network it actually ran over. Written once
+/// (the peer is taken), best-effort: a failure only loses the event.
+fn write_peer_event(e: &GeneratorEntry) {
+    let Some((ts, peer)) = e.counters.peer.lock().unwrap().take() else {
+        return;
+    };
+    let row = EventRow {
+        mono_ns: ts.mono_ns,
+        utc_ns: ts.utc_ns,
+        event_type: "CLIENT_CONNECTED".into(),
+        flow_id: Some(e.flow_id),
+        event_metadata: Some(
+            serde_json::json!({
+                "peer_ip": peer.ip().to_string(),
+                "peer_port": peer.port(),
+                "protocol": e.protocol,
+            })
+            .to_string(),
+        ),
+    };
+    let path = e.log_dir.join(format!("events_f{}.parquet", e.flow_id));
+    if let Err(err) = write_events(&path, &e.log_ctx, &[row]) {
+        tracing::warn!(flow_id = e.flow_id, %err, "could not write CLIENT_CONNECTED event");
+    }
 }
 
 fn internal<E: std::fmt::Display>(e: E) -> (StatusCode, String) {

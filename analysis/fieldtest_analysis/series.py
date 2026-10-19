@@ -34,7 +34,7 @@ from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 7
+SERIES_VERSION = 8
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -94,6 +94,21 @@ def _echo_flows(pk) -> set:
     sent = set(m.loc[m["direction"] == schema.DIR_SENT, "flow_id"].dropna().astype(int))
     recv = set(m.loc[m["direction"] == schema.DIR_RECEIVED, "flow_id"].dropna().astype(int))
     return sent & recv
+
+
+def _peer_ips(td) -> list[str]:
+    """The UE's address(es) as the server saw them (CLIENT_CONNECTED events):
+    which network the test ran over. Empty for tests before the event existed."""
+    ev = td.events
+    if ev.empty or "event_type" not in ev or "event_metadata" not in ev:
+        return []
+    ips = set()
+    for meta in ev.loc[ev["event_type"] == "CLIENT_CONNECTED", "event_metadata"].dropna():
+        try:
+            ips.add(json.loads(meta)["peer_ip"])
+        except (ValueError, KeyError, TypeError):
+            continue
+    return sorted(ips)
 
 
 def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
@@ -219,6 +234,7 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
         "v": SERIES_VERSION,
         "test_id": test_dir.name,
         "stats": stats,
+        "peers": _peer_ips(td),
         "stalls": stalls.detect(td, off),
         "neighbors": neighbors,
         "plan": plan,
@@ -243,6 +259,27 @@ def _write_json(path: Path, obj) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, separators=(",", ":")))
     os.replace(tmp, path)
+
+
+def _reverse_dns(cache_path: Path, ips: set[str], timeout_s: float = 3.0) -> dict[str, str | None]:
+    """Reverse-DNS names for the UE's addresses (e.g. "m90-…cust.tele2.se"
+    names the operator), cached on disk; a lookup that fails or times out
+    is cached as None so it is not retried every build."""
+    import concurrent.futures
+    import socket
+
+    cache = json.loads(cache_path.read_text()) if cache_path.exists() else {}
+    todo = sorted(ips - cache.keys())
+    if todo:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {ip: pool.submit(socket.gethostbyaddr, ip) for ip in todo}
+            for ip, fut in futures.items():
+                try:
+                    cache[ip] = fut.result(timeout=timeout_s)[0]
+                except Exception:
+                    cache[ip] = None
+        _write_json(cache_path, cache)
+    return cache
 
 
 def _local_day(epoch_s: float) -> str:
@@ -273,6 +310,7 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
 
     by_day: dict[str, list[dict]] = {}
     found: dict[str, dict] = {}
+    hosts = _reverse_dns(out / "rdns.json", {ip for t in tests for ip in t.get("peers", [])})
     for t in sorted(tests, key=lambda t: t["start"]):
         by_day.setdefault(_local_day(t["start"]), []).append(t)
     for day, day_tests in by_day.items():
@@ -284,7 +322,13 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
             cols["t"].append(round(t["end"] + 0.1, 1))
             for c in COLUMNS:
                 cols[c].append(None)
-        meta = [{k: t.get(k) for k in ("test_id", "plan", "start", "end", "stats")} for t in day_tests]
+        meta = [
+            dict(
+                {k: t.get(k) for k in ("test_id", "plan", "start", "end", "stats")},
+                peers=[{"ip": ip, "host": hosts.get(ip)} for ip in t.get("peers", [])],
+            )
+            for t in day_tests
+        ]
         neighbors = [n for t in day_tests for n in t.get("neighbors", [])]
         # Stall episodes with the time since the previous one that day (the
         # Pixel's recur on a fixed period, which shows up here).

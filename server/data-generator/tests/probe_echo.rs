@@ -124,6 +124,40 @@ async fn probe_echo_end_to_end() {
         !files.is_empty(),
         "expected server packets.parquet segments"
     );
+
+    // CLIENT_CONNECTED records the UE's address as the server saw it.
+    let events = std::fs::read_dir(&log_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("events_f")
+        })
+        .expect("events_f<flow>.parquet written at stop");
+    let mut reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+        std::fs::File::open(events).unwrap(),
+    )
+    .unwrap()
+    .build()
+    .unwrap();
+    let batch = reader.next().unwrap().unwrap();
+    let col = |name: &str| {
+        batch
+            .column_by_name(name)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap()
+            .value(0)
+            .to_string()
+    };
+    assert_eq!(col("event_type"), "CLIENT_CONNECTED");
+    let meta: serde_json::Value = serde_json::from_str(&col("event_metadata")).unwrap();
+    assert_eq!(meta["peer_ip"], "127.0.0.1");
+    assert_eq!(meta["protocol"], "UDP");
 }
 
 #[tokio::test]

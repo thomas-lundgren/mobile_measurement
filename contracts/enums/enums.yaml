@@ -121,7 +121,7 @@ event_types:
   - SIGNAL_LOSS_START   # no serving cell for > N seconds
   - SIGNAL_LOSS_END
   # logged live — operational events (ALWAYS logged, not config-gated)
-  - CLIENT_CONNECTED
+  - CLIENT_CONNECTED    # server, per flow: event_metadata {peer_ip, peer_port, protocol}
   - SERVER_DISCONNECTED
   - UPLOAD_STARTED
   - ERROR

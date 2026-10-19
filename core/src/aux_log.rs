@@ -3,8 +3,9 @@
 //! they don't need the wait-free SPSC ring. Rows are buffered in memory during
 //! the test and written as one Parquet file at stop (each is "once per test").
 //!
-//! Schemas mirror `contracts/parquet/{gps,clock}.parquet.yaml`. Join columns
-//! come from the test context. gps sits at the test root; clock under `mobile/`.
+//! Schemas mirror `contracts/parquet/{gps,clock,radio,events}.parquet.yaml`.
+//! Join columns come from the test context. gps/radio sit at the test root;
+//! clock and events under the node's folder.
 
 use std::fs::File;
 use std::path::Path;
@@ -207,6 +208,67 @@ fn clock_schema() -> Schema {
     ])
 }
 
+/// One `events.parquet` row (`contracts/parquet/events.parquet.yaml`).
+#[derive(Debug, Clone)]
+pub struct EventRow {
+    pub mono_ns: u64,
+    pub utc_ns: u64,
+    /// From `contracts/enums/enums.yaml` event_types.
+    pub event_type: String,
+    pub flow_id: Option<u32>,
+    /// JSON object string with per-event detail.
+    pub event_metadata: Option<String>,
+}
+
+fn events_schema() -> Schema {
+    Schema::new(vec![
+        Field::new("device_id", DataType::Utf8, false),
+        Field::new("session_id", DataType::Utf8, false),
+        Field::new("test_id", DataType::Utf8, false),
+        Field::new("node", DataType::Utf8, false),
+        Field::new("mono_ns", DataType::UInt64, false),
+        Field::new("utc_ns", DataType::UInt64, false),
+        Field::new("event_type", DataType::Utf8, false),
+        Field::new("flow_id", DataType::UInt32, true),
+        Field::new("event_metadata", DataType::Utf8, true),
+    ])
+}
+
+pub fn write_events(path: &Path, ctx: &AuxContext, rows: &[EventRow]) -> std::io::Result<()> {
+    let n = rows.len();
+    let schema = Arc::new(events_schema());
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(rep(&ctx.device_id, n)) as _,
+            Arc::new(rep(&ctx.session_id, n)) as _,
+            Arc::new(rep(&ctx.test_id, n)) as _,
+            Arc::new(rep(&ctx.node, n)) as _,
+            Arc::new(UInt64Array::from(
+                rows.iter().map(|r| r.mono_ns).collect::<Vec<_>>(),
+            )) as _,
+            Arc::new(UInt64Array::from(
+                rows.iter().map(|r| r.utc_ns).collect::<Vec<_>>(),
+            )) as _,
+            Arc::new(StringArray::from(
+                rows.iter()
+                    .map(|r| r.event_type.clone())
+                    .collect::<Vec<_>>(),
+            )) as _,
+            Arc::new(UInt32Array::from(
+                rows.iter().map(|r| r.flow_id).collect::<Vec<_>>(),
+            )) as _,
+            Arc::new(StringArray::from(
+                rows.iter()
+                    .map(|r| r.event_metadata.clone())
+                    .collect::<Vec<_>>(),
+            )) as _,
+        ],
+    )
+    .map_err(std::io::Error::other)?;
+    write_batch(path, schema, batch)
+}
+
 pub fn write_clock(path: &Path, ctx: &AuxContext, rows: &[ClockRow]) -> std::io::Result<()> {
     let n = rows.len();
     let schema = Arc::new(clock_schema());
@@ -374,6 +436,33 @@ pub fn write_radio(path: &Path, ctx: &AuxContext, rows: &[RadioRow]) -> std::io:
 mod tests {
     use super::*;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    #[test]
+    fn events_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("events_f1.parquet");
+        let rows = vec![EventRow {
+            mono_ns: 1,
+            utc_ns: 2,
+            event_type: "CLIENT_CONNECTED".into(),
+            flow_id: Some(1),
+            event_metadata: Some(r#"{"peer_ip":"192.0.2.7"}"#.into()),
+        }];
+        write_events(&p, &ctx(), &rows).unwrap();
+        let mut r = ParquetRecordBatchReaderBuilder::try_new(File::open(&p).unwrap())
+            .unwrap()
+            .build()
+            .unwrap();
+        let batch = r.next().unwrap().unwrap();
+        let meta = batch
+            .column_by_name("event_metadata")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(meta.value(0), r#"{"peer_ip":"192.0.2.7"}"#);
+        assert_eq!(batch.column_by_name("event_type").unwrap().len(), 1);
+    }
 
     fn ctx() -> AuxContext {
         AuxContext {

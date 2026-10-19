@@ -1603,10 +1603,12 @@ dependencies = [
 name = "mp-data-generator"
 version = "0.1.0"
 dependencies = [
+ "arrow",
  "axum",
  "fieldtest-core",
  "libc",
  "mp-contracts",
+ "parquet",
  "serde",
  "serde_json",
  "tempfile",

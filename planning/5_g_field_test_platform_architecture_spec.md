@@ -1236,7 +1236,7 @@ Logged explicitly:
 
 - TEST_START
 - TEST_STOP
-- CLIENT_CONNECTED
+- CLIENT_CONNECTED — the server writes one per flow (`server/events_f<flow_id>.parquet`) with `event_metadata` `{peer_ip, peer_port, protocol}`: the UE's address as the server saw it after NAT, i.e. which network the test actually ran over (operator mobile network vs. a Wi-Fi's internet line)
 - SERVER_DISCONNECTED
 - SIGNAL_LOSS_START (no serving cell for >N seconds)
 - SIGNAL_LOSS_END (serving cell re-acquired)

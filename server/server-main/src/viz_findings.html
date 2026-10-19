@@ -72,7 +72,9 @@
 <main id="main">
   <section>
     <h2>Tests</h2>
-    <p class="intro">One row per test. Delays are percentiles over all packets (RTT from the probe; one-way delays
+    <p class="intro">One row per test. "Phone's address" is the phone's public address as the server saw it on the
+      test's flows (recorded for tests from 2026-10-19 10:08 on), and shows which network the test really ran over — the operator's mobile
+      network or a Wi-Fi's internet line. Delays are percentiles over all packets (RTT from the probe; one-way delays
       clock-corrected, from probe and realtime UDP). Loss is the worst UDP flow per direction. Click a time to open
       the charts zoomed to that test.</p>
     <div class="scroll"><table id="tests"></table></div>
@@ -149,6 +151,15 @@ function table(el, head, rows, empty) {
 
 const testOf = (id) => (data.tests || []).find((t) => t.test_id === id);
 
+// Which network the test really ran over: the phone's public address after
+// NAT and its reverse-DNS name (names the operator or the Wi-Fi's ISP).
+function peers(t) {
+  if (!t.peers || !t.peers.length) return '<span class="muted">not recorded</span>';
+  return t.peers.map((p) => p.host
+    ? `<span title="${esc(p.ip)}">${esc(p.host)}</span>`
+    : esc(p.ip)).join("<br>");
+}
+
 function renderTests() {
   const rows = data.tests.map((t) => {
     const s = t.stats || {};
@@ -161,6 +172,7 @@ function renderTests() {
       chartsLink(hm(t.start), t.start - 1, t.end + 1),
       esc(t.plan || t.test_id),
       t.radio ? esc(t.radio) : '<span class="muted">–</span>',
+      peers(t),
       pp(s.rtt_ms), pp(s.ul_ms), pp(s.dl_ms),
       num(s.down_mbps), num(s.up_mbps),
       `${pct(loss.ul)} / ${pct(loss.dl)} / ${pct(loss.probe)}`,
@@ -168,7 +180,7 @@ function renderTests() {
     ];
   });
   table($("tests"), [
-    ["Time"], ["Test"], ["Radio"], ["RTT p50 / p99 ms", "num"], ["Uplink p50 / p99 ms", "num"],
+    ["Time"], ["Test"], ["Radio"], ["Phone's address (seen by server)"], ["RTT p50 / p99 ms", "num"], ["Uplink p50 / p99 ms", "num"],
     ["Downlink p50 / p99 ms", "num"], ["Down Mbit/s", "num"], ["Up Mbit/s", "num"],
     ["Loss UL / DL / probe", "num"], ["Flags"],
   ], rows, "No tests this day.");

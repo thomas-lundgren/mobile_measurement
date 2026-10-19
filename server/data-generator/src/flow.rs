@@ -30,6 +30,19 @@ pub struct Counters {
     pub received: AtomicU64,
     pub bytes_sent: AtomicU64,
     pub bytes_received: AtomicU64,
+    /// The UE's address as first seen on this flow (after NAT): which network
+    /// the test really ran over. Written as a CLIENT_CONNECTED event at stop.
+    pub peer: Mutex<Option<(Timestamp, SocketAddr)>>,
+}
+
+impl Counters {
+    /// Record the UE's address on first contact (later calls are no-ops).
+    pub fn note_peer(&self, peer: SocketAddr) {
+        let mut p = self.peer.lock().unwrap();
+        if p.is_none() {
+            *p = Some((Timestamp::now(), peer));
+        }
+    }
 }
 
 /// Spawn the echo loop. `socket` must already be bound with a read timeout so
@@ -56,6 +69,7 @@ pub fn spawn_probe_echo(
                     let recv_ts = Timestamp::now();
                     if !seen_client {
                         seen_client = true;
+                        counters.note_peer(peer);
                         *state.lock().unwrap() = GeneratorState::Running;
                     }
                     counters.received.fetch_add(1, Ordering::Relaxed);
@@ -258,6 +272,7 @@ pub fn spawn_dscp_probe_echo(
 
             if !seen_client {
                 seen_client = true;
+                counters.note_peer(recv.peer);
                 *state.lock().unwrap() = GeneratorState::Running;
             }
             counters.received.fetch_add(1, Ordering::Relaxed);
@@ -362,7 +377,10 @@ pub fn spawn_realtime_udp(
                         return;
                     }
                     match socket.recv_from(&mut buf) {
-                        Ok((_, addr)) => break addr,
+                        Ok((_, addr)) => {
+                            counters.note_peer(addr);
+                            break addr;
+                        }
                         Err(ref e) if would_block(e) => continue,
                         Err(_) => continue,
                     }
@@ -417,10 +435,11 @@ pub fn spawn_realtime_udp(
                 let mut started = false;
                 while !stop.load(Ordering::Acquire) {
                     match socket.recv_from(&mut buf) {
-                        Ok((n, _addr)) => {
+                        Ok((n, addr)) => {
                             let recv_ts = Timestamp::now();
                             if !started {
                                 started = true;
+                                counters.note_peer(addr);
                                 *state.lock().unwrap() = GeneratorState::Running;
                             }
                             counters.received.fetch_add(1, Ordering::Relaxed);
@@ -491,7 +510,10 @@ pub fn spawn_bulk_tcp(
                 return;
             }
             match listener.accept() {
-                Ok((s, _)) => break s,
+                Ok((s, addr)) => {
+                    counters.note_peer(addr);
+                    break s;
+                }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(ACCEPT_POLL);
                     continue;
