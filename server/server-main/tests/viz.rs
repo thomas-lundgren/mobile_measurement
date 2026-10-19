@@ -92,6 +92,9 @@ async fn series_days_and_day_file() {
     let jwt = operator_jwt(&st).await;
     let (s, _) = get(&st, "/viz/charts", None).await;
     assert_eq!(s, StatusCode::OK);
+    let (s, body) = get(&st, "/favicon.png", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(body.starts_with(b"\x89PNG"));
     let (s, _) = get(&st, "/api/v1/viz/series/2026-10-19", None).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
 

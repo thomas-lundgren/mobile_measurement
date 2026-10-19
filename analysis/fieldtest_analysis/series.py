@@ -24,9 +24,11 @@ import pandas as pd
 
 from . import clock, metrics, schema
 from .loader import load_test
-from .track import _plan_names
+from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
+#: Bump when a test's cached series gains or changes fields (forces a rebuild).
+SERIES_VERSION = 2
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -34,8 +36,10 @@ COLUMNS = [
     "rtt_med", "rtt_max",
     "ul_med", "ul_max", "dl_med", "dl_max",
     "down_mbps", "up_mbps",
-    "lte_rsrp", "nr_rsrp", "mode",
+    "lte_rsrp", "nr_rsrp", "nr_rsrq", "mode",
+    "lte_pci", "earfcn", "nr_pci", "nrarfcn",
 ]  # fmt: skip
+RADIO_COLUMNS = ["lte_rsrp", "nr_rsrp", "nr_rsrq", "mode", "lte_pci", "earfcn", "nr_pci", "nrarfcn"]
 
 
 def _bins(t_ns: pd.Series) -> pd.Series:
@@ -94,13 +98,30 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
             parts.append(b.rename(col).to_frame())
 
     radio = td.radio
+    neighbors: list[list] = []
     if radio is not None and not radio.empty:
         r = radio.assign(t=pd.to_numeric(radio["utc_ns"], errors="coerce").astype("float") - o)
         r = r.dropna(subset=["t"]).sort_values("t")
-        r = r.assign(bin=_bins(r["t"])).groupby("bin").last()
+        # Neighbor cells as [t_s, pci, rsrp]; the schema carries no channel.
+        for t_ns, cells in zip(r["t"], r["neighbor_cells"]):
+            if cells is None or (not isinstance(cells, (list, np.ndarray))):
+                continue
+            for c in cells:
+                if c is not None and c.get("rsrp") is not None and c.get("pci") is not None:
+                    neighbors.append([round(t_ns / 1e9, 1), int(c["pci"]), int(c["rsrp"])])
+        last = r.assign(bin=_bins(r["t"])).groupby("bin").last()
         parts.append(
             pd.DataFrame(
-                {"lte_rsrp": r["lte_rsrp"], "nr_rsrp": r["rsrp"], "mode": r["network_type"]}
+                {
+                    "lte_rsrp": last["lte_rsrp"],
+                    "nr_rsrp": last["rsrp"],
+                    "nr_rsrq": last["rsrq"],
+                    "mode": last["network_type"],
+                    "lte_pci": last["lte_pci"],
+                    "earfcn": last["earfcn"],
+                    "nr_pci": last["pci"],
+                    "nrarfcn": last["nrarfcn"],
+                }
             )
         )
 
@@ -115,11 +136,13 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
     for col in ("down_mbps", "up_mbps"):
         if df[col].notna().any():
             df[col] = df[col].fillna(0.0)
-    for col in ("lte_rsrp", "nr_rsrp", "mode"):
+    for col in RADIO_COLUMNS:
         df[col] = df[col].ffill(limit=RADIO_FILL_BINS)
 
     out = {
+        "v": SERIES_VERSION,
         "test_id": test_dir.name,
+        "neighbors": neighbors,
         "plan": plan,
         "start": lo * BIN_NS / 1e9,
         "end": (hi + 1) * BIN_NS / 1e9,
@@ -128,6 +151,8 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
     for col in COLUMNS:
         vals = df[col].astype(object).where(df[col].notna(), None).tolist()
         out[col] = [round(v, 2) if isinstance(v, float) else v for v in vals]
+    for col in ("lte_pci", "earfcn", "nr_pci", "nrarfcn"):
+        out[col] = [None if v is None else int(v) for v in out[col]]
     return out
 
 
@@ -153,9 +178,12 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
     tests = []
     for test_dir in sorted(Path(root).glob("ses_*/tst_*")):
         cache = out / "tests" / f"{test_dir.name}.json"
+        data = None
         if cache.exists() and cache.stat().st_mtime >= _newest_mtime(test_dir):
             data = json.loads(cache.read_text())
-        else:
+            if data is not None and data.get("v") != SERIES_VERSION:
+                data = None
+        if data is None:
             try:
                 data = test_series(test_dir, plans.get(test_dir.name))
             except Exception as e:  # truncated upload, unreadable parquet, ...
@@ -178,7 +206,16 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
             for c in COLUMNS:
                 cols[c].append(None)
         meta = [{k: t[k] for k in ("test_id", "plan", "start", "end")} for t in day_tests]
-        _write_json(out / "series" / f"{day}.json", {"day": day, "tests": meta, **cols})
+        neighbors = [n for t in day_tests for n in t.get("neighbors", [])]
+        # Clear-text band + frequency for every channel seen that day.
+        channels = {
+            "lte": {str(e): channel_label("LTE", e) for e in sorted({v for v in cols["earfcn"] if v is not None})},
+            "nr": {str(n): channel_label("NR", n) for n in sorted({v for v in cols["nrarfcn"] if v is not None})},
+        }
+        _write_json(
+            out / "series" / f"{day}.json",
+            {"day": day, "tests": meta, "channels": channels, "neighbors": neighbors, **cols},
+        )
     days = sorted(by_day)
     _write_json(out / "series" / "days.json", {"days": days})
     return days

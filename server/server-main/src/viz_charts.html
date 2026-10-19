@@ -4,10 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Measurement Charts</title>
+<link rel="icon" type="image/png" href="/favicon.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.min.css">
 <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
 <style>
-  :root { --bg:#fff; --fg:#1d1d1f; --muted:#6e6e73; --panel:#f5f5f7; --border:#d2d2d7; --accent:#0a66c2; --grid:#0000001a; }
+  :root { --bg:#ffffff; --fg:#1d1d1f; --muted:#6e6e73; --panel:#f5f5f7; --border:#d2d2d7; --accent:#0a66c2; --grid:#0000001a; }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#1c1c1e; --fg:#f2f2f7; --muted:#a1a1a6; --panel:#2c2c2e; --border:#3a3a3c; --accent:#4c9aff; --grid:#ffffff1f; }
   }
@@ -34,14 +35,13 @@
   #login h2 { font-size:16px; margin:0 0 8px; }
   #login input { width:100%; margin:4px 0; }
   #login .err { color:#d70015; min-height:1.2em; font-size:12px; }
-  #tests { font-size:12px; color:var(--muted); display:flex; flex-wrap:wrap; gap:4px 12px; }
-  #tests button { font-size:12px; padding:1px 6px; }
 </style>
 </head>
 <body>
 <header>
   <h1>Measurements</h1>
   <label>Day <select id="day"></select></label>
+  <label>Zoom to test <select id="tests"></select></label>
   <label><input type="checkbox" id="logy"> log delay axis</label>
   <button id="reset">Reset zoom</button>
   <button id="reload">Reload</button>
@@ -59,11 +59,11 @@
 </form>
 
 <main id="main">
-  <div id="tests"></div>
   <div class="chart"><h2>Round-trip time (UDP probe), ms</h2><div id="c_rtt"></div></div>
   <div class="chart"><h2>One-way delay (UDP, clock-corrected), ms</h2><div id="c_owd"></div></div>
   <div class="chart"><h2>TCP throughput, Mbit/s</h2><div id="c_tput"></div></div>
   <div class="chart"><h2>Signal (RSRP), dBm, and network mode</h2><div id="c_radio"></div></div>
+  <div class="chart"><h2>Cell measurements: serving cells (PCI · band · downlink frequency) and neighbour cells, RSRP dBm</h2><div id="c_cells"></div></div>
 </main>
 
 <script>
@@ -169,17 +169,120 @@ function build() {
   }]);
   plots.push(new uPlot(radioOpts, [t, data.lte_rsrp, data.nr_rsrp, modeLevel], $("c_radio")));
 
-  // Test list: click to zoom to one test.
-  $("tests").innerHTML = data.tests.map((x, i) => {
+  plots.push(cellsPlot(t));
+
+  // Test list: pick one to zoom to it.
+  $("tests").innerHTML = `<option value="">all (${data.tests.length})</option>` + data.tests.map((x, i) => {
     const s = new Date(x.start * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    return `<button data-i="${i}">${s} ${x.plan || x.test_id}</button>`;
+    return `<option value="${i}">${s} ${x.plan || x.test_id}</option>`;
   }).join("");
 }
 
-$("tests").addEventListener("click", (e) => {
-  const i = e.target.dataset && e.target.dataset.i;
-  if (i == null) return;
-  const x = data.tests[+i];
+// Serving cell as clear text: "LTE PCI 478 · B8 · 940 MHz".
+function cellText(rat, i) {
+  const ch = (data.channels || {})[rat === "LTE" ? "lte" : "nr"] || {};
+  if (rat === "LTE") {
+    if (data.lte_pci[i] == null && data.earfcn[i] == null) return null;
+    const c = data.earfcn[i] == null ? "channel not reported" : ch[data.earfcn[i]] || "EARFCN " + data.earfcn[i];
+    return `LTE PCI ${data.lte_pci[i] ?? "?"} · ${c}`;
+  }
+  if (data.nr_pci[i] == null && data.nrarfcn[i] == null && data.nr_rsrp[i] == null) return null;
+  const c = data.nrarfcn[i] == null ? "channel not reported" : ch[data.nrarfcn[i]] || "NR-ARFCN " + data.nrarfcn[i];
+  return `5G PCI ${data.nr_pci[i] ?? "?"} · ${c}`;
+}
+
+// Runs of bins with the same serving cell: [{i, text}] at each change; a
+// null text ends a run (no cell reported, or the gap between tests).
+function segments(rat) {
+  const out = [];
+  let prev = null;
+  for (let i = 0; i < data.t.length; i++) {
+    const text = cellText(rat, i);
+    if (text !== prev) { out.push({ i, text }); prev = text; }
+  }
+  return out;
+}
+
+function cellsPlot(t) {
+  const lteSegs = segments("LTE");
+  const nrSegs = segments("NR");
+  const nb = data.neighbors || [];
+  const fmtCell = (rat) => (u, v, si, i) => {
+    if (i == null) return "–";
+    const text = cellText(rat, i);
+    return (v == null ? "–" : v.toFixed(0) + " dBm") + (text ? " · " + text : "");
+  };
+  const o = opts([
+    line("serving LTE", COL.lte, { width: 2, value: fmtCell("LTE") }),
+    line("serving 5G", COL.nr, { width: 2, value: fmtCell("NR") }),
+    { label: "neighbours (LTE + 5G, channel not recorded)", stroke: COL.mode, width: 0, points: { show: false },
+      value: () => "" },
+  ], "dBm");
+  o.height = 300;
+  o.scales.y = { range: [-140, -50] };
+  o.hooks.draw = [(u) => {
+    const ctx = u.ctx;
+    const dpr = devicePixelRatio || 1;
+    const { min, max } = u.scales.x;
+    const { left, top, width: w, height: h } = u.bbox;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, w, h);
+    ctx.clip();
+
+    // Neighbour measurements as small grey dots.
+    ctx.fillStyle = COL.mode + "aa";
+    const r = 1.6 * dpr;
+    for (const [nt, , rsrp] of nb) {
+      if (nt < min || nt > max) continue;
+      ctx.beginPath();
+      ctx.arc(u.valToPos(nt, "x", true), u.valToPos(rsrp, "y", true), r, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+
+    // Cell labels: one row per RAT at the top; a faint line at each change.
+    ctx.font = `${11 * dpr}px system-ui, sans-serif`;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left"; // uPlot leaves "right" behind after its axes
+    const rows = [[lteSegs, COL.lte, top + 10 * dpr], [nrSegs, COL.nr, top + 26 * dpr]];
+    for (const [segs, colour, y] of rows) {
+      let lastEnd = -Infinity;
+      for (let k = 0; k < segs.length; k++) {
+        const s = segs[k];
+        const nextT = k + 1 < segs.length ? t[segs[k + 1].i] : Infinity;
+        if (!s.text || nextT < min || t[s.i] > max) continue;
+        const startX = u.valToPos(Math.max(t[s.i], min), "x", true);
+        if (t[s.i] >= min) {
+          ctx.strokeStyle = colour + "55";
+          ctx.lineWidth = dpr;
+          ctx.setLineDash([3 * dpr, 3 * dpr]);
+          ctx.beginPath();
+          ctx.moveTo(startX, top);
+          ctx.lineTo(startX, top + h);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        // Label where the cell starts (or at the left edge), only if it fits
+        // before the plot's right edge and after the previous label.
+        const x = startX + 3 * dpr;
+        const tw = ctx.measureText(s.text).width;
+        if (x < lastEnd + 6 * dpr || x + tw > left + w) continue;
+        ctx.fillStyle = css("--bg") + "dd";
+        ctx.fillRect(x - 2 * dpr, y - 8 * dpr, tw + 4 * dpr, 16 * dpr);
+        ctx.fillStyle = colour;
+        ctx.fillText(s.text, x, y);
+        lastEnd = x + tw;
+      }
+    }
+    ctx.restore();
+  }];
+  return new uPlot(o, [t, data.lte_rsrp, data.nr_rsrp, t.map(() => null)], $("c_cells"));
+}
+
+$("tests").addEventListener("change", (e) => {
+  if (!data || !plots.length) return;
+  if (e.target.value === "") { $("reset").click(); return; }
+  const x = data.tests[+e.target.value];
   plots[0].setScale("x", { min: x.start - 2, max: x.end + 2 });
 });
 

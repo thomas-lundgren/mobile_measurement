@@ -20,11 +20,14 @@ use crate::AppState;
 
 const MAP_PAGE: &str = include_str!("viz.html");
 const CHARTS_PAGE: &str = include_str!("viz_charts.html");
+const FAVICON: &[u8] = include_bytes!("favicon.png");
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/viz", get(map_page))
         .route("/viz/charts", get(charts_page))
+        .route("/favicon.png", get(favicon))
+        .route("/favicon.ico", get(favicon))
         .route("/api/v1/viz/track", get(track))
         .route("/api/v1/viz/series", get(series_days))
         .route("/api/v1/viz/series/{day}", get(series_day))
@@ -36,6 +39,16 @@ async fn map_page() -> Html<&'static str> {
 
 async fn charts_page() -> Html<&'static str> {
     Html(CHARTS_PAGE)
+}
+
+async fn favicon() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        FAVICON,
+    )
 }
 
 async fn track(

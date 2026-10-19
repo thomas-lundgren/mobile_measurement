@@ -27,16 +27,17 @@ from .loader import _read_one
 #: Max distance in time between a radio sample and the GPS fix it is placed at.
 MAX_GAP_NS = 5_000_000_000
 
-# (first, last, band) — E-UTRA bands in use in Europe (36.101 §5.7.3).
+# (first, last, band, F_DL_low MHz) — E-UTRA bands in use in Europe
+# (36.101 §5.7.3): F_DL = F_DL_low + 0.1 (EARFCN - first).
 _LTE_BANDS = [
-    (0, 599, "B1"),
-    (1200, 1949, "B3"),
-    (2750, 3449, "B7"),
-    (3450, 3799, "B8"),
-    (6150, 6449, "B20"),
-    (9210, 9659, "B28"),
-    (9920, 10359, "B32"),
-    (37750, 38249, "B38"),
+    (0, 599, "B1", 2110.0),
+    (1200, 1949, "B3", 1805.0),
+    (2750, 3449, "B7", 2620.0),
+    (3450, 3799, "B8", 925.0),
+    (6150, 6449, "B20", 791.0),
+    (9210, 9659, "B28", 758.0),
+    (9920, 10359, "B32", 1452.0),
+    (37750, 38249, "B38", 2570.0),
 ]
 # NR-ARFCN ranges (38.101-1 §5.4.2.3); n1/n3/n28 overlap LTE refarming bands.
 _NR_BANDS = [
@@ -51,7 +52,7 @@ def _band(value, table) -> str | None:
     if pd.isna(value):
         return None
     v = int(value)
-    for first, last, name in table:
+    for first, last, name, *_ in table:
         if first <= v <= last:
             return name
     return None
@@ -63,6 +64,38 @@ def lte_band(earfcn) -> str | None:
 
 def nr_band(nrarfcn) -> str | None:
     return _band(nrarfcn, _NR_BANDS)
+
+
+def lte_dl_mhz(earfcn) -> float | None:
+    """Downlink carrier frequency of an EARFCN (None for unknown bands)."""
+    if pd.isna(earfcn):
+        return None
+    v = int(earfcn)
+    for first, last, _, f_low in _LTE_BANDS:
+        if first <= v <= last:
+            return round(f_low + 0.1 * (v - first), 1)
+    return None
+
+
+def nr_mhz(nrarfcn) -> float | None:
+    """Carrier frequency of an NR-ARFCN, global raster (38.104 §5.4.2.1)."""
+    if pd.isna(nrarfcn):
+        return None
+    v = int(nrarfcn)
+    if 0 <= v < 600000:
+        return round(0.005 * v, 2)
+    if v < 2016667:
+        return round(3000.0 + 0.015 * (v - 600000), 2)
+    return round(24250.08 + 0.06 * (v - 2016667), 2)
+
+
+def channel_label(rat: str, arfcn) -> str | None:
+    """Clear-text band + frequency, e.g. "B8 · 945.0 MHz" or "n78 · 3669.6 MHz"."""
+    if pd.isna(arfcn):
+        return None
+    band, mhz = (lte_band(arfcn), lte_dl_mhz(arfcn)) if rat == "LTE" else (nr_band(arfcn), nr_mhz(arfcn))
+    freq = f"{mhz:g} MHz" if mhz is not None else f"ARFCN {int(arfcn)}"
+    return f"{band} · {freq}" if band else freq
 
 
 def _plan_names(db: str | None) -> dict[str, str]:

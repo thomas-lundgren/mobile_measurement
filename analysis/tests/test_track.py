@@ -6,7 +6,7 @@ import json
 
 import pandas as pd
 
-from fieldtest_analysis.track import build_track, lte_band, main, nr_band
+from fieldtest_analysis.track import build_track, channel_label, lte_band, lte_dl_mhz, main, nr_band, nr_mhz
 
 S = 1_000_000_000
 
@@ -63,3 +63,15 @@ def test_cli_writes_json(tmp_path):
     data = json.loads(out.read_text())
     assert data["points"][0]["lte_band"] == "B20"
     assert data["points"][0]["mode"] is None
+
+
+def test_frequencies():
+    assert lte_dl_mhz(3600) == 940.0  # B8: 925 + 0.1 * (3600 - 3450)
+    assert lte_dl_mhz(1750) == 1860.0  # B3
+    assert lte_dl_mhz(6400) == 816.0  # B20
+    assert nr_mhz(644640) == 3669.6  # n78
+    assert nr_mhz(423850) == 2119.25  # n1
+    assert channel_label("LTE", 3600) == "B8 · 940 MHz"
+    assert channel_label("NR", 644640) == "n78 · 3669.6 MHz"
+    assert channel_label("LTE", 99999) == "ARFCN 99999"
+    assert channel_label("NR", None) is None
