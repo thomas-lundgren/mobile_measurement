@@ -38,6 +38,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Reach responders for the device's reachability check (contracts/packets/reach.md).
+    if let Ok(spec) = std::env::var("MP_REACH_LISTEN") {
+        let ports = mp_server_main::reach::parse_listen(&spec)?;
+        for (proto, addr) in mp_server_main::reach::spawn("0.0.0.0", &ports)? {
+            println!("reach responder {proto:?} on {addr}");
+        }
+    }
+
     let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;

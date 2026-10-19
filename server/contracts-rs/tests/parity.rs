@@ -363,3 +363,18 @@ fn test_plan_examples_deserialize() {
         assert_eq!(bindings.len(), plan.flows.len(), "binding count `{name}`");
     }
 }
+
+#[test]
+fn reachability_examples_deserialize() {
+    let doc = json("testvectors/reachability/reachability_report_examples.json");
+    let examples = doc["examples"].as_array().unwrap();
+    assert!(!examples.is_empty());
+    for ex in examples {
+        let name = ex["name"].as_str().unwrap();
+        let report: ReachabilityReport = serde_json::from_value(ex["report"].clone())
+            .unwrap_or_else(|e| panic!("reachability example `{name}`: {e}"));
+        let round: ReachabilityReport =
+            serde_json::from_value(serde_json::to_value(&report).unwrap()).unwrap();
+        assert_eq!(report, round, "reachability round-trip `{name}`");
+    }
+}

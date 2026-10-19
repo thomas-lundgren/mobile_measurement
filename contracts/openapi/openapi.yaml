@@ -203,6 +203,34 @@ paths:
           description: ''
         '404':
           description: ''
+  /api/v1/devices/{device_id}/reachability:
+    post:
+      tags:
+      - device
+      summary: |-
+        The device's own reachability check (which ports/protocols toward the
+        server get through the network it was on). Checks run on the device
+        without the server — on a restrictive network it cannot be reached — and
+        are uploaded later; each report is appended as one JSON line to
+        `<upload_root>/reach/<device_id>.jsonl`.
+      operationId: post_reachability
+      parameters:
+      - name: device_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReachabilityReport'
+        required: true
+      responses:
+        '204':
+          description: ''
+        '401':
+          description: ''
   /api/v1/devices/{device_id}/status:
     post:
       tags:
@@ -1119,6 +1147,38 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TopPeer'
+    NetworkContext:
+      type: object
+      required:
+      - transport
+      properties:
+        operator:
+          type:
+          - string
+          - 'null'
+        transport:
+          $ref: '#/components/schemas/NetworkTransport'
+        validated:
+          type:
+          - boolean
+          - 'null'
+        wifi_freq_mhz:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        wifi_ssid:
+          type:
+          - string
+          - 'null'
+    NetworkTransport:
+      type: string
+      enum:
+      - CELLULAR
+      - WIFI
+      - ETHERNET
+      - OTHER
+      - NONE
     OperatorRole:
       type: string
       enum:
@@ -1281,6 +1341,72 @@ components:
           - integer
           - 'null'
           format: int32
+    ReachCheck:
+      type: object
+      required:
+      - protocol
+      - port
+      - kind
+      - ok
+      properties:
+        error:
+          type:
+          - string
+          - 'null'
+        kind:
+          $ref: '#/components/schemas/ReachKind'
+        ok:
+          type: boolean
+        port:
+          type: integer
+          format: int32
+          minimum: 0
+        protocol:
+          $ref: '#/components/schemas/ReachProtocol'
+        rtt_ms:
+          type:
+          - number
+          - 'null'
+          format: double
+        seen_as:
+          type:
+          - string
+          - 'null'
+    ReachKind:
+      type: string
+      enum:
+      - reach
+      - http
+    ReachProtocol:
+      type: string
+      enum:
+      - tcp
+      - udp
+    ReachTrigger:
+      type: string
+      enum:
+      - NETWORK_CHANGE
+      - SERVICE_START
+      - MANUAL
+    ReachabilityReport:
+      type: object
+      description: Body of `POST /devices/{id}/reachability`.
+      required:
+      - checked_at
+      - trigger
+      - network
+      - checks
+      properties:
+        checked_at:
+          $ref: '#/components/schemas/DualClock'
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReachCheck'
+        network:
+          $ref: '#/components/schemas/NetworkContext'
+        trigger:
+          $ref: '#/components/schemas/ReachTrigger'
     RunTestPayload:
       type: object
       description: Payload of the RUN_TEST command delivered to a device.

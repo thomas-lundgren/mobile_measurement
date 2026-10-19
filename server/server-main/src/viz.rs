@@ -35,6 +35,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/viz/series", get(series_days))
         .route("/api/v1/viz/series/{day}", get(series_day))
         .route("/api/v1/viz/findings/{day}", get(findings_day))
+        .route("/api/v1/viz/reachability", get(reachability))
 }
 
 async fn map_page() -> Html<&'static str> {
@@ -87,6 +88,45 @@ async fn findings_day(
     Path(day): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
     serve_day(&st, &headers, "findings", &day).await
+}
+
+/// Most recent device reachability reports (newest first, all devices), from
+/// the JSON lines `POST /devices/{id}/reachability` appends under
+/// `<upload_root>/reach/`.
+async fn reachability(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    authed_operator(&st, &headers)?;
+    let dir = st.upload_root.join("reach");
+    let reports = tokio::task::spawn_blocking(move || read_reports(&dir, REACH_LIMIT))
+        .await
+        .map_err(|_| AppError::Internal)?;
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        axum::Json(serde_json::json!({ "reports": reports })),
+    ))
+}
+
+const REACH_LIMIT: usize = 500;
+
+fn read_reports(dir: &std::path::Path, limit: usize) -> Vec<serde_json::Value> {
+    let mut out: Vec<serde_json::Value> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "jsonl"))
+        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+        .flat_map(|text| {
+            text.lines()
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let key = |v: &serde_json::Value| v["checked_at"]["utc_ns"].as_i64().unwrap_or(0);
+    out.sort_by_key(|v| std::cmp::Reverse(key(v)));
+    out.truncate(limit);
+    out
 }
 
 /// `<upload_root>/viz/<dir>/<day>.json`, for a day given as YYYY-MM-DD.

@@ -6,6 +6,7 @@ pub mod db;
 pub mod device;
 pub mod error;
 pub mod openapi;
+pub mod reach;
 pub mod registry;
 pub mod resolve;
 pub mod state;

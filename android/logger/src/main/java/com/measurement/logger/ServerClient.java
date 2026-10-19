@@ -114,6 +114,13 @@ public final class ServerClient {
         close(post("/api/v1/devices/" + deviceId + "/status", status, "Bearer " + session));
     }
 
+    /** Returns the HTTP status; the caller decides whether to keep the report. */
+    public int postReachability(String session, String deviceId, JSONObject report) throws Exception {
+        try (Response r = post("/api/v1/devices/" + deviceId + "/reachability", report, "Bearer " + session)) {
+            return r.code();
+        }
+    }
+
     // --- 3-phase upload ---
 
     public JSONObject uploadSummary(String session, String testId, JSONObject manifest) throws Exception {

@@ -10,6 +10,7 @@ pub mod internal;
 pub mod logging_config;
 pub mod monitor;
 pub mod orchestration;
+pub mod reachability;
 pub mod test_plan;
 pub mod upload;
 
@@ -17,6 +18,7 @@ pub use auth::*;
 pub use capability::*;
 pub use command::*;
 pub use device_status::*;
+pub use reachability::*;
 pub use internal::*;
 pub use logging_config::*;
 pub use monitor::*;

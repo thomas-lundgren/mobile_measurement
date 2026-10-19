@@ -310,3 +310,46 @@ async fn server_time_is_unauthenticated_and_monotonicish() {
     let t = body["server_utc_ns"].as_i64().unwrap();
     assert!(t > 1_700_000_000_000_000_000, "plausible UTC nanoseconds");
 }
+
+#[tokio::test]
+async fn reachability_report_is_stored_and_listed_for_operators() {
+    let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
+    let st = state().await.with_upload_root(dir.path());
+    let (device_id, session) = enrolled_session(&st).await;
+
+    let vectors: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../contracts/testvectors/reachability/reachability_report_examples.json"
+    ))
+    .unwrap();
+    let report = vectors["examples"][0]["report"].clone();
+    let path = format!("/api/v1/devices/{device_id}/reachability");
+    let (s, _) = send(&st, "POST", &path, None, Some(report.clone())).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let (s, _) = send(&st, "POST", &path, Some(&session), Some(report)).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+
+    mp_server_main::auth::create_operator(&st.pool, "op", "pw123456", OperatorRole::Operator)
+        .await
+        .unwrap();
+    let (_, login) = send(
+        &st,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({"username":"op","password":"pw123456"})),
+    )
+    .await;
+    let jwt = login["jwt"].as_str().unwrap();
+    let (s, _) = send(&st, "GET", "/api/v1/viz/reachability", Some(&session), None).await;
+    assert_eq!(
+        s,
+        StatusCode::UNAUTHORIZED,
+        "device sessions cannot read reports"
+    );
+    let (s, body) = send(&st, "GET", "/api/v1/viz/reachability", Some(jwt), None).await;
+    assert_eq!(s, StatusCode::OK);
+    let got = &body["reports"][0];
+    assert_eq!(got["device_id"], device_id.as_str());
+    assert_eq!(got["network"]["wifi_ssid"], "Office-Guest");
+    assert_eq!(got["checks"][1]["seen_as"], "34.79.46.191:33444");
+}

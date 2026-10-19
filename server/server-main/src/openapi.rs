@@ -17,6 +17,7 @@ use utoipa::OpenApi;
         crate::device::poll_command,
         crate::device::ack_command,
         crate::device::post_status,
+        crate::device::post_reachability,
         crate::uploads::summary,
         crate::uploads::put_file,
         crate::uploads::complete,
@@ -39,6 +40,9 @@ use utoipa::OpenApi;
         DeviceSummary, TestSummary, LoggingConfigAck,
         // device status / command
         DeviceStatus, DualClock, Battery, Storage, RadioSnapshot, DeviceCommand,
+        // reachability
+        ReachabilityReport, ReachTrigger, NetworkContext, NetworkTransport, ReachCheck,
+        ReachProtocol, ReachKind,
         // upload
         UploadManifest, ManifestFile, UploadInitResponse,
         // enums referenced above

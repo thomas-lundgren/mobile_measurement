@@ -1,5 +1,5 @@
 //! Device control-plane endpoints (session-authenticated): register,
-//! command poll/ack, status. Identity is always the token's device; a path
+//! command poll/ack, status, reachability reports. Identity is always the token's device; a path
 //! `{device_id}` that disagrees is rejected.
 
 use axum::extract::{Path, State};
@@ -7,7 +7,9 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use mp_contracts::{Capability, Command, DeviceCommand, DeviceStatus, LoggingConfig};
+use mp_contracts::{
+    Capability, Command, DeviceCommand, DeviceStatus, LoggingConfig, ReachabilityReport,
+};
 
 use crate::auth::authed_device;
 use crate::error::AppError;
@@ -26,6 +28,10 @@ pub fn routes() -> Router<AppState> {
             post(ack_command),
         )
         .route("/api/v1/devices/{device_id}/status", post(post_status))
+        .route(
+            "/api/v1/devices/{device_id}/reachability",
+            post(post_reachability),
+        )
         .route("/api/v1/time", get(server_time))
 }
 
@@ -140,6 +146,45 @@ pub async fn ack_command(
             }
         }
     }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The device's own reachability check (which ports/protocols toward the
+/// server get through the network it was on). Checks run on the device
+/// without the server — on a restrictive network it cannot be reached — and
+/// are uploaded later; each report is appended as one JSON line to
+/// `<upload_root>/reach/<device_id>.jsonl`.
+#[utoipa::path(
+    post, path = "/api/v1/devices/{device_id}/reachability", tag = "device",
+    params(("device_id" = String, Path)),
+    request_body = ReachabilityReport,
+    responses((status = 204), (status = 401))
+)]
+pub async fn post_reachability(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Path(device_id): Path<String>,
+    Json(report): Json<ReachabilityReport>,
+) -> Result<StatusCode, AppError> {
+    let device_id = authed_for(&st, &headers, Some(&device_id)).await?;
+    let mut line = serde_json::to_value(&report).map_err(|_| AppError::Internal)?;
+    line["device_id"] = device_id.clone().into();
+    line["received_at_utc_ns"] = now_utc_ns().into();
+    let dir = st.upload_root.join("reach");
+    let path = dir.join(format!("{device_id}.jsonl"));
+    let text = format!("{line}\n");
+    tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        use std::io::Write;
+        std::fs::create_dir_all(&dir)?;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?
+            .write_all(text.as_bytes())
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(|_| AppError::Internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/reachability_report.schema.json",
+  "title": "ReachabilityReport",
+  "description": "Body of POST /api/v1/devices/{device_id}/reachability. One reachability check run by the device on its own (on a network change, at service start, or on request): which ports/protocols toward the server get through the current network. Runs without the server's involvement, because on a restrictive network the device cannot receive commands; reports are stored on the device and uploaded once the server is reachable. Wire protocol of the reach responders: contracts/packets/reach.md.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["checked_at", "trigger", "network", "checks"],
+  "properties": {
+    "checked_at": { "$ref": "#/$defs/DualClock" },
+    "trigger": {
+      "type": "string",
+      "enum": ["NETWORK_CHANGE", "SERVICE_START", "MANUAL"],
+      "description": "What started this check."
+    },
+    "network": { "$ref": "#/$defs/NetworkContext" },
+    "checks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ReachCheck" }
+    }
+  },
+
+  "$defs": {
+    "DualClock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mono_ns", "utc_ns"],
+      "properties": {
+        "mono_ns": { "type": "integer" },
+        "utc_ns":  { "type": "integer" }
+      }
+    },
+    "NetworkContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transport"],
+      "description": "The network the checks ran over (the device binds every probe socket to it).",
+      "properties": {
+        "transport": {
+          "type": "string",
+          "enum": ["CELLULAR", "WIFI", "ETHERNET", "OTHER", "NONE"]
+        },
+        "wifi_ssid":     { "type": ["string", "null"], "description": "SSID when on Wi-Fi (needs location permission)." },
+        "wifi_freq_mhz": { "type": ["integer", "null"] },
+        "operator":      { "type": ["string", "null"], "description": "Cellular operator name when on cellular." },
+        "validated":     { "type": ["boolean", "null"], "description": "Android considers the network to have working internet access." }
+      }
+    },
+    "ReachCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "port", "kind", "ok"],
+      "properties": {
+        "protocol": { "type": "string", "enum": ["tcp", "udp"] },
+        "port":     { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Port dialled on the server's public address." },
+        "kind": {
+          "type": "string",
+          "enum": ["reach", "http"],
+          "description": "reach: the MPREACH1 echo (contracts/packets/reach.md). http: GET /api/v1/time on the control port."
+        },
+        "ok":       { "type": "boolean" },
+        "rtt_ms":   { "type": ["number", "null"], "description": "Round trip of the successful exchange (TCP: request→reply, not counting connect)." },
+        "seen_as":  { "type": ["string", "null"], "description": "ip:port the server saw (reach only) — differs between checks when a proxy or different NAT is in the path." },
+        "error":    { "type": ["string", "null"], "description": "Why it failed: timeout, refused, reset, bad_reply, http_<status>, ..." }
+      }
+    }
+  }
+}

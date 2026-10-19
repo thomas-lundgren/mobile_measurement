@@ -43,6 +43,8 @@
   .b-red { color:var(--red); } .b-orange { color:var(--orange); } .b-green { color:var(--green); }
   .b-purple { color:var(--purple); } .b-blue { color:var(--blue); } .b-muted { color:var(--muted); }
   .muted { color:var(--muted); }
+  td.ok { color:var(--green); font-weight:600; }
+  td.no { color:var(--red); }
   .empty { color:var(--muted); font-style:italic; }
   #login { max-width:320px; margin:15vh auto; padding:16px; background:var(--panel); border:1px solid var(--border);
     border-radius:10px; display:none; }
@@ -70,6 +72,15 @@
 </form>
 
 <main id="main">
+  <section>
+    <h2>Reachability checks</h2>
+    <p class="intro">Run by the phone on its own whenever its network changes (and at start or on the app's button):
+      which ports and protocols toward the server get through that network. "Seen as" is the phone's address as the
+      server saw it; different addresses for different ports mean a proxy or different NAT in the path. Checks from a
+      network the server could not be reached on are uploaded later. Newest first, all days.</p>
+    <div class="scroll"><table id="reach"></table></div>
+  </section>
+
   <section>
     <h2>Tests</h2>
     <p class="intro">One row per test. "Phone's address" is the phone's public address as the server saw it on the
@@ -259,6 +270,50 @@ function renderServerSide() {
   ], rows, "None this day.");
 }
 
+async function loadReach() {
+  let reports;
+  try {
+    reports = (await api("/api/v1/viz/reachability")).reports;
+  } catch (e) {
+    if (e.message !== "login") $("reach").innerHTML = `<tbody><tr><td class="empty">Error: ${esc(e.message)}</td></tr></tbody>`;
+    return;
+  }
+  // One column per target, in the order the phone probes them.
+  const cols = [];
+  for (const r of reports) for (const c of r.checks) {
+    const k = `${c.protocol}/${c.port}`;
+    if (!cols.includes(k)) cols.push(k);
+  }
+  const rows = reports.slice(0, 100).map((r) => {
+    const n = r.network || {};
+    const net = [n.transport, n.wifi_ssid, n.operator].filter(Boolean).join(" · ") +
+      (n.validated === false ? ' <span class="muted">(no internet)</span>' : "");
+    const byKey = Object.fromEntries(r.checks.map((c) => [`${c.protocol}/${c.port}`, c]));
+    const seen = [...new Set(r.checks.filter((c) => c.seen_as).map((c) => c.seen_as.replace(/:\d+$/, "")))];
+    const cells = cols.map((k) => {
+      const c = byKey[k];
+      if (!c) return { html: "–", cls: "" };
+      return c.ok
+        ? { html: `✓ ${num(c.rtt_ms)} ms`, cls: "ok" }
+        : { html: `✗ ${esc(c.error || "")}`, cls: "no" };
+    });
+    return { cells: [
+      new Date(r.checked_at.utc_ns / 1e6).toLocaleString(),
+      esc(r.trigger.toLowerCase().replace("_", " ")),
+      net,
+      ...cells.map((c) => c.html),
+      seen.length > 1 ? seen.map(esc).join("<br>") + badge("proxy / split path", "b-orange") : esc(seen[0] || "–"),
+    ], cls: ["", "", "", ...cells.map((c) => c.cls), ""] };
+  });
+  const head = [["Checked"], ["Trigger"], ["Network"], ...cols.map((k) => [k, "num"]), ["Seen as"]];
+  if (!rows.length) {
+    $("reach").innerHTML = '<tbody><tr><td class="empty">No reachability checks uploaded yet.</td></tr></tbody>';
+    return;
+  }
+  $("reach").innerHTML = `<thead><tr>${head.map(([h, c]) => `<th class="${c || ""}">${h}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((r) => `<tr>${r.cells.map((v, i) => `<td class="${[head[i][1] || "", r.cls[i]].join(" ")}">${v}</td>`).join("")}</tr>`).join("")}</tbody>`;
+}
+
 async function loadDay() {
   const day = $("day").value;
   if (!day) return;
@@ -280,7 +335,7 @@ async function load() {
     const prev = sel.value;
     sel.innerHTML = days.slice().reverse().map((d) => `<option>${d}</option>`).join("");
     if (days.includes(prev)) sel.value = prev;
-    await loadDay();
+    await Promise.all([loadDay(), loadReach()]);
   } catch (e) {
     if (e.message !== "login") $("status").textContent = e.message === "HTTP 404" ? "No data yet" : "Error: " + e.message;
   }

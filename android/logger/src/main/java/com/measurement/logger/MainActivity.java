@@ -85,6 +85,12 @@ public final class MainActivity extends AppCompatActivity {
         ((Button) findViewById(R.id.stopBtn)).setOnClickListener(v ->
                 stopService(new Intent(this, LoggerService.class)));
 
+        // Runs in the service (which keeps the result and uploads it later);
+        // starts the service from the saved server if it is not running.
+        ((Button) findViewById(R.id.reachBtn)).setOnClickListener(v ->
+                androidx.core.content.ContextCompat.startForegroundService(this,
+                        new Intent(this, LoggerService.class).setAction(LoggerService.ACTION_REACH_CHECK)));
+
         // Dev/automation: `adb shell am start -n .../.MainActivity -e server URL -e token TOK`
         // prefills the fields and auto-starts the service. The URL is also
         // remembered so it shows up in the dropdown next time.
@@ -106,7 +112,7 @@ public final class MainActivity extends AppCompatActivity {
         ui.post(new Runnable() {
             @Override
             public void run() {
-                status.setText(LoggerService.STATE);
+                status.setText(LoggerService.STATE + "\n" + ReachabilityChecker.SUMMARY);
                 ui.postDelayed(this, 500);
             }
         });

@@ -1,0 +1,31 @@
+{
+  "schema": "../../schemas/reachability_report.schema.json",
+  "examples": [
+    {
+      "name": "guest_wifi_only_web",
+      "report": {
+        "checked_at": { "mono_ns": 882013440000, "utc_ns": 1792405800000000000 },
+        "trigger": "NETWORK_CHANGE",
+        "network": { "transport": "WIFI", "wifi_ssid": "Office-Guest", "wifi_freq_mhz": 5180, "validated": true },
+        "checks": [
+          { "protocol": "tcp", "port": 8080,  "kind": "http",  "ok": false, "error": "timeout" },
+          { "protocol": "tcp", "port": 443,   "kind": "reach", "ok": true,  "rtt_ms": 31.5, "seen_as": "34.79.46.191:33444" },
+          { "protocol": "udp", "port": 443,   "kind": "reach", "ok": false, "error": "timeout" },
+          { "protocol": "udp", "port": 3478,  "kind": "reach", "ok": false, "error": "timeout" }
+        ]
+      }
+    },
+    {
+      "name": "cellular_all_open",
+      "report": {
+        "checked_at": { "mono_ns": 1042013440000, "utc_ns": 1792407000000000000 },
+        "trigger": "SERVICE_START",
+        "network": { "transport": "CELLULAR", "operator": "Tele2", "validated": true },
+        "checks": [
+          { "protocol": "tcp", "port": 8080,  "kind": "http",  "ok": true, "rtt_ms": 28.1 },
+          { "protocol": "udp", "port": 41100, "kind": "reach", "ok": true, "rtt_ms": 24.9, "seen_as": "90.129.122.158:20191" }
+        ]
+      }
+    }
+  ]
+}

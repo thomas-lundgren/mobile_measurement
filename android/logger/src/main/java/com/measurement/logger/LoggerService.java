@@ -32,6 +32,8 @@ import java.util.List;
 public final class LoggerService extends Service {
     public static final String EXTRA_SERVER = "server";
     public static final String EXTRA_TOKEN = "token";
+    /** Start-service action: run a reachability check now (the app's button). */
+    public static final String ACTION_REACH_CHECK = "com.measurement.logger.REACH_CHECK";
     private static final String CHANNEL = "logger";
     private static final String PREFS = "mp_logger";
 
@@ -60,6 +62,7 @@ public final class LoggerService extends Service {
     private PowerManager.WakeLock wakeLock;
     private int loggingConfigVersion = 1;
     private JSONObject loggingConfig; // latest server-pushed config (SET_LOGGING_CONFIG)
+    private ReachabilityChecker reach;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -102,6 +105,16 @@ public final class LoggerService extends Service {
         }
         acquireWakeLock();
         running = true;
+        if (reach == null) {
+            try {
+                reach = new ReachabilityChecker(this, server);
+                reach.start();
+            } catch (Exception e) {
+                ReachabilityChecker.SUMMARY = "reachability unavailable: " + e.getMessage();
+            }
+        } else if (intent != null && ACTION_REACH_CHECK.equals(intent.getAction())) {
+            reach.requestCheck("MANUAL");
+        }
         final String s = server;
         final String t = token;
         // A duplicate start / resume leaves live threads alone, but restarts
@@ -136,6 +149,10 @@ public final class LoggerService extends Service {
 
     private void stopThreads() {
         running = false;
+        if (reach != null) {
+            reach.stop();
+            reach = null;
+        }
         if (worker != null) {
             worker.interrupt();
         }
@@ -241,6 +258,10 @@ public final class LoggerService extends Service {
             if (System.currentTimeMillis() - lastStatus > 5000) {
                 postStatus(client, session, deviceId, null);
                 lastStatus = System.currentTimeMillis();
+                ReachabilityChecker r = reach;
+                if (r != null) {
+                    r.flush(client, session, deviceId);  // reports from networks the server could not be reached on
+                }
             }
         }
     }
