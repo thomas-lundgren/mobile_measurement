@@ -137,9 +137,7 @@ public final class RadioSampler {
                         putIfValid(row, "nci", id.getNci());
                         putIfValid(row, "tac", id.getTac());
                         putIfValid(row, "nrarfcn", id.getNrarfcn());
-                        putIfValid(row, "rsrp", ss.getSsRsrp());
-                        putIfValid(row, "rsrq", ss.getSsRsrq());
-                        putIfValid(row, "sinr", ss.getSsSinr());
+                        putNrSignal(row, ss);
                         row.put("cell_connection_status", primary ? "PRIMARY" : "SECONDARY");
                     } else {
                         neighbors.put(neighbor(id.getPci(), ss.getSsRsrp()));
@@ -158,16 +156,20 @@ public final class RadioSampler {
                     }
                 }
             }
-            // NSA: CellInfoNr often carries no signal (or no NR entry at all);
-            // the NR leg's measurements are reported via SignalStrength.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !row.has("rsrp")) {
+            // The NR leg's signal comes from SignalStrength, which the modem
+            // keeps current. In NSA, CellInfoNr's signal is a snapshot from
+            // when the 5G leg was added and never refreshes (one value for
+            // hours), or is unavailable with a placeholder SINR of 0. Use
+            // CellInfoNr's signal only when SignalStrength has none.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 SignalStrength sig = tm.getSignalStrength();
                 if (sig != null) {
                     for (CellSignalStrengthNr ss : sig.getCellSignalStrengths(CellSignalStrengthNr.class)) {
                         if (valid(ss.getSsRsrp())) {
-                            putIfValid(row, "rsrp", ss.getSsRsrp());
-                            putIfValid(row, "rsrq", ss.getSsRsrq());
-                            putIfValid(row, "sinr", ss.getSsSinr());
+                            row.remove("rsrp");
+                            row.remove("rsrq");
+                            row.remove("sinr");
+                            putNrSignal(row, ss);
                             if (!row.has("cell_connection_status")) {
                                 row.put("cell_connection_status", haveLte ? "SECONDARY" : "PRIMARY");
                             }
@@ -188,6 +190,17 @@ public final class RadioSampler {
      *  (Integer.MAX_VALUE) / UNAVAILABLE_LONG; those must be null, not dBm. */
     private static boolean valid(long v) {
         return v != CellInfo.UNAVAILABLE && v != CellInfo.UNAVAILABLE_LONG;
+    }
+
+    /** NR signal fields; SINR is only trusted beside a valid RSRP (Pixel
+     *  reports SINR 0, not UNAVAILABLE, when it has no measurement). */
+    private static void putNrSignal(JSONObject row, CellSignalStrengthNr ss) throws Exception {
+        if (!valid(ss.getSsRsrp())) {
+            return;
+        }
+        row.put("rsrp", ss.getSsRsrp());
+        putIfValid(row, "rsrq", ss.getSsRsrq());
+        putIfValid(row, "sinr", ss.getSsSinr());
     }
 
     private static void putIfValid(JSONObject row, String key, long v) throws Exception {
