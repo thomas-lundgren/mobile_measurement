@@ -20,6 +20,8 @@ pub enum AppError {
     Unprocessable(String),
     #[error("internal error")]
     Internal,
+    #[error("unavailable: {0}")]
+    Unavailable(String),
 }
 
 impl AppError {
@@ -32,6 +34,7 @@ impl AppError {
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AppError::Unprocessable(_) => StatusCode::UNPROCESSABLE_ENTITY,
             AppError::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 }

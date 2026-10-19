@@ -2,7 +2,7 @@
 //! Phase 1: DB (1c) + device/operator auth (1d). Plain HTTP on loopback (TLS is
 //! a Phase-5 hardening concern, per the Phase 1 design).
 
-use mp_server_main::{build_router, db, AppState};
+use mp_server_main::{build_router, db, AppState, UploadHold};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -46,7 +46,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let app = build_router(state);
+    // MP_UPLOAD_HOLD_MIN_FREE_GB: hold mobile uploads until the phone is on
+    // the local network, unless its free storage drops below this many GB.
+    if let Ok(gb) = std::env::var("MP_UPLOAD_HOLD_MIN_FREE_GB") {
+        let gb: f64 = gb.parse()?;
+        state = state.with_upload_hold(UploadHold {
+            min_free_bytes: (gb * 1e9) as i64,
+        });
+        println!("mobile uploads held off the local network (unless < {gb} GB free)");
+    }
+
+    let app = build_router(state)
+        .into_make_service_with_connect_info::<std::net::SocketAddr>();
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("server-main listening on http://{bind}");

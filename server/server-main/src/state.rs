@@ -19,6 +19,16 @@ pub struct AppState {
     pub test_control_url: Arc<Option<String>>,
     /// UDP port of the low-overhead time-sync responder, advertised via /time.
     pub time_udp_port: u16,
+    /// Hold mobile uploads that arrive over the mobile network (see
+    /// `uploads::upload_held`); None uploads over any network.
+    pub upload_hold: Option<UploadHold>,
+}
+
+/// Mobile uploads are accepted only from the local network (home Wi-Fi), or
+/// from anywhere once the device reports less free storage than this.
+#[derive(Clone, Copy, Debug)]
+pub struct UploadHold {
+    pub min_free_bytes: i64,
 }
 
 impl AppState {
@@ -35,6 +45,7 @@ impl AppState {
             server_host: "127.0.0.1".to_string(),
             test_control_url: Arc::new(None),
             time_udp_port: 8081,
+            upload_hold: None,
         }
     }
 
@@ -50,6 +61,11 @@ impl AppState {
 
     pub fn with_server_host(mut self, host: impl Into<String>) -> Self {
         self.server_host = host.into();
+        self
+    }
+
+    pub fn with_upload_hold(mut self, hold: UploadHold) -> Self {
+        self.upload_hold = Some(hold);
         self
     }
 

@@ -5,9 +5,11 @@
 //! `server/` recordings for the same test.
 
 use std::collections::HashSet;
+use std::net::{IpAddr, SocketAddr};
 
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::{ConnectInfo, FromRequestParts, Path, State};
+use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{post, put};
 use axum::{Json, Router};
@@ -59,19 +61,86 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// The TCP peer's address, when the server runs with connect info (absent in
+/// router-level tests that don't set it).
+pub struct Peer(pub Option<IpAddr>);
+
+impl<S: Send + Sync> FromRequestParts<S> for Peer {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        Ok(Peer(
+            parts
+                .extensions
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|c| c.0.ip()),
+        ))
+    }
+}
+
+/// Local network: private, loopback or link-local ranges, or the server's own
+/// public address (the router's hairpin NAT when the phone is on home Wi-Fi).
+/// Carrier-grade NAT (100.64/10) counts as the mobile network.
+fn is_local(ip: IpAddr, server_host: &str) -> bool {
+    if server_host.parse::<IpAddr>().is_ok_and(|h| h == ip) {
+        return true;
+    }
+    match ip {
+        IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_local(IpAddr::V4(v4), server_host);
+            }
+            v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00 || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Why an upload from `peer` is held, or None to accept it. With a hold
+/// configured, uploads wait for the local network unless the device's last
+/// heartbeat reported storage running low. A held upload gets 503: the
+/// Logger keeps the files and retries with backoff.
+async fn upload_held(st: &AppState, device_id: &str, peer: Option<IpAddr>) -> Result<Option<String>, AppError> {
+    let Some(hold) = st.upload_hold else {
+        return Ok(None);
+    };
+    if peer.is_some_and(|ip| is_local(ip, &st.server_host)) {
+        return Ok(None);
+    }
+    let free: Option<(Option<i64>,)> =
+        sqlx::query_as("SELECT storage_free_bytes FROM device_status WHERE device_id = ?")
+            .bind(device_id)
+            .fetch_optional(&st.pool)
+            .await?;
+    if let Some((Some(free),)) = free {
+        if free < hold.min_free_bytes {
+            return Ok(None);
+        }
+    }
+    let from = peer.map_or("an unknown address".to_string(), |ip| ip.to_string());
+    Ok(Some(format!("upload held until the device is on the local network (from {from})")))
+}
+
 #[utoipa::path(
     post, path = "/api/v1/tests/{test_id}/summary", tag = "upload",
     params(("test_id" = String, Path)),
     request_body = UploadManifest,
-    responses((status = 200, body = UploadInitResponse), (status = 401), (status = 404))
+    responses(
+        (status = 200, body = UploadInitResponse), (status = 401), (status = 404),
+        (status = 503, description = "Upload held (device not on the local network); retry later")
+    )
 )]
 pub async fn summary(
     State(st): State<AppState>,
+    Peer(peer): Peer,
     headers: HeaderMap,
     Path(test_id): Path<String>,
     Json(manifest): Json<UploadManifest>,
 ) -> Result<Json<UploadInitResponse>, AppError> {
-    owned_test(&st, &headers, &test_id).await?;
+    let (device_id, _) = owned_test(&st, &headers, &test_id).await?;
+    if let Some(why) = upload_held(&st, &device_id, peer).await? {
+        return Err(AppError::Unavailable(why));
+    }
     if manifest.node != "mobile" {
         return Err(AppError::BadRequest("node must be 'mobile'".into()));
     }

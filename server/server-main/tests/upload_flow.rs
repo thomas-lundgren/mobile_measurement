@@ -357,3 +357,63 @@ async fn foreign_test_and_unauth_rejected() {
     .await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
+
+/// POST the summary as if from `peer` (the server runs with connect info).
+async fn summary_from(st: &AppState, test_id: &str, session: &str, peer: &str) -> StatusCode {
+    let manifest = json!({
+        "test_result": "COMPLETED", "node": "mobile",
+        "files": [ manifest_file("header.json", b"{}") ]
+    });
+    let addr: std::net::SocketAddr = peer.parse().unwrap();
+    let r = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/tests/{test_id}/summary"))
+        .header("authorization", format!("Bearer {session}"))
+        .header("content-type", "application/json")
+        .extension(axum::extract::ConnectInfo(addr))
+        .body(Body::from(manifest.to_string()))
+        .unwrap();
+    build_router(st.clone()).oneshot(r).await.unwrap().status()
+}
+
+#[tokio::test]
+async fn upload_held_off_the_local_network_unless_storage_is_low() {
+    let root = tempfile::tempdir().unwrap();
+    let st = state(root.path())
+        .await
+        .with_server_host("2.248.90.179")
+        .with_upload_hold(mp_server_main::UploadHold {
+            min_free_bytes: 2_000_000_000,
+        });
+    let (device_id, session) = device_session(&st).await;
+    let test_id = "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5";
+    make_test(&st, &device_id, test_id).await;
+
+    // mobile network (public or carrier-grade NAT address): held, retryable
+    for peer in ["90.129.122.158:40000", "100.70.1.2:40000"] {
+        assert_eq!(summary_from(&st, test_id, &session, peer).await, StatusCode::SERVICE_UNAVAILABLE);
+    }
+    // home Wi-Fi: a LAN address, or the router's hairpin NAT showing our own public address
+    for peer in ["192.168.1.57:40000", "2.248.90.179:40000"] {
+        assert_eq!(summary_from(&st, test_id, &session, peer).await, StatusCode::OK);
+    }
+    // storage running low: accepted over the mobile network too
+    let status = |free| mp_server_main::registry::StatusUpdate {
+        device_id: device_id.clone(),
+        logger_state: "IDLE".into(),
+        current_test_id: None,
+        logging_config_version: 1,
+        battery_level_pct: None,
+        battery_charging: None,
+        storage_free_bytes: Some(free),
+        pending_uploads: None,
+        radio_json: None,
+        sampled_mono_ns: 1,
+        sampled_utc_ns: 2,
+        received_at: 3,
+    };
+    mp_server_main::registry::upsert_device_status(&st.pool, &status(50_000_000_000)).await.unwrap();
+    assert_eq!(summary_from(&st, test_id, &session, "90.129.122.158:40000").await, StatusCode::SERVICE_UNAVAILABLE);
+    mp_server_main::registry::upsert_device_status(&st.pool, &status(1_000_000_000)).await.unwrap();
+    assert_eq!(summary_from(&st, test_id, &session, "90.129.122.158:40000").await, StatusCode::OK);
+}

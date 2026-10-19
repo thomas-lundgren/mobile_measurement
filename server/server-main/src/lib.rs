@@ -17,7 +17,7 @@ pub mod uploads;
 pub mod util;
 pub mod viz;
 
-pub use state::AppState;
+pub use state::{AppState, UploadHold};
 
 use axum::Router;
 

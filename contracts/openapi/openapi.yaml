@@ -368,6 +368,8 @@ paths:
           description: ''
         '404':
           description: ''
+        '503':
+          description: Upload held (device not on the local network); retry later
   /api/v1/tests/{test_id}/upload/{upload_id}/complete:
     post:
       tags:
