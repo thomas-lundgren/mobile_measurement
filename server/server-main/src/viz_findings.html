@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Measurement Findings</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<style>
+  :root { --bg:#ffffff; --fg:#1d1d1f; --muted:#6e6e73; --panel:#f5f5f7; --border:#d2d2d7; --accent:#0a66c2;
+    --row:#0000000a; --red:#d70015; --orange:#c75300; --green:#1a7f37; --purple:#8944ab; --blue:#0a66c2; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1c1c1e; --fg:#f2f2f7; --muted:#a1a1a6; --panel:#2c2c2e; --border:#3a3a3c; --accent:#4c9aff;
+      --row:#ffffff0d; --red:#ff6961; --orange:#ffb340; --green:#4cd964; --purple:#da8fff; --blue:#4c9aff; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--fg);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position:sticky; top:0; z-index:10; background:var(--panel); border-bottom:1px solid var(--border);
+    padding:8px 16px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  header h1 { font-size:16px; margin:0 8px 0 0; }
+  header label { color:var(--muted); font-size:12px; }
+  a { color:var(--accent); }
+  select, input, button { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--border);
+    border-radius:6px; padding:4px 6px; }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  #status { color:var(--muted); font-size:12px; }
+  main { padding:8px 16px 32px; max-width:1500px; }
+  section { margin:18px 0 26px; }
+  h2 { font-size:15px; margin:0 0 4px; }
+  .intro { color:var(--muted); font-size:13px; margin:0 0 8px; max-width:980px; }
+  .callout { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:8px 12px;
+    margin:0 0 10px; font-size:13px; max-width:980px; }
+  .scroll { overflow-x:auto; }
+  table { border-collapse:collapse; font-size:12.5px; min-width:100%; }
+  th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--border); white-space:nowrap; vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; position:sticky; top:0; background:var(--bg); }
+  td.num, th.num { text-align:right; font-variant-numeric: tabular-nums; }
+  td.wrap { white-space:normal; min-width:280px; max-width:520px; }
+  tbody tr:hover { background:var(--row); }
+  .badge { display:inline-block; padding:1px 6px; border-radius:10px; font-size:11.5px; font-weight:600;
+    border:1px solid currentColor; margin:0 4px 2px 0; white-space:nowrap; }
+  .b-red { color:var(--red); } .b-orange { color:var(--orange); } .b-green { color:var(--green); }
+  .b-purple { color:var(--purple); } .b-blue { color:var(--blue); } .b-muted { color:var(--muted); }
+  .muted { color:var(--muted); }
+  .empty { color:var(--muted); font-style:italic; }
+  #login { max-width:320px; margin:15vh auto; padding:16px; background:var(--panel); border:1px solid var(--border);
+    border-radius:10px; display:none; }
+  #login h2 { font-size:16px; margin:0 0 8px; }
+  #login input { width:100%; margin:4px 0; }
+  #login .err { color:var(--red); min-height:1.2em; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Findings</h1>
+  <label>Day <select id="day"></select></label>
+  <button id="reload">Reload</button>
+  <a href="/viz">Map</a>
+  <a href="/viz/charts">Charts</a>
+  <span id="status"></span>
+</header>
+
+<form id="login">
+  <h2>Operator login</h2>
+  <input id="user" autocomplete="username" placeholder="Username" required>
+  <input id="pass" type="password" autocomplete="current-password" placeholder="Password" required>
+  <div class="err" id="loginErr"></div>
+  <button class="primary" type="submit">Log in</button>
+</form>
+
+<main id="main">
+  <section>
+    <h2>Tests</h2>
+    <p class="intro">One row per test. Delays are percentiles over all packets (RTT from the probe; one-way delays
+      clock-corrected, from probe and realtime UDP). Loss is the worst UDP flow per direction. Click a time to open
+      the charts zoomed to that test.</p>
+    <div class="scroll"><table id="tests"></table></div>
+  </section>
+
+  <section>
+    <h2>Delay down, throughput up</h2>
+    <p class="intro">Moments where the delay in a bulk direction drops to half or less (by at least 20 ms) while that
+      direction's throughput rises by at least 20 %, holding for 3 s on each side. The kind is a heuristic from the
+      200 ms bins and points at where to look; it does not prove the cause.</p>
+    <div class="scroll"><table id="regimes"></table></div>
+  </section>
+
+  <section>
+    <h2>Link pauses (both directions)</h2>
+    <div id="period" class="callout"></div>
+    <p class="intro">Bursts of ~120 ms stalls in uplink and downlink at the same instants, with packets held rather
+      than lost: a device-side pause (likely dual-SIM tune-away), not queueing. Exclude these windows when judging
+      head-of-line blocking.</p>
+    <div class="scroll"><table id="pauses"></table></div>
+  </section>
+
+  <section>
+    <h2>One-way gap episodes</h2>
+    <p class="intro">Repeated gaps (&gt; 80 ms) in one direction only, while the other direction flows normally:
+      packets arrive in bursts after each gap (radio scheduling or queueing in that direction).</p>
+    <div class="scroll"><table id="gaps"></table></div>
+  </section>
+
+  <section>
+    <h2>Downloads limited on the server side</h2>
+    <p class="intro">Share of a test's download time running at ≥ 200 Mbit/s with &lt; 15 ms downlink delay. There the
+      radio is faster than the server's own link (Wi-Fi, ~280 Mbit/s), so the queue is not on the radio and
+      downlink head-of-line blocking is not being measured.</p>
+    <div class="scroll"><table id="serverside"></table></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let data = null;
+
+function token() { try { return sessionStorage.getItem("mp_jwt"); } catch { return null; } }
+function setToken(t) { try { t ? sessionStorage.setItem("mp_jwt", t) : sessionStorage.removeItem("mp_jwt"); } catch {} }
+
+async function api(path) {
+  const r = await fetch(path, { headers: { authorization: "Bearer " + token() } });
+  if (r.status === 401) { setToken(null); showLogin(); throw new Error("login"); }
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const hms = (t) => new Date(t * 1000).toLocaleTimeString();
+const hm = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const num = (v, d = 0) => v == null ? "–" : Number(v).toFixed(d);
+const pct = (v) => v == null ? "–" : (100 * v).toFixed(v > 0 && v < 0.01 ? 2 : 1) + " %";
+const pp = (o) => o ? `${num(o.p50)} / ${num(o.p99)}` : "–";
+function dur(s) {
+  if (s == null) return "–";
+  const m = Math.floor(s / 60), r = s - 60 * m;
+  return m ? `${m} min ${r.toFixed(1)} s` : `${r.toFixed(1)} s`;
+}
+function chartsLink(text, from, to) {
+  return `<a href="/viz/charts#day=${data.day}&from=${from}&to=${to}">${esc(text)}</a>`;
+}
+const badge = (text, cls) => `<span class="badge ${cls}">${esc(text)}</span>`;
+
+function table(el, head, rows, empty) {
+  if (!rows.length) { el.innerHTML = `<tbody><tr><td class="empty">${empty}</td></tr></tbody>`; return; }
+  el.innerHTML = `<thead><tr>${head.map(([h, c]) => `<th class="${c || ""}">${h}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((r) => `<tr>${r.map((v, i) => `<td class="${head[i][1] || ""}">${v}</td>`).join("")}</tr>`).join("")}</tbody>`;
+}
+
+const testOf = (id) => (data.tests || []).find((t) => t.test_id === id);
+
+function renderTests() {
+  const rows = data.tests.map((t) => {
+    const s = t.stats || {};
+    const loss = s.loss || {};
+    const flags = [];
+    if (t.link_pauses) flags.push(badge(`link pause ×${t.link_pauses}`, "b-red"));
+    if (t.gap_episodes) flags.push(badge(`one-way gaps ×${t.gap_episodes}`, "b-purple"));
+    if (t.server_side_share >= 0.2) flags.push(badge(`server-side DL ${Math.round(100 * t.server_side_share)} %`, "b-orange"));
+    return [
+      chartsLink(hm(t.start), t.start - 1, t.end + 1),
+      esc(t.plan || t.test_id),
+      t.radio ? esc(t.radio) : '<span class="muted">–</span>',
+      pp(s.rtt_ms), pp(s.ul_ms), pp(s.dl_ms),
+      num(s.down_mbps), num(s.up_mbps),
+      `${pct(loss.ul)} / ${pct(loss.dl)} / ${pct(loss.probe)}`,
+      flags.join(""),
+    ];
+  });
+  table($("tests"), [
+    ["Time"], ["Test"], ["Radio"], ["RTT p50 / p99 ms", "num"], ["Uplink p50 / p99 ms", "num"],
+    ["Downlink p50 / p99 ms", "num"], ["Down Mbit/s", "num"], ["Up Mbit/s", "num"],
+    ["Loss UL / DL / probe", "num"], ["Flags"],
+  ], rows, "No tests this day.");
+}
+
+const KIND_CLASS = {
+  "bottleneck moved to the server side": "b-orange", "after handover": "b-blue", "stall recovery": "b-purple",
+  "likely radio reconfiguration": "b-green", "radio capacity change": "b-green",
+};
+
+function renderRegimes() {
+  const rows = data.regime_changes.map((r) => [
+    chartsLink(hms(r.time), r.time - 8, r.time + 8),
+    esc(r.plan || r.test_id),
+    r.direction === "uplink" ? "UL" : "DL",
+    `${r.delay_before_ms} → <b>${r.delay_after_ms}</b>`,
+    `${r.tput_before_mbps} → <b>${r.tput_after_mbps}</b>`,
+    badge(r.kind, KIND_CLASS[r.kind] || "b-muted") + (r.interruption_before ? badge("interruption before", "b-muted") : ""),
+    `<span class="muted">${esc(r.explanation)}</span>`,
+  ]);
+  table($("regimes"), [
+    ["Time"], ["Test"], ["Dir"], ["Delay ms", "num"], ["Throughput Mbit/s", "num"], ["Kind"], ["Why", "wrap"],
+  ], rows, "None found this day.");
+}
+
+function renderPauses() {
+  const all = data.pause_period_all_days, day = data.pause_period;
+  const describe = (p, scope) => p
+    ? `<b>Recurs every ${dur(p.period_s)}</b> (${p.period_s} s) ${scope}: ${p.fits} of ${p.intervals} intervals
+       between pauses are whole multiples of it within ±5 s (RMS ${num(p.rms_error_s, 1)} s). Tests run only part of
+       the time, so most pauses are not observed.`
+    : `Too few pauses ${scope} to estimate a period.`;
+  $("period").innerHTML = describe(all, "over all days") +
+    (day && all && Math.abs(day.period_s - all.period_s) > 2
+      ? `<br><span class="muted">This day alone gives ${day.period_s} s (${day.fits} of ${day.intervals}); fewer
+         intervals, so less reliable.</span>` : "");
+  const rows = data.link_pauses.map((e) => [
+    chartsLink(hms(e.start), e.start - 3, e.end + 3),
+    esc(e.plan || e.test_id),
+    `${e.stalls_downlink} / ${e.stalls_uplink}`,
+    `${num(e.stall_ms_median)} / ${num(e.stall_ms_max)}`,
+    num(e.end - e.start, 1),
+    e.since_prev_s == null ? "–" : `${dur(e.since_prev_s)} <span class="muted">(${(e.since_prev_s / (all ? all.period_s : 1)).toFixed(2)}×)</span>`,
+  ]);
+  table($("pauses"), [
+    ["Time"], ["Test"], ["Stalls DL / UL", "num"], ["Stall median / max ms", "num"], ["Duration s", "num"],
+    ["Since previous pause", "num"],
+  ], rows, "No link pauses this day.");
+}
+
+function renderGaps() {
+  const rows = data.gap_episodes.map((e) => [
+    chartsLink(hms(e.start), e.start - 3, e.end + 3),
+    esc(e.plan || e.test_id),
+    e.directions === "uplink" ? "UL" : "DL",
+    e.directions === "uplink" ? e.stalls_uplink : e.stalls_downlink,
+    `${num(e.stall_ms_median)} / ${num(e.stall_ms_max)}`,
+    num(e.end - e.start, 1),
+  ]);
+  table($("gaps"), [
+    ["Time"], ["Test"], ["Dir"], ["Gaps", "num"], ["Gap median / max ms", "num"], ["Duration s", "num"],
+  ], rows, "No one-way gap episodes this day.");
+}
+
+function renderServerSide() {
+  const rows = data.tests.filter((t) => t.server_side_share >= 0.2).map((t) => [
+    chartsLink(hm(t.start), t.start - 1, t.end + 1),
+    esc(t.plan || t.test_id),
+    t.radio ? esc(t.radio) : "–",
+    Math.round(100 * t.server_side_share) + " %",
+    num((t.stats || {}).down_mbps),
+    pp((t.stats || {}).dl_ms),
+  ]);
+  table($("serverside"), [
+    ["Time"], ["Test"], ["Radio"], ["Share of download time", "num"], ["Down Mbit/s", "num"], ["Downlink p50 / p99 ms", "num"],
+  ], rows, "None this day.");
+}
+
+async function loadDay() {
+  const day = $("day").value;
+  if (!day) return;
+  $("status").textContent = "Loading…";
+  try {
+    data = await api("/api/v1/viz/findings/" + day);
+    renderTests(); renderRegimes(); renderPauses(); renderGaps(); renderServerSide();
+    $("status").textContent = `${data.tests.length} tests`;
+  } catch (e) {
+    if (e.message !== "login") $("status").textContent = e.message === "HTTP 404" ? "No findings for this day yet" : "Error: " + e.message;
+  }
+}
+
+async function load() {
+  if (!token()) { showLogin(); return; }
+  try {
+    const { days } = await api("/api/v1/viz/series");
+    const sel = $("day");
+    const prev = sel.value;
+    sel.innerHTML = days.slice().reverse().map((d) => `<option>${d}</option>`).join("");
+    if (days.includes(prev)) sel.value = prev;
+    await loadDay();
+  } catch (e) {
+    if (e.message !== "login") $("status").textContent = e.message === "HTTP 404" ? "No data yet" : "Error: " + e.message;
+  }
+}
+
+function showLogin() { $("main").style.display = "none"; $("login").style.display = "block"; $("user").focus(); }
+
+$("login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("loginErr").textContent = "";
+  const r = await fetch("/api/v1/auth/login", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: $("user").value, password: $("pass").value }),
+  });
+  if (!r.ok) { $("loginErr").textContent = "Login failed"; return; }
+  setToken((await r.json()).jwt);
+  $("pass").value = "";
+  $("login").style.display = "none";
+  $("main").style.display = "block";
+  load();
+});
+$("day").addEventListener("change", loadDay);
+$("reload").addEventListener("click", load);
+
+load();
+</script>
+</body>
+</html>

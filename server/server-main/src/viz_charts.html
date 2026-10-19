@@ -52,6 +52,7 @@
   <button id="reset">Reset zoom</button>
   <button id="reload">Reload</button>
   <a href="/viz">Map</a>
+  <a href="/viz/findings">Findings</a>
   <span class="key" id="modeKey"></span>
   <span class="key"><i style="background:#ff375f55"></i>link pause (both directions)</span>
   <span class="key"><i style="background:#af52de44"></i>one-way gaps</span>
@@ -479,10 +480,14 @@ async function load() {
   try {
     const { days } = await api("/api/v1/viz/series");
     const sel = $("day");
-    const prev = sel.value;
+    // Deep link from the findings page: #day=YYYY-MM-DD&from=<s>&to=<s>.
+    const link = new URLSearchParams(location.hash.slice(1));
+    const prev = link.get("day") || sel.value;
     sel.innerHTML = days.slice().reverse().map((d) => `<option>${d}</option>`).join("");
     if (days.includes(prev)) sel.value = prev;
     await loadDay();
+    const from = parseFloat(link.get("from")), to = parseFloat(link.get("to"));
+    if (plots.length && from < to) plots[0].setScale("x", { min: from, max: to });
   } catch (e) {
     if (e.message !== "login") $("status").textContent = e.message === "HTTP 404" ? "No data yet" : "Error: " + e.message;
   }

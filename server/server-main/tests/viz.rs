@@ -115,6 +115,23 @@ async fn series_days_and_day_file() {
     assert_eq!(s, StatusCode::OK);
     assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["t"][0], 1.0);
 
+    std::fs::create_dir_all(root.join("viz/findings")).unwrap();
+    std::fs::write(
+        root.join("viz/findings/2026-10-19.json"),
+        r#"{"day":"2026-10-19"}"#,
+    )
+    .unwrap();
+    let (s, body) = get(&st, "/api/v1/viz/findings/2026-10-19", Some(&jwt)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap()["day"],
+        "2026-10-19"
+    );
+    let (s, _) = get(&st, "/api/v1/viz/findings/2026-10-19", None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let (s, _) = get(&st, "/viz/findings", None).await;
+    assert_eq!(s, StatusCode::OK);
+
     for bad in ["..%2Fdays", "2026-10-1x", "20261019000"] {
         let (s, _) = get(&st, &format!("/api/v1/viz/series/{bad}"), Some(&jwt)).await;
         assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}");

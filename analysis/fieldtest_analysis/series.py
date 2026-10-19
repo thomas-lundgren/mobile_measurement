@@ -11,8 +11,9 @@ uplink delay could exceed its RTT). Throughput is binned at arrival.
     python -m fieldtest_analysis.series <data_root> [--db mp.db] -o <out_dir>
 
 Writes ``<out_dir>/tests/<test_id>.json`` (cache, rebuilt only when a file in
-the test directory is newer), ``<out_dir>/series/<YYYY-MM-DD>.json`` and
-``<out_dir>/series/days.json``. A test that fails to load is skipped.
+the test directory is newer), ``<out_dir>/series/<YYYY-MM-DD>.json``,
+``<out_dir>/series/days.json`` and ``<out_dir>/findings/<YYYY-MM-DD>.json``
+(see findings.py). A test that fails to load is skipped.
 """
 
 from __future__ import annotations
@@ -27,13 +28,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import clock, metrics, schema, stalls
+from . import clock, findings, metrics, schema, stalls
 from .loader import load_test
 from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 6
+SERIES_VERSION = 7
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -59,6 +60,40 @@ def _delay_stats(t_ns: pd.Series, v_ns: pd.Series, prefix: str) -> pd.DataFrame:
     df = pd.DataFrame({"bin": _bins(t_ns), "v": v_ns.astype("float") / 1e6})
     g = df.groupby("bin")["v"]
     return pd.DataFrame({f"{prefix}_med": g.median(), f"{prefix}_max": g.max()})
+
+
+def _pcts(values_ms) -> dict | None:
+    v = pd.to_numeric(pd.Series(values_ms), errors="coerce").dropna()
+    if v.empty:
+        return None
+    return {"p50": round(float(v.median()), 1), "p99": round(float(np.percentile(v, 99)), 1)}
+
+
+def _udp_loss(td) -> dict:
+    """Worst loss ratio per direction over the one-way UDP flows (receiver
+    side: server = uplink, mobile = downlink) and the probe (round trip)."""
+    pk = td.packets
+    udp_flows = set(pk.loc[pk["protocol"] == "UDP", "flow_id"].dropna().astype(int))
+    echo_flows = _echo_flows(pk)
+    out = {"ul": None, "dl": None, "probe": None}
+    for r in metrics.loss(td).itertuples(index=False):
+        if r.flow_id not in udp_flows or r.loss_ratio is None or pd.isna(r.loss_ratio):
+            continue
+        if r.flow_id in echo_flows:
+            if r.node != "mobile":
+                continue  # the server's view of the probe flow
+            key = "probe"
+        else:
+            key = "ul" if r.node == "server" else "dl"
+        out[key] = max(out[key] or 0.0, round(float(r.loss_ratio), 4))
+    return out
+
+
+def _echo_flows(pk) -> set:
+    m = pk[pk["node"] == "mobile"]
+    sent = set(m.loc[m["direction"] == schema.DIR_SENT, "flow_id"].dropna().astype(int))
+    recv = set(m.loc[m["direction"] == schema.DIR_RECEIVED, "flow_id"].dropna().astype(int))
+    return sent & recv
 
 
 def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
@@ -92,8 +127,8 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
     # One-way delay, offset-corrected, placed at send time; skipped when no
     # offset estimate exists. Realtime packets carry their sender's stamp;
     # probe legs come from matching the probe's rows on both nodes.
+    ul_t, ul_v, dl_t, dl_v = [], [], [], []
     if off.available:
-        ul_t, ul_v, dl_t, dl_v = [], [], [], []
         owd = metrics.realtime_owd(td, off).dropna(subset=["owd_corrected_ns"])
         owd = owd.assign(utc=owd["utc_ns"].astype("float"), v=owd["owd_corrected_ns"].astype("float"))
         recv_t = np.where(owd["node"] == "mobile", owd["utc"] - o, owd["utc"])
@@ -171,9 +206,19 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
     for col in RADIO_COLUMNS:
         df[col] = df[col].ffill(limit=RADIO_FILL_BINS)
 
+    tput = {c: df[c][df[c] > 0].median() if df[c].notna().any() else None for c in ("down_mbps", "up_mbps")}
+    stats = {
+        "rtt_ms": _pcts(echo["rtt"] / 1e6) if not echo.empty else None,
+        "ul_ms": _pcts(pd.concat(ul_v) / 1e6) if ul_v else None,
+        "dl_ms": _pcts(pd.concat(dl_v) / 1e6) if dl_v else None,
+        "down_mbps": None if pd.isna(tput["down_mbps"]) else round(float(tput["down_mbps"]), 1),
+        "up_mbps": None if pd.isna(tput["up_mbps"]) else round(float(tput["up_mbps"]), 1),
+        "loss": _udp_loss(td),
+    }
     out = {
         "v": SERIES_VERSION,
         "test_id": test_dir.name,
+        "stats": stats,
         "stalls": stalls.detect(td, off),
         "neighbors": neighbors,
         "plan": plan,
@@ -227,6 +272,7 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
             tests.append(data)
 
     by_day: dict[str, list[dict]] = {}
+    found: dict[str, dict] = {}
     for t in sorted(tests, key=lambda t: t["start"]):
         by_day.setdefault(_local_day(t["start"]), []).append(t)
     for day, day_tests in by_day.items():
@@ -238,7 +284,7 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
             cols["t"].append(round(t["end"] + 0.1, 1))
             for c in COLUMNS:
                 cols[c].append(None)
-        meta = [{k: t[k] for k in ("test_id", "plan", "start", "end")} for t in day_tests]
+        meta = [{k: t.get(k) for k in ("test_id", "plan", "start", "end", "stats")} for t in day_tests]
         neighbors = [n for t in day_tests for n in t.get("neighbors", [])]
         # Stall episodes with the time since the previous one that day (the
         # Pixel's recur on a fixed period, which shows up here).
@@ -255,17 +301,22 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
             "lte": {str(e): channel_label("LTE", e) for e in sorted({v for v in cols["earfcn"] if v is not None})},
             "nr": {str(n): channel_label("NR", n) for n in sorted({v for v in cols["nrarfcn"] if v is not None})},
         }
-        _write_json(
-            out / "series" / f"{day}.json",
-            {
-                "day": day,
-                "tests": meta,
-                "channels": channels,
-                "neighbors": neighbors,
-                "stall_episodes": episodes,
-                **cols,
-            },
-        )
+        day_data = {
+            "day": day,
+            "tests": meta,
+            "channels": channels,
+            "neighbors": neighbors,
+            "stall_episodes": episodes,
+            **cols,
+        }
+        _write_json(out / "series" / f"{day}.json", day_data)
+        found[day] = findings.day_findings(day_data)
+    # The pause period is clearer over all days (more intervals).
+    all_pauses = [e["start"] for f in found.values() for e in f["link_pauses"]]
+    period_all = findings.pause_period(all_pauses)
+    for day, f in found.items():
+        f["pause_period_all_days"] = period_all
+        _write_json(out / "findings" / f"{day}.json", f)
     days = sorted(by_day)
     _write_json(out / "series" / "days.json", {"days": days})
     return days
