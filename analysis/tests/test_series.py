@@ -30,3 +30,11 @@ def test_build_writes_day_files_and_cache(twonode_test_dir, tmp_path):
     assert day["tests"][0]["test_id"] == "tst_X"
     assert day["t"][-1] is not None and day["rtt_med"][-1] is None  # gap row after the test
     assert json.loads((out / "series" / "days.json").read_text())["days"] == days
+
+
+def test_one_way_delay_never_exceeds_rtt_in_a_bin(twonode_test_dir):
+    """Delays are binned at send time, so a probe's legs share its RTT bin."""
+    s = series.test_series(twonode_test_dir)
+    pairs = [(r, u) for r, u in zip(s["rtt_med"], s["ul_med"]) if r is not None and u is not None]
+    assert pairs
+    assert all(u <= r + 2.0 for r, u in pairs)

@@ -69,7 +69,7 @@
 <div id="tip"></div>
 <main id="main">
   <div class="chart"><h2>Round-trip time (UDP probe), ms</h2><div id="c_rtt"></div></div>
-  <div class="chart"><h2>One-way delay (UDP, clock-corrected), ms</h2><div id="c_owd"></div></div>
+  <div class="chart"><h2>One-way delay (UDP, clock-corrected), ms — RTT dashed for comparison; all delays at the packet's send time</h2><div id="c_owd"></div></div>
   <div class="chart"><h2>TCP throughput, Mbit/s</h2><div id="c_tput"></div></div>
   <div class="chart"><h2>Signal (RSRP), dBm, and network mode</h2><div id="c_radio"></div></div>
   <div class="chart"><h2>Cell measurements: serving cells (PCI · band · downlink frequency) and neighbour cells, RSRP dBm</h2><div id="c_cells"></div></div>
@@ -226,8 +226,9 @@ function build() {
     line("uplink max", COL.max2),
     line("downlink median", COL.med1, { width: 2 }),
     line("downlink max", COL.max1),
+    line("RTT median", COL.mode, { dash: [4, 4] }),
   ], "ms", { scales: Object.assign({ x: { time: true } }, ydelay) }),
-  [t, pos(data.ul_med), pos(data.ul_max), pos(data.dl_med), pos(data.dl_max)], $("c_owd")));
+  [t, pos(data.ul_med), pos(data.ul_max), pos(data.dl_med), pos(data.dl_max), pos(data.rtt_med)], $("c_owd")));
 
   plots.push(new uPlot(opts([
     line("download", COL.down, { fill: COL.down + "22" }),

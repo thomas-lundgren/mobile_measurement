@@ -3,6 +3,11 @@ one-way delay per direction, TCP throughput per direction, and the radio
 trace, all on the **server** UTC clock (mobile times minus the estimated
 offset O = mobile - server), then assembled into one file per local day.
 
+Delays are binned at the packet's **send** time, so a probe's RTT and its
+two one-way legs land in the same bin even while queueing delay swings by
+hundreds of ms per second (binned at arrival, they would not, and a bin's
+uplink delay could exceed its RTT). Throughput is binned at arrival.
+
     python -m fieldtest_analysis.series <data_root> [--db mp.db] -o <out_dir>
 
 Writes ``<out_dir>/tests/<test_id>.json`` (cache, rebuilt only when a file in
@@ -28,7 +33,7 @@ from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 4
+SERIES_VERSION = 5
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -68,26 +73,43 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
     pk = pk.dropna(subset=["t"])
     parts = []
 
-    # Probe RTT on the mobile's monotonic clock, placed at echo receipt.
-    mob = pk[(pk["node"] == "mobile") & (pk["protocol"] == "UDP")]
+    # Probe RTT on the mobile's monotonic clock, placed at the probe's send.
+    keys = ["flow_id", "sequence_number"]
+    udp = pk[pk["protocol"] == "UDP"]
+    mob, srv = udp[udp["node"] == "mobile"], udp[udp["node"] == "server"]
     sent = mob[mob["direction"] == schema.DIR_SENT]
     recv = mob[mob["direction"] == schema.DIR_RECEIVED]
-    keys = ["flow_id", "sequence_number"]
     echo = sent.merge(recv, on=keys, suffixes=("_s", "_r"))
     echo = echo.assign(rtt=echo["mono_ns_r"].astype("float") - echo["mono_ns_s"].astype("float"))
     echo = echo[echo["rtt"] >= 0]
     if not echo.empty:
-        parts.append(_delay_stats(echo["t_r"], echo["rtt"], "rtt"))
+        parts.append(_delay_stats(echo["t_s"], echo["rtt"], "rtt"))
 
-    # One-way delay, offset-corrected; skipped when no offset estimate exists.
+    # One-way delay, offset-corrected, placed at send time; skipped when no
+    # offset estimate exists. Realtime packets carry their sender's stamp;
+    # probe legs come from matching the probe's rows on both nodes.
     if off.available:
+        ul_t, ul_v, dl_t, dl_v = [], [], [], []
         owd = metrics.realtime_owd(td, off).dropna(subset=["owd_corrected_ns"])
-        owd = owd.assign(utc=owd["utc_ns"].astype("float"))
-        owd["t"] = np.where(owd["node"] == "mobile", owd["utc"] - o, owd["utc"])
-        for direction, prefix in (("uplink", "ul"), ("downlink", "dl")):
+        owd = owd.assign(utc=owd["utc_ns"].astype("float"), v=owd["owd_corrected_ns"].astype("float"))
+        recv_t = np.where(owd["node"] == "mobile", owd["utc"] - o, owd["utc"])
+        owd = owd.assign(t_send=recv_t - owd["v"])
+        for direction, (ts, vs) in (("uplink", (ul_t, ul_v)), ("downlink", (dl_t, dl_v))):
             d = owd[owd["direction_owd"] == direction]
-            if not d.empty:
-                parts.append(_delay_stats(d["t"], d["owd_corrected_ns"], prefix))
+            ts.append(d["t_send"])
+            vs.append(d["v"])
+        if not echo.empty:
+            srv_recv = srv[srv["direction"] == schema.DIR_RECEIVED][keys + ["t"]].rename(columns={"t": "t_srv_r"})
+            srv_sent = srv[srv["direction"] == schema.DIR_SENT][keys + ["t"]].rename(columns={"t": "t_srv_s"})
+            legs = echo.merge(srv_recv, on=keys).merge(srv_sent, on=keys)
+            ul_t.append(legs["t_s"])
+            ul_v.append(legs["t_srv_r"] - legs["t_s"])
+            dl_t.append(legs["t_srv_s"])
+            dl_v.append(legs["t_r"] - legs["t_srv_s"])
+        for prefix, ts, vs in (("ul", ul_t, ul_v), ("dl", dl_t, dl_v)):
+            t_all, v_all = pd.concat(ts, ignore_index=True), pd.concat(vs, ignore_index=True)
+            if not t_all.empty:
+                parts.append(_delay_stats(t_all, v_all, prefix))
 
     # TCP goodput per direction (bytes received per bin).
     tcp = pk[(pk["protocol"] == "TCP") & (pk["direction"] == schema.DIR_RECEIVED)]
