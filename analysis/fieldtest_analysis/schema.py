@@ -89,6 +89,14 @@ RADIO = [
     "bandwidth_mhz",
     "cell_connection_status",
     "network_type",
+    "transport",
+    "wifi_freq_mhz",
+    "wifi_channel",
+    "wifi_bw_mhz",
+    "wifi_standard",
+    "wifi_rssi",
+    "wifi_tx_mbps",
+    "wifi_rx_mbps",
     "neighbor_cells",
 ]
 

@@ -3,6 +3,12 @@ package com.measurement.logger;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.wifi.ScanResult;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.telephony.CellInfo;
 import android.telephony.CellInfoLte;
@@ -252,8 +258,106 @@ public final class RadioSampler {
             if (neighbors.length() > 0) {
                 row.put("neighbor_cells", neighbors);
             }
+            putTransport(row);
             RustCore.pushRadio(handle, row.toString());
         } catch (Exception ignored) {
+        }
+    }
+
+    /** Which network carries the data (the cellular fields describe the
+     *  modem even while traffic goes over Wi-Fi), plus the Wi-Fi link when
+     *  that is the one: frequency, channel, channel width, standard, RSSI and
+     *  link rates. Channel width is not in WifiInfo; it comes from the
+     *  cached scan entry of the connected access point. */
+    @SuppressWarnings({"MissingPermission", "deprecation"})
+    private void putTransport(JSONObject row) throws Exception {
+        ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        Network active = cm.getActiveNetwork();
+        NetworkCapabilities caps = active == null ? null : cm.getNetworkCapabilities(active);
+        if (caps == null) {
+            row.put("transport", "NONE");
+            return;
+        }
+        boolean wifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+        String transport = wifi ? "WIFI"
+                : caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ? "CELLULAR"
+                : caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ? "ETHERNET"
+                : "OTHER";
+        row.put("transport", transport);
+        if (!wifi) {
+            return;
+        }
+        WifiManager wm = (WifiManager) ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        WifiInfo info = wm.getConnectionInfo();
+        if (info == null || info.getFrequency() <= 0) {
+            return;
+        }
+        int freq = info.getFrequency();
+        row.put("wifi_freq_mhz", freq);
+        int channel = wifiChannel(freq);
+        if (channel > 0) {
+            row.put("wifi_channel", channel);
+        }
+        if (info.getRssi() > -127) {
+            row.put("wifi_rssi", info.getRssi());
+        }
+        if (info.getTxLinkSpeedMbps() > 0) {
+            row.put("wifi_tx_mbps", info.getTxLinkSpeedMbps());
+        }
+        if (info.getRxLinkSpeedMbps() > 0) {
+            row.put("wifi_rx_mbps", info.getRxLinkSpeedMbps());
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            String std = wifiStandard(info.getWifiStandard());
+            if (std != null) {
+                row.put("wifi_standard", std);
+            }
+        }
+        String bssid = info.getBSSID();
+        try {
+            for (ScanResult sr : wm.getScanResults()) {
+                if (bssid != null && bssid.equalsIgnoreCase(sr.BSSID)) {
+                    int bw = channelWidthMhz(sr.channelWidth);
+                    if (bw > 0) {
+                        row.put("wifi_bw_mhz", bw);
+                    }
+                    break;
+                }
+            }
+        } catch (SecurityException ignored) {
+            // no location permission: width stays unknown
+        }
+    }
+
+    static int wifiChannel(int freq) {
+        if (freq == 2484) return 14;
+        if (freq >= 2412 && freq <= 2472) return (freq - 2407) / 5;
+        if (freq >= 5955 && freq <= 7115) return (freq - 5950) / 5;  // 6 GHz
+        if (freq >= 5160 && freq <= 5885) return (freq - 5000) / 5;
+        return -1;
+    }
+
+    static int channelWidthMhz(int width) {
+        switch (width) {
+            case ScanResult.CHANNEL_WIDTH_20MHZ: return 20;
+            case ScanResult.CHANNEL_WIDTH_40MHZ: return 40;
+            case ScanResult.CHANNEL_WIDTH_80MHZ: return 80;
+            case ScanResult.CHANNEL_WIDTH_160MHZ:
+            case ScanResult.CHANNEL_WIDTH_80MHZ_PLUS_MHZ: return 160;
+            case 5: return 320;  // ScanResult.CHANNEL_WIDTH_320MHZ (API 33)
+            default: return -1;
+        }
+    }
+
+    static String wifiStandard(int std) {
+        switch (std) {
+            case 1: return "802.11a/b/g";  // ScanResult.WIFI_STANDARD_LEGACY
+            case 4: return "802.11n";
+            case 5: return "802.11ac";
+            case 6: return "802.11ax";
+            case 7: return "802.11ad";
+            case 8: return "802.11be";
+            default: return null;
         }
     }
 

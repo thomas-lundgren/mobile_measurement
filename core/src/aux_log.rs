@@ -89,6 +89,23 @@ pub struct RadioRow {
     /// Radio mode the device reports (LTE, LTE_CA, NR_NSA, NR_ADVANCED, NR_SA, ...).
     #[serde(default)]
     pub network_type: Option<String>,
+    /// Network carrying the data: CELLULAR, WIFI, ETHERNET, OTHER, NONE.
+    #[serde(default)]
+    pub transport: Option<String>,
+    #[serde(default)]
+    pub wifi_freq_mhz: Option<u32>,
+    #[serde(default)]
+    pub wifi_channel: Option<u32>,
+    #[serde(default)]
+    pub wifi_bw_mhz: Option<u32>,
+    #[serde(default)]
+    pub wifi_standard: Option<String>,
+    #[serde(default)]
+    pub wifi_rssi: Option<i32>,
+    #[serde(default)]
+    pub wifi_tx_mbps: Option<u32>,
+    #[serde(default)]
+    pub wifi_rx_mbps: Option<u32>,
     #[serde(default)]
     pub neighbor_cells: Option<Vec<Neighbor>>,
 }
@@ -283,6 +300,14 @@ pub fn write_radio(path: &Path, ctx: &AuxContext, rows: &[RadioRow]) -> std::io:
         Field::new("bandwidth_mhz", DataType::UInt32, true),
         Field::new("cell_connection_status", DataType::Utf8, true),
         Field::new("network_type", DataType::Utf8, true),
+        Field::new("transport", DataType::Utf8, true),
+        Field::new("wifi_freq_mhz", DataType::UInt32, true),
+        Field::new("wifi_channel", DataType::UInt32, true),
+        Field::new("wifi_bw_mhz", DataType::UInt32, true),
+        Field::new("wifi_standard", DataType::Utf8, true),
+        Field::new("wifi_rssi", DataType::Int32, true),
+        Field::new("wifi_tx_mbps", DataType::UInt32, true),
+        Field::new("wifi_rx_mbps", DataType::UInt32, true),
         Field::new("neighbor_cells", neighbors.data_type().clone(), true),
     ]));
     let u32c =
@@ -324,6 +349,20 @@ pub fn write_radio(path: &Path, ctx: &AuxContext, rows: &[RadioRow]) -> std::io:
                     .map(|r| r.network_type.clone())
                     .collect::<Vec<_>>(),
             )) as _,
+            Arc::new(StringArray::from(
+                rows.iter().map(|r| r.transport.clone()).collect::<Vec<_>>(),
+            )) as _,
+            Arc::new(u32c(|r| r.wifi_freq_mhz)) as _,
+            Arc::new(u32c(|r| r.wifi_channel)) as _,
+            Arc::new(u32c(|r| r.wifi_bw_mhz)) as _,
+            Arc::new(StringArray::from(
+                rows.iter()
+                    .map(|r| r.wifi_standard.clone())
+                    .collect::<Vec<_>>(),
+            )) as _,
+            Arc::new(i32c(|r| r.wifi_rssi)) as _,
+            Arc::new(u32c(|r| r.wifi_tx_mbps)) as _,
+            Arc::new(u32c(|r| r.wifi_rx_mbps)) as _,
             neighbors,
         ],
     )
@@ -404,6 +443,14 @@ mod tests {
                 bandwidth_mhz: Some(100),
                 cell_connection_status: Some("PRIMARY".into()),
                 network_type: Some("NR_SA".into()),
+                transport: Some("WIFI".into()),
+                wifi_freq_mhz: Some(5240),
+                wifi_channel: Some(48),
+                wifi_bw_mhz: Some(80),
+                wifi_standard: Some("802.11ax".into()),
+                wifi_rssi: Some(-51),
+                wifi_tx_mbps: Some(540),
+                wifi_rx_mbps: Some(480),
                 neighbor_cells: Some(vec![
                     Neighbor {
                         pci: 302,
@@ -431,6 +478,14 @@ mod tests {
                 bandwidth_mhz: None,
                 cell_connection_status: None,
                 network_type: None,
+                transport: None,
+                wifi_freq_mhz: None,
+                wifi_channel: None,
+                wifi_bw_mhz: None,
+                wifi_standard: None,
+                wifi_rssi: None,
+                wifi_tx_mbps: None,
+                wifi_rx_mbps: None,
                 neighbor_cells: None,
             },
         ];
@@ -458,6 +513,14 @@ mod tests {
             .unwrap();
         assert_eq!(nt.value(0), "NR_SA");
         assert!(nt.is_null(1));
+        let bw = batch
+            .column_by_name("wifi_bw_mhz")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        assert_eq!(bw.value(0), 80);
+        assert!(bw.is_null(1));
     }
 
     #[test]

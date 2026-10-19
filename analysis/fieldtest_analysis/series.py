@@ -33,7 +33,7 @@ from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 5
+SERIES_VERSION = 6
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -43,8 +43,12 @@ COLUMNS = [
     "down_mbps", "up_mbps",
     "lte_rsrp", "nr_rsrp", "nr_rsrq", "mode",
     "lte_pci", "earfcn", "nr_pci", "nrarfcn",
+    "transport", "wifi_freq_mhz", "wifi_channel", "wifi_bw_mhz", "wifi_standard", "wifi_rssi",
 ]  # fmt: skip
-RADIO_COLUMNS = ["lte_rsrp", "nr_rsrp", "nr_rsrq", "mode", "lte_pci", "earfcn", "nr_pci", "nrarfcn"]
+RADIO_COLUMNS = [
+    "lte_rsrp", "nr_rsrp", "nr_rsrq", "mode", "lte_pci", "earfcn", "nr_pci", "nrarfcn",
+    "transport", "wifi_freq_mhz", "wifi_channel", "wifi_bw_mhz", "wifi_standard", "wifi_rssi",
+]  # fmt: skip
 
 
 def _bins(t_ns: pd.Series) -> pd.Series:
@@ -143,6 +147,12 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
                     "earfcn": last["earfcn"],
                     "nr_pci": last["pci"],
                     "nrarfcn": last["nrarfcn"],
+                    "transport": last["transport"],
+                    "wifi_freq_mhz": last["wifi_freq_mhz"],
+                    "wifi_channel": last["wifi_channel"],
+                    "wifi_bw_mhz": last["wifi_bw_mhz"],
+                    "wifi_standard": last["wifi_standard"],
+                    "wifi_rssi": last["wifi_rssi"],
                 }
             )
         )
@@ -174,7 +184,7 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
     for col in COLUMNS:
         vals = df[col].astype(object).where(df[col].notna(), None).tolist()
         out[col] = [round(v, 2) if isinstance(v, float) else v for v in vals]
-    for col in ("lte_pci", "earfcn", "nr_pci", "nrarfcn"):
+    for col in ("lte_pci", "earfcn", "nr_pci", "nrarfcn", "wifi_freq_mhz", "wifi_channel", "wifi_bw_mhz", "wifi_rssi"):
         out[col] = [None if v is None else int(v) for v in out[col]]
     return out
 

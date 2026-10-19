@@ -194,7 +194,23 @@ const MODE_INFO = {
 const MODE_UNKNOWN = ["mode not recorded", "#8e8e93"];
 let radioSegs = [];
 
+const WIFI_COLOUR = "#0a84ff";
+
+function wifiText(i) {
+  const f = data.wifi_freq_mhz && data.wifi_freq_mhz[i];
+  const band = f == null ? null : f < 2500 ? "2.4 GHz" : f < 5925 ? "5 GHz" : "6 GHz";
+  const parts = [
+    band,
+    data.wifi_channel[i] != null ? "ch " + data.wifi_channel[i] : null,
+    data.wifi_bw_mhz[i] != null ? data.wifi_bw_mhz[i] + " MHz" : null,
+    data.wifi_standard[i],
+  ].filter(Boolean);
+  return { text: ["Wi-Fi", ...parts].join(" · "), short: "Wi-Fi", colour: WIFI_COLOUR };
+}
+
 function radioText(i) {
+  // Traffic over Wi-Fi: the cellular fields only describe the idle modem.
+  if (data.transport && data.transport[i] === "WIFI") return wifiText(i);
   const m = data.mode[i];
   const lte = data.earfcn[i] != null ? ((data.channels || {}).lte || {})[data.earfcn[i]] : null;
   if (m == null && lte == null) return null;
