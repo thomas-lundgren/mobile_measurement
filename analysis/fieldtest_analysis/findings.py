@@ -17,6 +17,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from . import timing
+
 #: 3 s of 200 ms bins on each side of a candidate change.
 REGIME_WINDOW = 15
 REGIME_MIN_DROP_MS = 20.0
@@ -222,4 +224,5 @@ def day_findings(day: dict) -> dict:
         "link_pauses": pauses,
         "pause_period": pause_period([e["start"] for e in pauses]),
         "gap_episodes": [e for e in episodes if e["directions"] != "both"],
+        "timing_summary": timing.day_summary(tests),
     }

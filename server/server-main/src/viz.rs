@@ -35,6 +35,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/viz/series", get(series_days))
         .route("/api/v1/viz/series/{day}", get(series_day))
         .route("/api/v1/viz/findings/{day}", get(findings_day))
+        .route("/api/v1/viz/timing/{test_id}", get(timing_test))
         .route("/api/v1/viz/reachability", get(reachability))
 }
 
@@ -88,6 +89,23 @@ async fn findings_day(
     Path(day): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
     serve_day(&st, &headers, "findings", &day).await
+}
+
+/// Per-test delivery-timing detail (spectra) written by the analysis to
+/// `<upload_root>/viz/timing/<test_id>.json`.
+async fn timing_test(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Path(test_id): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    // tst_ + ULID only: the id becomes a file name.
+    let valid = test_id.len() <= 40
+        && test_id.starts_with("tst_")
+        && test_id[4..].bytes().all(|b| b.is_ascii_alphanumeric());
+    if !valid {
+        return Err(AppError::BadRequest("bad test id".into()));
+    }
+    serve_json(&st, &headers, PathBuf::from(format!("timing/{test_id}.json"))).await
 }
 
 /// Most recent device reachability reports (newest first, all devices), from

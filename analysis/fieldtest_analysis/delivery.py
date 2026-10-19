@@ -106,6 +106,9 @@ def _sender_stats(sent: pd.DataFrame) -> dict:
     if "send_call_ns" in sent and sent["send_call_ns"].notna().any():
         c = pd.to_numeric(sent["send_call_ns"], errors="coerce") / 1e3
         out["send_call_us"] = {"p50": _r(_pct(c, 50)), "p99": _r(_pct(c, 99)), "max": _r(float(c.max()))}
+        span_s = (sent["mono_ns"].astype("int64").max() - sent["mono_ns"].astype("int64").min()) / 1e9
+        # share of the test the sender spent blocked in send() (calls > 0.5 ms)
+        out["blocked_share"] = round(float(c[c > 500].sum() / 1e6 / span_s), 3) if span_s > 0 else None
     if "sock_outq_bytes" in sent and sent["sock_outq_bytes"].notna().any():
         q = pd.to_numeric(sent["sock_outq_bytes"], errors="coerce")
         out["outq_bytes"] = {"p50": _pct(q, 50), "p99": _pct(q, 99), "max": float(q.max())}

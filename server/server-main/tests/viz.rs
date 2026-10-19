@@ -137,3 +137,20 @@ async fn series_days_and_day_file() {
         assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}");
     }
 }
+
+#[tokio::test]
+async fn timing_detail_per_test() {
+    let (st, root) = state().await;
+    let jwt = operator_jwt(&st).await;
+    std::fs::create_dir_all(root.join("viz/timing")).unwrap();
+    std::fs::write(root.join("viz/timing/tst_01ABC.json"), r#"{"streams":[]}"#).unwrap();
+    let (s, _) = get(&st, "/api/v1/viz/timing/tst_01ABC", None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let (s, body) = get(&st, "/api/v1/viz/timing/tst_01ABC", Some(&jwt)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(serde_json::from_slice::<Value>(&body).unwrap()["streams"].is_array());
+    let (s, _) = get(&st, "/api/v1/viz/timing/tst_..%2Fsecret", Some(&jwt)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = get(&st, "/api/v1/viz/timing/tst_MISSING", Some(&jwt)).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}

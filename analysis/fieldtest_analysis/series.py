@@ -28,13 +28,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import clock, findings, metrics, schema, stalls
+from . import clock, findings, metrics, schema, stalls, timing
 from .loader import load_test
 from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 8
+SERIES_VERSION = 9
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -230,9 +230,12 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
         "up_mbps": None if pd.isna(tput["up_mbps"]) else round(float(tput["up_mbps"]), 1),
         "loss": _udp_loss(td),
     }
+    timing_streams, timing_detail = timing.summarize(td)
     out = {
         "v": SERIES_VERSION,
         "test_id": test_dir.name,
+        "timing": timing_streams,
+        "_timing_detail": timing_detail,
         "stats": stats,
         "peers": _peer_ips(td),
         "stalls": stalls.detect(td, off),
@@ -256,7 +259,8 @@ def _newest_mtime(d: Path) -> float:
 
 def _write_json(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    # unique per writer: a cron rebuild may overlap a manual one
+    tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(obj, separators=(",", ":")))
     os.replace(tmp, path)
 
@@ -304,6 +308,9 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
             except Exception as e:  # truncated upload, unreadable parquet, ...
                 print(f"skip {test_dir.name}: {e}", file=sys.stderr)
                 continue
+            detail = data.pop("_timing_detail", None) if data else None
+            if detail:
+                _write_json(out / "timing" / f"{test_dir.name}.json", detail)
             _write_json(cache, data)
         if data:
             tests.append(data)
@@ -324,7 +331,7 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
                 cols[c].append(None)
         meta = [
             dict(
-                {k: t.get(k) for k in ("test_id", "plan", "start", "end", "stats")},
+                {k: t.get(k) for k in ("test_id", "plan", "start", "end", "stats", "timing")},
                 peers=[{"ip": ip, "host": hosts.get(ip)} for ip in t.get("peers", [])],
             )
             for t in day_tests
