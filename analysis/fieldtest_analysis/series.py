@@ -34,7 +34,7 @@ from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 9
+SERIES_VERSION = 10
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -362,6 +362,11 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
         }
         _write_json(out / "series" / f"{day}.json", day_data)
         found[day] = findings.day_findings(day_data)
+        radio = {t["test_id"]: t.get("radio") for t in found[day]["tests"]}
+        _write_json(
+            out / "spectrogram" / f"{day}.json",
+            timing.day_spectrogram([dict(t, radio=radio.get(t["test_id"])) for t in meta], out / "timing"),
+        )
     # The pause period is clearer over all days (more intervals).
     all_pauses = [e["start"] for f in found.values() for e in f["link_pauses"]]
     period_all = findings.pause_period(all_pauses)

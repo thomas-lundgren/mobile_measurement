@@ -36,6 +36,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/viz/series/{day}", get(series_day))
         .route("/api/v1/viz/findings/{day}", get(findings_day))
         .route("/api/v1/viz/timing/{test_id}", get(timing_test))
+        .route("/api/v1/viz/spectrogram/{day}", get(spectrogram_day))
         .route("/api/v1/viz/reachability", get(reachability))
 }
 
@@ -89,6 +90,14 @@ async fn findings_day(
     Path(day): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
     serve_day(&st, &headers, "findings", &day).await
+}
+
+async fn spectrogram_day(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Path(day): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    serve_day(&st, &headers, "spectrogram", &day).await
 }
 
 /// Per-test delivery-timing detail (spectra) written by the analysis to

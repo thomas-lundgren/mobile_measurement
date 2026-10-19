@@ -26,3 +26,21 @@ def test_day_summary_counts_added_lines_and_backpressure():
     assert out["added_lines"] == [{"hz": 400.0, "uplink": 2, "downlink": 0}]
     assert out["backpressure"]["streams"] == 1 and out["backpressure"]["held_packets_median"] == 2400
     assert out["overload_delay_ceilings_ms"] == [950]
+
+
+def test_detail_has_heat_row_waterfall_and_buffer_timeline():
+    _, detail = timing.summarize(_uplink(grant_ms=4))
+    [d] = detail["streams"]
+    cols = int((2500 - timing.HEAT_F0_HZ) / timing.HEAT_STEP_HZ)
+    assert len(d["heat"]["rx"]) == len(d["heat"]["tx"]) == cols
+    assert d["waterfall"] is None or len(d["waterfall"]["rows"][0]) == cols
+    b = d["buffer"]
+    assert len(b["t"]) == len(b["modem_packets"]) == len(b["sent_mbps"])
+    assert max(b["modem_packets"]) <= 6  # 4 ms grants: a few packets wait at most
+
+
+def test_load_block_for_saturation_plots():
+    streams, _ = timing.summarize(_uplink(grant_ms=4, eagain_every=10))
+    load = streams[0]["load"]
+    assert abs(load["offered_mbps"] - 1.6) < 0.05 and abs(load["sent_mbps"] - 1.44) < 0.05
+    assert load["delivered_mbps"] <= load["sent_mbps"] + 0.01

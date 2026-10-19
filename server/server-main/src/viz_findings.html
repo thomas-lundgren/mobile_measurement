@@ -55,12 +55,34 @@
   #login .err { color:var(--red); min-height:1.2em; font-size:12px; }
   #timing tbody tr { cursor:pointer; }
   #timing tbody tr.sel { background:var(--row); outline:1px solid var(--accent); }
-  #spectrum { display:none; background:var(--panel); border:1px solid var(--border); border-radius:8px;
-    padding:8px 12px; margin:8px 0; max-width:1100px; }
-  #spectrum h3 { font-size:13px; margin:0 0 6px; }
-  #spectrum .plots { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:10px; }
-  #spectrum .ptitle { font-size:12px; color:var(--muted); margin:0 0 2px; }
+  .ptitle { font-size:12.5px; color:var(--muted); margin:8px 0 2px; font-weight:600; }
   .u-legend { font-size:11.5px; }
+  nav.tabs { display:flex; flex-wrap:wrap; gap:4px; padding:8px 16px 0; border-bottom:1px solid var(--border);
+    background:var(--bg); position:sticky; top:41px; z-index:9; }
+  nav.tabs button { border:1px solid var(--border); border-bottom:none; border-radius:8px 8px 0 0; padding:6px 12px;
+    background:var(--panel); color:var(--muted); }
+  nav.tabs button.on { background:var(--bg); color:var(--fg); font-weight:600; border-color:var(--accent);
+    box-shadow:inset 0 2px 0 var(--accent); }
+  .tab { display:none; } .tab.on { display:block; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:10px; margin:12px 0; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px 12px; cursor:pointer; }
+  .card .k { color:var(--muted); font-size:12px; }
+  .card .v { font-size:22px; font-weight:650; margin:2px 0; font-variant-numeric:tabular-nums; }
+  .card .s { color:var(--muted); font-size:12px; }
+  ul.keys { max-width:980px; padding-left:20px; } ul.keys li { margin:6px 0; }
+  .ctrl { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:6px 0 10px; font-size:13px; }
+  .heatwrap { position:relative; margin:4px 0 14px; }
+  .heatwrap canvas { display:block; width:100%; border:1px solid var(--border); border-radius:6px; cursor:crosshair; }
+  .tip { position:fixed; pointer-events:none; background:var(--panel); border:1px solid var(--border); border-radius:6px;
+    padding:4px 8px; font-size:12px; z-index:50; display:none; max-width:360px; box-shadow:0 2px 8px #0004; }
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:14px; }
+  .chart { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:8px; }
+  .chart h3 { font-size:13px; margin:0 0 4px; } .chart p { margin:0 0 6px; color:var(--muted); font-size:12px; }
+  .chart canvas { display:block; width:100%; }
+  .legend { font-size:12px; color:var(--muted); } .legend i { display:inline-block; width:10px; height:10px;
+    border-radius:50%; margin:0 4px 0 10px; vertical-align:middle; }
+  #detail { display:none; }
+  #detail .chart { margin:8px 0; }
 </style>
 </head>
 <body>
@@ -72,6 +94,15 @@
   <a href="/viz/charts">Charts</a>
   <span id="status"></span>
 </header>
+<nav class="tabs" id="tabs">
+  <button data-tab="overview">Overview</button>
+  <button data-tab="freq">Interface frequencies</button>
+  <button data-tab="sat">Uplink saturation</button>
+  <button data-tab="streams">Streams</button>
+  <button data-tab="tests">Tests</button>
+  <button data-tab="events">Events</button>
+  <button data-tab="reach">Reachability</button>
+</nav>
 
 <form id="login">
   <h2>Operator login</h2>
@@ -82,78 +113,143 @@
 </form>
 
 <main id="main">
-  <section>
-    <h2>Reachability checks</h2>
-    <p class="intro">Run by the phone on its own whenever its network changes (and at start or on the app's button):
-      which ports and protocols toward the server get through that network. "Seen as" is the phone's address as the
-      server saw it; different addresses for different ports mean a proxy or different NAT in the path. Checks from a
-      network the server could not be reached on are uploaded later. Newest first, all days.</p>
-    <div class="scroll"><table id="reach"></table></div>
-  </section>
+  <div class="tab" data-tab="overview">
+    <div class="cards" id="cards"></div>
+    <h2>Key findings</h2>
+    <ul class="keys" id="keys"></ul>
+  </div>
 
-  <section>
-    <h2>Delivery timing &amp; uplink buffering</h2>
-    <div id="timingSummary" class="callout"></div>
-    <p class="intro">Fast realtime UDP streams (1 ms spacing and up), one row per stream. <b>Batched</b>: packets
-      reaching the receiver's kernel within 0.1 ms of each other (one uplink grant at the server, one
-      modem-to-host transfer on the phone). <b>1 ms grid</b>: how well the spacing between batches sits on 1 ms
-      subframes (0 = no grid, 1 = exact; random ≈ 0.01–0.02). <b>Hold</b>: how long a batch's first packet waited for
-      its last. <b>Excess delay</b>: one-way delay above the stream's fastest packet. <b>Lines</b>: periodicities in
-      the arrival times that the 1 ms sender does not have, grouped by fundamental. <b>Modem queue</b> (overloaded
-      streams): packets the queue holds ≈ send rate × age reached, and how often the phone's OS queue was full
-      because the modem stopped taking packets (back pressure). Click a row for its spectra.</p>
-    <div id="spectrum">
-      <h3 id="specTitle"></h3>
-      <div class="plots">
-        <div><p class="ptitle">Arrival-time spectrum: received (kernel) vs sent</p><div id="specArrival"></div></div>
-        <div><p class="ptitle">Excess-delay spectrum</p><div id="specDelay"></div></div>
+  <div class="tab" data-tab="freq">
+    <section>
+      <h2>Hidden interface frequencies</h2>
+      <p class="intro">Arrival-time spectra of every fast UDP stream, one row per stream (oldest at the top), frequency
+        left to right. Bright = strong periodicity in when packets reach the receiver's kernel. A rhythm that
+        repeats in many tests is a vertical stripe; harmonics of one rhythm are evenly spaced stripes. "Added by the
+        path" hides what the 1 ms sender already has (its 1000 / 2000 Hz lines) and keeps only what the radio, modem or
+        network added. Hover for values; click a row for its detail.</p>
+      <div class="ctrl">
+        <label><input type="radio" name="hmode" value="added" checked> Added by the path</label>
+        <label><input type="radio" name="hmode" value="rx"> Everything received</label>
+        <label>Range <select id="frange">
+          <option value="2500">0–2500 Hz</option><option value="1300">0–1300 Hz</option>
+          <option value="500">0–500 Hz</option><option value="120">0–120 Hz</option></select></label>
+        <span class="legend">edge marks: <span style="color:var(--orange)">▼</span> 400 Hz series
+          <span style="color:var(--muted)">▼</span> 1 kHz subframes <span style="color:var(--purple)">▼</span> 10 Hz</span>
       </div>
+      <h3 class="ptitle">Uplink — packets from the phone, timed at the server</h3>
+      <div class="heatwrap"><canvas id="heatUL"></canvas></div>
+      <h3 class="ptitle">Downlink — packets from the server, timed at the phone's kernel</h3>
+      <div class="heatwrap"><canvas id="heatDL"></canvas></div>
+      <div class="chart"><h3>Average over all streams</h3>
+        <p>Median received spectrum (blue) and sent spectrum (grey) per direction, dB over each stream's floor.</p>
+        <div id="avgSpec"></div></div>
+      <div id="detailSlotFreq"></div>
+    </section>
+  </div>
+
+  <div class="tab" data-tab="sat">
+    <section>
+      <h2>Uplink saturation and modem buffer</h2>
+      <p class="intro">Every fast uplink stream. <b>Colours</b>: <span style="color:var(--blue)">●</span> uplink keeps up,
+        <span style="color:var(--orange)">●</span> overloaded (≥ 5 % lost), <span style="color:var(--red)">●</span>
+        modem back pressure (the phone's OS queue full ≥ 5 % of the time: the modem stopped taking packets). Packets
+        held ≈ send rate × the age packets reach (p90 excess delay). Click a point for the stream's buffer-fill
+        timeline.</p>
+      <div class="grid2">
+        <div class="chart"><h3>Offered vs delivered rate</h3><p>Points leave the diagonal where the uplink saturates.</p>
+          <canvas id="scRate"></canvas></div>
+        <div class="chart"><h3>Packets held in the modem vs packet size</h3>
+          <p>A flat level across sizes = a packet-count limit.</p><canvas id="scPkts"></canvas></div>
+        <div class="chart"><h3>Bytes held in the modem vs packet size</h3>
+          <p>Bytes fall with packet size at the same packet count — not a byte limit.</p><canvas id="scBytes"></canvas></div>
+        <div class="chart"><h3>Delay vs load</h3><p>p90 excess delay against offered ÷ delivered: the ceiling where
+          the modem drops by age.</p><canvas id="scDelay"></canvas></div>
+      </div>
+      <div id="detailSlotSat"></div>
+    </section>
+  </div>
+
+  <div class="tab" data-tab="streams">
+    <section>
+      <h2>Delivery timing &amp; uplink buffering — all streams</h2>
+      <div id="timingSummary" class="callout"></div>
+      <p class="intro">Fast realtime UDP streams (1 ms spacing and up), one row per stream. <b>Batched</b>: packets
+        reaching the receiver's kernel within 0.1 ms of each other. <b>1 ms grid</b>: how well the spacing between
+        batches sits on 1 ms subframes (0 = none, 1 = exact; random ≈ 0.01–0.02). <b>Hold</b>: how long a batch's first
+        packet waited for its last. <b>Excess delay</b>: one-way delay above the stream's fastest packet. <b>Lines</b>:
+        periodicities the 1 ms sender does not have. <b>Modem queue</b>: packets held and the share of time the
+        modem pushed back. Click a row for its detail.</p>
+      <div id="detailSlotStreams"></div>
+      <div class="scroll"><table id="timing"></table></div>
+    </section>
+  </div>
+
+  <div class="tab" data-tab="tests">
+    <section>
+      <h2>Tests</h2>
+      <p class="intro">One row per test. "Phone's address" is the phone's public address as the server saw it on the
+        test's flows, and shows which network the test really ran over. Delays are percentiles over all packets (RTT
+        from the probe; one-way delays clock-corrected). Loss is the worst UDP flow per direction. Click a time to open
+        the charts zoomed to that test.</p>
+      <div class="scroll"><table id="tests"></table></div>
+    </section>
+  </div>
+
+  <div class="tab" data-tab="events">
+    <section>
+      <h2>Delay down, throughput up</h2>
+      <p class="intro">Moments where the delay in a bulk direction drops to half or less (by at least 20 ms) while that
+        direction's throughput rises by at least 20 %, holding for 3 s on each side. The kind is a heuristic.</p>
+      <div class="scroll"><table id="regimes"></table></div>
+    </section>
+    <section>
+      <h2>Link pauses (both directions)</h2>
+      <div id="period" class="callout"></div>
+      <p class="intro">Bursts of ~120 ms stalls in uplink and downlink at the same instants, with packets held rather
+        than lost: a device-side pause (likely dual-SIM tune-away), not queueing.</p>
+      <div class="scroll"><table id="pauses"></table></div>
+    </section>
+    <section>
+      <h2>One-way gap episodes</h2>
+      <p class="intro">Repeated gaps (&gt; 80 ms) in one direction only, while the other direction flows normally.</p>
+      <div class="scroll"><table id="gaps"></table></div>
+    </section>
+    <section>
+      <h2>Downloads limited on the server side</h2>
+      <p class="intro">Share of a test's download time at ≥ 200 Mbit/s with &lt; 15 ms downlink delay: the radio is
+        faster than the server's own link, so downlink head-of-line blocking is not being measured.</p>
+      <div class="scroll"><table id="serverside"></table></div>
+    </section>
+  </div>
+
+  <div class="tab" data-tab="reach">
+    <section>
+      <h2>Reachability checks</h2>
+      <p class="intro">Run by the phone whenever its network changes (and at start or on the app's button): which
+        ports and protocols toward the server get through that network. "Seen as" is the phone's address as the server
+        saw it. Newest first, all days.</p>
+      <div class="scroll"><table id="reach"></table></div>
+    </section>
+  </div>
+
+  <div id="detail">
+    <div class="chart">
+      <h3 id="dTitle"></h3>
+      <div class="grid2">
+        <div><p>Arrival-time spectrum: received (kernel) vs sent. Drag to zoom.</p><div id="dArrival"></div></div>
+        <div><p>Waterfall: arrival spectrum over the test (2 s windows), time downwards.</p>
+          <div class="heatwrap"><canvas id="dWaterfall"></canvas></div></div>
+      </div>
+      <div id="dBufferBox">
+        <p>Uplink buffer fill: packets in the modem and the phone's OS queue (top); sent vs delivered rate (250 ms
+          average) and share of time blocked in send() (bottom).</p>
+        <div id="dBuffer"></div><div id="dRates"></div>
+      </div>
+      <div><p>Excess-delay spectrum.</p><div id="dDelay"></div></div>
     </div>
-    <div class="scroll"><table id="timing"></table></div>
-  </section>
-
-  <section>
-    <h2>Tests</h2>
-    <p class="intro">One row per test. "Phone's address" is the phone's public address as the server saw it on the
-      test's flows (recorded for tests from 2026-10-19 10:08 on), and shows which network the test really ran over — the operator's mobile
-      network or a Wi-Fi's internet line. Delays are percentiles over all packets (RTT from the probe; one-way delays
-      clock-corrected, from probe and realtime UDP). Loss is the worst UDP flow per direction. Click a time to open
-      the charts zoomed to that test.</p>
-    <div class="scroll"><table id="tests"></table></div>
-  </section>
-
-  <section>
-    <h2>Delay down, throughput up</h2>
-    <p class="intro">Moments where the delay in a bulk direction drops to half or less (by at least 20 ms) while that
-      direction's throughput rises by at least 20 %, holding for 3 s on each side. The kind is a heuristic from the
-      200 ms bins and points at where to look; it does not prove the cause.</p>
-    <div class="scroll"><table id="regimes"></table></div>
-  </section>
-
-  <section>
-    <h2>Link pauses (both directions)</h2>
-    <div id="period" class="callout"></div>
-    <p class="intro">Bursts of ~120 ms stalls in uplink and downlink at the same instants, with packets held rather
-      than lost: a device-side pause (likely dual-SIM tune-away), not queueing. Exclude these windows when judging
-      head-of-line blocking.</p>
-    <div class="scroll"><table id="pauses"></table></div>
-  </section>
-
-  <section>
-    <h2>One-way gap episodes</h2>
-    <p class="intro">Repeated gaps (&gt; 80 ms) in one direction only, while the other direction flows normally:
-      packets arrive in bursts after each gap (radio scheduling or queueing in that direction).</p>
-    <div class="scroll"><table id="gaps"></table></div>
-  </section>
-
-  <section>
-    <h2>Downloads limited on the server side</h2>
-    <p class="intro">Share of a test's download time running at ≥ 200 Mbit/s with &lt; 15 ms downlink delay. There the
-      radio is faster than the server's own link (Wi-Fi, ~280 Mbit/s), so the queue is not on the radio and
-      downlink head-of-line blocking is not being measured.</p>
-    <div class="scroll"><table id="serverside"></table></div>
-  </section>
+  </div>
 </main>
+<div class="tip" id="tip"></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -201,6 +297,7 @@ function peers(t) {
     ? `<span title="${esc(p.ip)}">${esc(p.host)}</span>`
     : esc(p.ip)).join("<br>");
 }
+
 
 function renderTests() {
   const rows = data.tests.map((t) => {
@@ -301,6 +398,7 @@ function renderServerSide() {
   ], rows, "None this day.");
 }
 
+
 function renderTimingSummary() {
   const s = data.timing_summary;
   if (!s || !(s.streams.uplink + s.streams.downlink)) {
@@ -368,50 +466,336 @@ function renderTiming() {
     ["Modem queue", "num"], ["OS queue max · blocked", "num"],
   ], rows, "No fast realtime streams this day.");
   $("timing").querySelectorAll("tbody tr").forEach((tr, i) => {
-    tr.addEventListener("click", (ev) => { if (ev.target.tagName !== "A") showSpectrum(i, tr); });
+    tr.addEventListener("click", (ev) => {
+      if (ev.target.tagName === "A") return;
+      document.querySelectorAll("#timing tr.sel").forEach((r) => r.classList.remove("sel"));
+      tr.classList.add("sel");
+      const { t, s } = timingRows[i];
+      openDetail(t.test_id, s.flow_id, s.direction);
+    });
   });
-  $("spectrum").style.display = "none";
 }
 
-let specPlots = [];
-async function showSpectrum(i, tr) {
-  const { t, s } = timingRows[i];
-  document.querySelectorAll("#timing tr.sel").forEach((r) => r.classList.remove("sel"));
-  tr.classList.add("sel");
-  $("spectrum").style.display = "block";
-  $("specTitle").textContent = `${hms(t.start)} ${t.plan || t.test_id} · ${s.direction} · ${s.pps} × ${s.size} B — loading…`;
-  let detail;
-  try { detail = await api("/api/v1/viz/timing/" + t.test_id); }
-  catch (e) { $("specTitle").textContent += " no spectra for this test"; return; }
-  const st = (detail.streams || []).find((x) => x.flow_id === s.flow_id && x.direction === s.direction);
-  specPlots.forEach((p) => p.destroy()); specPlots = [];
-  $("specArrival").innerHTML = ""; $("specDelay").innerHTML = "";
-  if (!st) { $("specTitle").textContent += " — no spectra for this stream"; return; }
-  $("specTitle").textContent = `${hms(t.start)} ${t.plan || t.test_id} · ${s.direction} · ${s.pps} × ${s.size} B` +
-    (t.radio ? ` · ${t.radio}` : "");
-  const css = getComputedStyle(document.documentElement);
-  const c = (v) => css.getPropertyValue(v).trim();
-  const w = Math.max(300, Math.min(540, $("spectrum").clientWidth / 2 - 30));
-  const axes = [
-    { stroke: c("--muted"), grid: { stroke: c("--border"), width: 0.5 }, label: "Hz" },
-    { stroke: c("--muted"), grid: { stroke: c("--border"), width: 0.5 }, size: 50 },
-  ];
-  const floor = (a) => a.map((v) => v == null || v <= 0 ? null : v);
-  const a = st.arrival;
-  const series = [{}, { label: "received", stroke: c("--blue"), width: 1 }];
-  const cols = [a.f, floor(a.rx)];
-  if (a.tx) { series.push({ label: "sent", stroke: c("--muted"), width: 1 }); cols.push(floor(a.tx)); }
-  specPlots.push(new uPlot({ width: w, height: 230, scales: { x: { time: false }, y: { distr: 3 } }, axes, series,
-    cursor: { drag: { x: true, y: false } } }, cols, $("specArrival")));
-  if (st.delay) {
-    specPlots.push(new uPlot({ width: w, height: 230, scales: { x: { time: false }, y: { distr: 3 } }, axes,
-      series: [{}, { label: "excess delay PSD", stroke: c("--red"), width: 1 }],
-      cursor: { drag: { x: true, y: false } } }, [st.delay.f, floor(st.delay.psd)], $("specDelay")));
-  } else {
-    $("specDelay").innerHTML = '<p class="muted">Too short for a delay spectrum.</p>';
+
+// ---------- tabs ----------
+let curTab = "overview";
+function showTab(name) {
+  curTab = name;
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === name));
+  try { history.replaceState(null, "", "#tab=" + name); } catch {}
+  placeDetail();
+  if (data) requestAnimationFrame(() => drawTab(name));
+}
+document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+
+const css = () => getComputedStyle(document.documentElement);
+const cv = (v) => css().getPropertyValue(v).trim();
+
+// ---------- colour map (inferno-like) ----------
+const STOPS = [[0, [0, 0, 4]], [0.15, [40, 11, 84]], [0.35, [120, 28, 109]], [0.55, [188, 55, 84]],
+  [0.75, [237, 105, 37]], [0.9, [251, 180, 26]], [1, [252, 255, 164]]];
+const LUT = Array.from({ length: 256 }, (_, i) => {
+  const x = i / 255;
+  let k = 0; while (k < STOPS.length - 2 && x > STOPS[k + 1][0]) k++;
+  const [x0, c0] = STOPS[k], [x1, c1] = STOPS[k + 1], f = (x - x0) / (x1 - x0);
+  return c0.map((c, j) => Math.round(c + f * (c1[j] - c)));
+});
+
+const tip = $("tip");
+function showTip(ev, html) { tip.innerHTML = html; tip.style.display = "block";
+  tip.style.left = Math.min(ev.clientX + 14, innerWidth - 370) + "px"; tip.style.top = (ev.clientY + 14) + "px"; }
+function hideTip() { tip.style.display = "none"; }
+
+// Heatmap of rows × columns of values 0..1. opts: {f0, step, fmax, rowH, label(i), onClick(i), guides}
+function heatmap(canvas, rows, opts) {
+  const dpr = devicePixelRatio || 1;
+  const W = canvas.parentElement.clientWidth, padL = 54, padB = 24, padT = 7;
+  const rowH = opts.rowH || Math.max(3, Math.min(10, Math.floor(420 / Math.max(rows.length, 1))));
+  const H = padT + rows.length * rowH + padB;
+  canvas.style.height = H + "px"; canvas.width = W * dpr; canvas.height = H * dpr;
+  const g = canvas.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = cv("--panel"); g.fillRect(0, 0, W, H);
+  const ncol = Math.max(1, Math.round((opts.fmax - opts.f0) / opts.step));
+  const plotW = W - padL - 8;
+  if (rows.length) {
+    const img = g.createImageData(ncol, rows.length);
+    rows.forEach((r, y) => { for (let x = 0; x < ncol; x++) {
+      const v = Math.max(0, Math.min(1, r[x] ?? 0)), c = LUT[Math.round(v * 255)], o = 4 * (y * ncol + x);
+      img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255; } });
+    const off = document.createElement("canvas"); off.width = ncol; off.height = rows.length;
+    off.getContext("2d").putImageData(img, 0, 0);
+    g.imageSmoothingEnabled = false;
+    g.drawImage(off, padL, padT, plotW, rows.length * rowH);
   }
+  const xOf = (hz) => padL + (hz - opts.f0) / (opts.fmax - opts.f0) * plotW;
+  // guides: small ticks above and below the map, so they don't read as data
+  const bottom = padT + rows.length * rowH;
+  for (const [hz, col] of opts.guides || []) {
+    if (hz > opts.fmax) continue;
+    g.fillStyle = col;
+    g.beginPath(); g.moveTo(xOf(hz) - 4, 0); g.lineTo(xOf(hz) + 4, 0); g.lineTo(xOf(hz), padT); g.fill();
+    g.beginPath(); g.moveTo(xOf(hz) - 4, bottom + 7); g.lineTo(xOf(hz) + 4, bottom + 7); g.lineTo(xOf(hz), bottom); g.fill();
+  }
+  g.fillStyle = cv("--muted"); g.font = "11px system-ui"; g.textAlign = "center";
+  const tickStep = opts.fmax > 1500 ? 250 : opts.fmax > 600 ? 100 : opts.fmax > 200 ? 50 : 10;
+  for (let hz = 0; hz <= opts.fmax; hz += tickStep) g.fillText(String(hz), xOf(hz), H - 7);
+  g.textAlign = "right";
+  const every = Math.ceil(14 / rowH);
+  rows.forEach((_, i) => { if (i % every === 0 && opts.yLabel) g.fillText(opts.yLabel(i), padL - 4, padT + i * rowH + Math.min(rowH, 10)); });
+  canvas.onmousemove = (ev) => {
+    const r = canvas.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
+    const i = Math.floor((y - padT) / rowH), hz = opts.f0 + (x - padL) / plotW * (opts.fmax - opts.f0);
+    if (i < 0 || i >= rows.length || hz < opts.f0 || hz > opts.fmax) { hideTip(); return; }
+    showTip(ev, opts.tip(i, hz));
+  };
+  canvas.onmouseleave = hideTip;
+  canvas.onclick = (ev) => {
+    const r = canvas.getBoundingClientRect(), i = Math.floor((ev.clientY - r.top - padT) / rowH);
+    if (i >= 0 && i < rows.length && opts.onClick) opts.onClick(i);
+  };
 }
 
+// Scatter plot. points: [{x, y, c, tip, onClick}]; opts: {xlab, ylab, xlog, ylog, diag, xmin, ymin}
+function scatter(canvas, points, opts) {
+  const dpr = devicePixelRatio || 1, W = canvas.parentElement.clientWidth - 16, H = 280;
+  const pad = { l: 56, r: 10, t: 8, b: 36 };
+  canvas.style.height = H + "px"; canvas.width = W * dpr; canvas.height = H * dpr;
+  const g = canvas.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const pts = points.filter((p) => p.x != null && p.y != null && (!opts.xlog || p.x > 0) && (!opts.ylog || p.y > 0));
+  const tf = (v, log) => log ? Math.log10(v) : v;
+  const xs = pts.map((p) => tf(p.x, opts.xlog)), ys = pts.map((p) => tf(p.y, opts.ylog));
+  let x0 = opts.xmin != null ? tf(opts.xmin, opts.xlog) : Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = opts.ymin != null ? tf(opts.ymin, opts.ylog) : Math.min(...ys), y1 = Math.max(...ys);
+  if (opts.diag) { x1 = y1 = Math.max(x1, y1); x0 = y0 = Math.min(x0, y0); }
+  if (!pts.length) { g.fillStyle = cv("--muted"); g.fillText("No data", W / 2 - 20, H / 2); return; }
+  const mx = (x1 - x0) * 0.05 || 1, my = (y1 - y0) * 0.06 || 1; x0 -= mx; x1 += mx; y0 -= my; y1 += my;
+  const X = (v) => pad.l + (tf(v, opts.xlog) - x0) / (x1 - x0) * (W - pad.l - pad.r);
+  const Y = (v) => H - pad.b - (tf(v, opts.ylog) - y0) / (y1 - y0) * (H - pad.t - pad.b);
+  g.strokeStyle = cv("--border"); g.fillStyle = cv("--muted"); g.font = "11px system-ui"; g.lineWidth = 1;
+  const ticks = (a, b, log) => {
+    if (log) { const out = []; for (let e = Math.floor(a); e <= Math.ceil(b); e++) for (const m of [1, 2, 5]) {
+      const v = m * 10 ** e; if (Math.log10(v) >= a && Math.log10(v) <= b) out.push(v); } return out; }
+    const span = b - a, raw = span / 5, p = 10 ** Math.floor(Math.log10(raw)), st = [1, 2, 5, 10].map((m) => m * p).find((s) => span / s <= 6);
+    const out = []; for (let v = Math.ceil(a / st) * st; v <= b; v += st) out.push(+v.toFixed(6)); return out;
+  };
+  const fmt = (v) => v >= 1000 ? (v / 1000) + "k" : String(v);
+  g.textAlign = "center";
+  for (const v of ticks(x0, x1, opts.xlog)) { const x = X(v); g.beginPath(); g.moveTo(x, pad.t); g.lineTo(x, H - pad.b); g.stroke(); g.fillText(fmt(v), x, H - pad.b + 13); }
+  g.textAlign = "right";
+  for (const v of ticks(y0, y1, opts.ylog)) { const y = Y(v); g.beginPath(); g.moveTo(pad.l, y); g.lineTo(W - pad.r, y); g.stroke(); g.fillText(fmt(v), pad.l - 4, y + 4); }
+  g.textAlign = "center"; g.fillText(opts.xlab, pad.l + (W - pad.l - pad.r) / 2, H - 4);
+  g.save(); g.translate(12, pad.t + (H - pad.t - pad.b) / 2); g.rotate(-Math.PI / 2); g.fillText(opts.ylab, 0, 0); g.restore();
+  if (opts.diag) { g.strokeStyle = cv("--muted"); g.setLineDash([4, 4]); g.beginPath();
+    const a = opts.xlog ? 10 ** x0 : x0, b = opts.xlog ? 10 ** x1 : x1;
+    g.moveTo(X(Math.max(a, 1e-9)), Y(Math.max(a, 1e-9))); g.lineTo(X(b), Y(b)); g.stroke(); g.setLineDash([]); }
+  for (const h of opts.hlines || []) { g.strokeStyle = h.c; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(pad.l, Y(h.y)); g.lineTo(W - pad.r, Y(h.y)); g.stroke(); g.setLineDash([]);
+    g.fillStyle = h.c; g.textAlign = "left"; g.fillText(h.label, pad.l + 4, Y(h.y) - 4); }
+  for (const p of pts) { g.fillStyle = p.c; g.globalAlpha = 0.8; g.beginPath(); g.arc(X(p.x), Y(p.y), 4.5, 0, 7); g.fill(); }
+  g.globalAlpha = 1;
+  const near = (ev) => { const r = canvas.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
+    let best = null, bd = 64; for (const p of pts) { const d = (X(p.x) - x) ** 2 + (Y(p.y) - y) ** 2; if (d < bd) { bd = d; best = p; } } return best; };
+  canvas.onmousemove = (ev) => { const p = near(ev); if (p) showTip(ev, p.tip); else hideTip(); canvas.style.cursor = p ? "pointer" : "default"; };
+  canvas.onmouseleave = hideTip;
+  canvas.onclick = (ev) => { const p = near(ev); if (p && p.onClick) p.onClick(); };
+}
+
+// ---------- data ----------
+let spec = null;          // day spectrogram
+let streams = [];         // [{t, s}] from findings tests
+const dbOf = (code) => code / 5 + (spec ? spec.db[0] : -10);
+const streamLabel = (t, s) => `${hms(t.start)} ${t.plan || ""} · ${s.direction === "uplink" ? "UL" : "DL"} · ${s.pps}×${s.size} B`;
+
+function heatValues(row, mode) {
+  return row.rx.map((c, i) => {
+    const r = dbOf(c);
+    // gamma < 1 lifts weak lines; 20 dB (added) / 30 dB (received) = full scale
+    if (mode === "rx") return Math.pow(Math.max(0, r) / 30, 0.7);
+    const t = row.tx ? dbOf(row.tx[i]) : -10;
+    return Math.pow(Math.max(0, r - Math.max(t, 3)) / 20, 0.7);
+  });
+}
+
+function drawFreq() {
+  if (!spec) return;
+  const mode = document.querySelector('input[name="hmode"]:checked').value;
+  const fmax = +$("frange").value;
+  const ncol = Math.round((fmax - spec.f0_hz) / spec.f_step_hz);
+  const guides = [[400, cv("--orange")], [800, cv("--orange")], [1200, cv("--orange")], [1600, cv("--orange")],
+    [1000, cv("--muted")], [2000, cv("--muted")], [10, cv("--purple")]];
+  for (const dir of ["uplink", "downlink"]) {
+    const rows = spec.rows.filter((r) => r.direction === dir);
+    const vals = rows.map((r) => heatValues(r, mode).slice(0, ncol));
+    heatmap($(dir === "uplink" ? "heatUL" : "heatDL"), vals, {
+      f0: spec.f0_hz, step: spec.f_step_hz, fmax, guides,
+      yLabel: (i) => hm(rows[i].start),
+      tip: (i, hz) => { const r = rows[i], k = Math.round((hz - spec.f0_hz) / spec.f_step_hz);
+        return `<b>${esc(hms(r.start))} ${esc(r.plan || "")}</b><br>${esc(r.radio || "")}<br>${r.pps} × ${r.size} B<br>
+          ${hz.toFixed(0)} Hz: received ${num(dbOf(r.rx[k]), 1)} dB` + (r.tx ? `, sent ${num(dbOf(r.tx[k]), 1)} dB` : "") +
+          `<br><span class="muted">click for detail</span>`; },
+      onClick: (i) => openDetail(rows[i].test_id, rows[i].flow_id, rows[i].direction),
+    });
+  }
+  // average spectrum per direction
+  const series = [{}], cols = [];
+  const f = Array.from({ length: ncol }, (_, i) => spec.f0_hz + i * spec.f_step_hz);
+  cols.push(f);
+  const med = (arr) => { const a = arr.filter((v) => v != null).sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : null; };
+  for (const [dir, col, colTx] of [["uplink", "--blue", "--muted"], ["downlink", "--green", "--border"]]) {
+    const rows = spec.rows.filter((r) => r.direction === dir);
+    if (!rows.length) continue;
+    cols.push(f.map((_, i) => med(rows.map((r) => dbOf(r.rx[i])))));
+    series.push({ label: `${dir} received`, stroke: cv(col), width: 1 });
+    if (rows.some((r) => r.tx)) {
+      cols.push(f.map((_, i) => med(rows.filter((r) => r.tx).map((r) => dbOf(r.tx[i])))));
+      series.push({ label: `${dir} sent`, stroke: cv(colTx), width: 1 });
+    }
+  }
+  $("avgSpec").innerHTML = "";
+  if (cols.length > 1) new uPlot({ width: $("avgSpec").clientWidth || 800, height: 240, scales: { x: { time: false } },
+    axes: axes("Hz", "dB"), series, cursor: { drag: { x: true, y: false } } }, cols, $("avgSpec"));
+}
+
+function axes(xl, yl) {
+  return [{ stroke: cv("--muted"), grid: { stroke: cv("--border"), width: 0.5 }, label: xl },
+          { stroke: cv("--muted"), grid: { stroke: cv("--border"), width: 0.5 }, size: 52, label: yl }];
+}
+
+function drawSat() {
+  const ul = streams.filter(({ s }) => s.direction === "uplink" && s.load);
+  const colour = (s) => (s.load.backpressure_share || 0) >= 0.05 ? cv("--red")
+    : (s.network_loss_share || 0) >= 0.05 ? cv("--orange") : cv("--blue");
+  const tipOf = (t, s) => `<b>${esc(streamLabel(t, s))}</b><br>${esc(t.radio || "")}<br>
+    offered ${num(s.load.offered_mbps, 1)} → delivered ${num(s.load.delivered_mbps, 1)} Mbit/s<br>
+    loss ${pct(s.network_loss_share)} · wait p50/p90 ${num(s.load.wait_p50_ms)}/${num(s.load.wait_p90_ms)} ms<br>
+    modem holds ≈ ${num(s.load.held_packets)} pkts / ${num(s.load.held_kb)} KB<br>
+    back pressure ${pct(s.load.backpressure_share)} · blocked ${pct(s.load.blocked_share)} · OS queue max ${num(s.load.os_queue_max_kb)} KB`;
+  const P = (fx, fy) => ul.map(({ t, s }) => ({ x: fx(s), y: fy(s), c: colour(s), tip: tipOf(t, s),
+    onClick: () => openDetail(t.test_id, s.flow_id, s.direction) }));
+  scatter($("scRate"), P((s) => s.load.offered_mbps, (s) => s.load.delivered_mbps),
+    { xlab: "offered Mbit/s", ylab: "delivered Mbit/s", xlog: true, ylog: true, diag: true });
+  const bp = ul.filter(({ s }) => (s.load.backpressure_share || 0) >= 0.05).map(({ s }) => s.load.held_packets).sort((a, b) => a - b);
+  const bpMed = bp.length ? bp[Math.floor(bp.length / 2)] : null;
+  scatter($("scPkts"), P((s) => s.size, (s) => s.load.held_packets),
+    { xlab: "packet size (B)", ylab: "packets held", xlog: true, ylog: true,
+      hlines: bpMed ? [{ y: bpMed, c: cv("--red"), label: `≈ ${bpMed} packets (median under back pressure)` }] : [] });
+  scatter($("scBytes"), P((s) => s.size, (s) => s.load.held_kb),
+    { xlab: "packet size (B)", ylab: "KB held", xlog: true, ylog: true });
+  scatter($("scDelay"), P((s) => s.load.delivered_mbps > 0 ? s.load.offered_mbps / s.load.delivered_mbps : null, (s) => s.load.wait_p90_ms),
+    { xlab: "offered ÷ delivered", ylab: "p90 excess delay ms", xlog: true, ylog: true });
+}
+
+// ---------- overview ----------
+function drawOverview() {
+  const ts = data.tests || [], tsum = data.timing_summary || { streams: { uplink: 0, downlink: 0 }, added_lines: [], backpressure: {}, overload_delay_ceilings_ms: [] };
+  const radios = {};
+  for (const t of ts) if (t.radio) { const r = t.radio.replace(/ \(\d+ %\)$/, ""); radios[r] = (radios[r] || 0) + 1; }
+  const topR = Object.entries(radios).sort((a, b) => b[1] - a[1]);
+  const top = tsum.added_lines[0];
+  const bp = tsum.backpressure || {};
+  const ceil = tsum.overload_delay_ceilings_ms || [];
+  const pauses = data.link_pauses || [];
+  const per = data.pause_period_all_days;
+  const cards = [
+    ["Tests", ts.length, topR.slice(0, 2).map(([r, n]) => `${r} ${n}`).join(" · "), "tests"],
+    ["Fast UDP streams", tsum.streams.uplink + tsum.streams.downlink, `${tsum.streams.uplink} uplink · ${tsum.streams.downlink} downlink`, "streams"],
+    ["Hidden rhythm", top ? `${num(top.hz)} Hz` : "–", top ? `${num(1000 / top.hz, 2)} ms period · ${top.uplink} UL / ${top.downlink} DL streams` : "none found", "freq"],
+    ["Modem queue limit", bp.held_packets_median ? `≈ ${num(bp.held_packets_median)} pkts` : "–", bp.streams ? `back pressure in ${bp.streams} streams (${bp.held_packets_range.join("–")})` : "no back pressure seen", "sat"],
+    ["Uplink delay ceiling", ceil.length ? `${ceil[0]}–${ceil[ceil.length - 1]} ms` : "–", ceil.length ? `${ceil.length} overloaded streams; dropped by age` : "no overload without back pressure", "sat"],
+    ["Link pauses", pauses.length, per ? `every ${dur(per.period_s)} (${per.fits}/${per.intervals} fit)` : "", "events"],
+    ["Delay-down events", (data.regime_changes || []).length, "delay halves while throughput rises", "events"],
+  ];
+  $("cards").innerHTML = cards.map(([k, v, s, tab]) =>
+    `<div class="card" data-go="${tab}"><div class="k">${esc(k)}</div><div class="v">${esc(String(v))}</div><div class="s">${esc(s)}</div></div>`).join("");
+  $("cards").querySelectorAll(".card").forEach((c) => c.onclick = () => showTab(c.dataset.go));
+  const go = (tab, text) => `<a href="#tab=${tab}" onclick="showTab('${tab}');return false">${text}</a>`;
+  const keys = [];
+  if (top) keys.push(`<b>A hidden ${num(top.hz)} Hz (${num(1000 / top.hz, 2)} ms) rhythm</b> in when packets arrive, in
+    ${top.uplink} uplink and ${top.downlink} downlink streams. The 1 ms senders don't have it, it is not on the 1 ms radio
+    grid, and it is absent over Wi-Fi and the home internet line: something on the mobile path handles packets every
+    ${num(1000 / top.hz, 1)} ms (the phone's modem interface or the operator's network). ${go("freq", "See the spectrograms →")}`);
+  const others = tsum.added_lines.slice(1).filter((l) => l.hz < 50);
+  if (others.length) keys.push(`Slow rhythms under load: ${others.map((l) => `${num(l.hz, 1)} Hz (${num(1000 / l.hz)} ms)`).join(", ")}
+    — uplink deliveries in bursts when it is overloaded.`);
+  if (bp.streams) keys.push(`<b>The modem's uplink buffer is limited by packet count (≈ ${num(bp.held_packets_median)} packets)</b>, not
+    bytes: under back pressure the count stays put while the bytes held change with packet size. When it is full the
+    modem stops taking packets, the phone's socket fills and send() blocks — the only local congestion signal an app
+    gets. ${go("sat", "See the saturation plots →")}`);
+  if (ceil.length) keys.push(`Overloaded below that count, the modem <b>drops by age</b>: uplink delay tops out at
+    ${ceil[0]}–${ceil[ceil.length - 1]} ms depending on the cell (a per-bearer discard timer). Below overload the phone's own
+    queue stays empty: no back pressure.`);
+  if (per) keys.push(`Link pauses recur every <b>${dur(per.period_s)}</b> (${per.fits} of ${per.intervals} intervals fit) — a
+    device-side pause, likely dual-SIM tune-away. ${go("events", "Events →")}`);
+  $("keys").innerHTML = keys.map((k) => `<li>${k}</li>`).join("") || '<li class="muted">Nothing notable yet.</li>';
+}
+
+// ---------- detail ----------
+let detailPlots = [], detailOpen = false;
+function placeDetail() {
+  const slot = { freq: "detailSlotFreq", sat: "detailSlotSat", streams: "detailSlotStreams" }[curTab];
+  if (slot && detailOpen) { $(slot).appendChild($("detail")); $("detail").style.display = "block"; }
+  else $("detail").style.display = "none";
+}
+async function openDetail(testId, flowId, direction) {
+  const t = (data.tests || []).find((x) => x.test_id === testId);
+  const s = t && (t.timing || []).find((x) => x.flow_id === flowId && x.direction === direction);
+  detailOpen = true; placeDetail();
+  $("dTitle").textContent = t ? `${streamLabel(t, s || { direction, pps: "?", size: "?" })} · ${t.radio || ""} — loading…` : "loading…";
+  let det;
+  try { det = await api("/api/v1/viz/timing/" + testId); } catch (e) { $("dTitle").textContent += " no detail"; return; }
+  const st = (det.streams || []).find((x) => x.flow_id === flowId && x.direction === direction);
+  detailPlots.forEach((p) => p.destroy()); detailPlots = [];
+  ["dArrival", "dBuffer", "dRates", "dDelay"].forEach((id) => $(id).innerHTML = "");
+  if (!st) { $("dTitle").textContent += " — no spectra"; return; }
+  $("dTitle").innerHTML = `${esc(t ? streamLabel(t, s) : testId)} · ${esc((t && t.radio) || "")} · ` +
+    chartsLink("open in charts", t.start - 1, t.end + 1);
+  const w = Math.max(300, $("dArrival").clientWidth || 520);
+  const floor = (a) => a.map((v) => v == null || v <= 0 ? null : v);
+  const a = st.arrival, ser = [{}, { label: "received", stroke: cv("--blue"), width: 1 }], cols = [a.f, floor(a.rx)];
+  if (a.tx) { ser.push({ label: "sent", stroke: cv("--muted"), width: 1 }); cols.push(floor(a.tx)); }
+  detailPlots.push(new uPlot({ width: w, height: 240, scales: { x: { time: false }, y: { distr: 3 } }, axes: axes("Hz", ""),
+    series: ser, cursor: { drag: { x: true, y: false } } }, cols, $("dArrival")));
+  const wf = st.waterfall;
+  if (wf) heatmap($("dWaterfall"), wf.rows.map((r) => r.map((c) => (c / 5 - 10) / 30)), {
+    f0: det.heat_f0_hz, step: det.heat_step_hz, fmax: 2500, rowH: Math.max(6, Math.floor(240 / wf.rows.length)),
+    guides: [[400, cv("--orange")], [800, cv("--orange")], [1000, cv("--muted")]],
+    yLabel: (i) => `${wf.t[i]} s`, tip: (i, hz) => `${wf.t[i]}–${wf.t[i] + wf.win_s} s · ${hz.toFixed(0)} Hz: ` +
+      `${num(wf.rows[i][Math.round((hz - det.heat_f0_hz) / det.heat_step_hz)] / 5 - 10, 1)} dB` });
+  const b = st.buffer;
+  $("dBufferBox").style.display = b ? "block" : "none";
+  if (b) {
+    const bw = $("dBufferBox").clientWidth || 900;
+    const s1 = [{}, { label: "packets in modem", stroke: cv("--red"), width: 1.5, scale: "p" }];
+    const c1 = [b.t, b.modem_packets];
+    if (b.os_queue_kb) { s1.push({ label: "OS queue KB", stroke: cv("--purple"), width: 1.5, scale: "kb" }); c1.push(b.os_queue_kb); }
+    detailPlots.push(new uPlot({ width: bw, height: 200, scales: { x: { time: false } }, series: s1,
+      axes: [{ stroke: cv("--muted"), grid: { stroke: cv("--border"), width: 0.5 }, label: "s" },
+        { scale: "p", stroke: cv("--red"), grid: { stroke: cv("--border"), width: 0.5 }, size: 52, label: "packets" },
+        { scale: "kb", side: 1, stroke: cv("--purple"), grid: { show: false }, size: 52, label: "KB" }] }, c1, $("dBuffer")));
+    const s2 = [{}, { label: "sent Mbit/s", stroke: cv("--muted"), width: 1 }, { label: "delivered Mbit/s", stroke: cv("--blue"), width: 1.5 }];
+    const smooth = (a, k = 5) => a.map((_, i) => { let n = 0, sum = 0;
+      for (let j = Math.max(0, i - k + 1); j <= i; j++) if (a[j] != null) { sum += a[j]; n++; } return n ? sum / n : null; });
+    const c2 = [b.t, smooth(b.sent_mbps), smooth(b.delivered_mbps)];
+    if (b.blocked_share) { s2.push({ label: "blocked in send()", stroke: cv("--red"), fill: cv("--red") + "33", width: 0.5, scale: "f" }); c2.push(smooth(b.blocked_share)); }
+    detailPlots.push(new uPlot({ width: bw, height: 170, scales: { x: { time: false }, f: { range: [0, 1] } }, series: s2,
+      axes: [{ stroke: cv("--muted"), grid: { stroke: cv("--border"), width: 0.5 }, label: "s" },
+        { stroke: cv("--muted"), grid: { stroke: cv("--border"), width: 0.5 }, size: 52, label: "Mbit/s" },
+        { scale: "f", side: 1, stroke: cv("--red"), grid: { show: false }, size: 46, values: (u, v) => v.map((x) => Math.round(100 * x) + "%") }] }, c2, $("dRates")));
+  }
+  if (st.delay) detailPlots.push(new uPlot({ width: w, height: 200, scales: { x: { time: false }, y: { distr: 3 } },
+    axes: axes("Hz", ""), series: [{}, { label: "excess-delay PSD", stroke: cv("--red"), width: 1 }] },
+    [st.delay.f, floor(st.delay.psd)], $("dDelay")));
+  $("detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function drawTab(name) {
+  if (name === "overview") drawOverview();
+  if (name === "freq") drawFreq();
+  if (name === "sat") drawSat();
+}
+document.querySelectorAll('input[name="hmode"]').forEach((r) => r.addEventListener("change", drawFreq));
+$("frange").addEventListener("change", drawFreq);
+let resizeT; addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(() => data && drawTab(curTab), 200); });
 async function loadReach() {
   let reports;
   try {
@@ -456,15 +840,21 @@ async function loadReach() {
     <tbody>${rows.map((r) => `<tr>${r.cells.map((v, i) => `<td class="${[head[i][1] || "", r.cls[i]].join(" ")}">${v}</td>`).join("")}</tr>`).join("")}</tbody>`;
 }
 
+
 async function loadDay() {
   const day = $("day").value;
   if (!day) return;
   $("status").textContent = "Loading…";
   try {
     data = await api("/api/v1/viz/findings/" + day);
+    try { spec = await api("/api/v1/viz/spectrogram/" + day); } catch (e) { spec = null; }
+    streams = [];
+    for (const t of data.tests) for (const s of t.timing || []) streams.push({ t, s });
+    detailOpen = false; placeDetail();
     renderTimingSummary(); renderTiming();
     renderTests(); renderRegimes(); renderPauses(); renderGaps(); renderServerSide();
-    $("status").textContent = `${data.tests.length} tests`;
+    drawTab(curTab);
+    $("status").textContent = `${data.tests.length} tests · ${streams.length} fast streams`;
   } catch (e) {
     if (e.message !== "login") $("status").textContent = e.message === "HTTP 404" ? "No findings for this day yet" : "Error: " + e.message;
   }
@@ -503,6 +893,7 @@ $("login").addEventListener("submit", async (e) => {
 $("day").addEventListener("change", loadDay);
 $("reload").addEventListener("click", load);
 
+showTab((location.hash.match(/tab=(\w+)/) || [])[1] || "overview");
 load();
 </script>
 </body>
