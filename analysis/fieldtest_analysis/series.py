@@ -22,13 +22,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import clock, metrics, schema
+from . import clock, metrics, schema, stalls
 from .loader import load_test
 from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 2
+SERIES_VERSION = 4
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -142,6 +142,7 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
     out = {
         "v": SERIES_VERSION,
         "test_id": test_dir.name,
+        "stalls": stalls.detect(td, off),
         "neighbors": neighbors,
         "plan": plan,
         "start": lo * BIN_NS / 1e9,
@@ -207,6 +208,16 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
                 cols[c].append(None)
         meta = [{k: t[k] for k in ("test_id", "plan", "start", "end")} for t in day_tests]
         neighbors = [n for t in day_tests for n in t.get("neighbors", [])]
+        # Stall episodes with the time since the previous one that day (the
+        # Pixel's recur on a fixed period, which shows up here).
+        episodes, prev = [], {}
+        for t in day_tests:
+            for e in t.get("stalls", []):
+                e = dict(e, test_id=t["test_id"], plan=t["plan"])
+                p = prev.get(e["directions"])
+                e["since_prev_s"] = round(e["start"] - p, 1) if p is not None else None
+                prev[e["directions"]] = e["start"]
+                episodes.append(e)
         # Clear-text band + frequency for every channel seen that day.
         channels = {
             "lte": {str(e): channel_label("LTE", e) for e in sorted({v for v in cols["earfcn"] if v is not None})},
@@ -214,7 +225,14 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
         }
         _write_json(
             out / "series" / f"{day}.json",
-            {"day": day, "tests": meta, "channels": channels, "neighbors": neighbors, **cols},
+            {
+                "day": day,
+                "tests": meta,
+                "channels": channels,
+                "neighbors": neighbors,
+                "stall_episodes": episodes,
+                **cols,
+            },
         )
     days = sorted(by_day)
     _write_json(out / "series" / "days.json", {"days": days})

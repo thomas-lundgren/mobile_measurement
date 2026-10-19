@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from . import clock, events, metrics
+from . import clock, events, metrics, stalls
 from .loader import TestData
 
 
@@ -78,4 +78,5 @@ def build_summary(td: TestData) -> dict:
             "counts": {k: int(v) for k, v in ev_counts.items()},
             "handover_count": int(ev_counts.get("HANDOVER", 0)),
         },
+        "stall_episodes": stalls.detect(td, offset),
     }

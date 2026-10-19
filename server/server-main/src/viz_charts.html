@@ -29,6 +29,12 @@
   .chart { margin:6px 0 14px; }
   .chart h2 { font-size:13px; font-weight:600; margin:0 0 2px; }
   .u-legend { font-size:12px; }
+  #tip { position:fixed; z-index:20; max-width:360px; padding:8px 10px; border-radius:8px; font-size:12px;
+    line-height:1.45; background:var(--panel); color:var(--fg); border:1px solid var(--border);
+    box-shadow:0 4px 14px #0004; pointer-events:none; display:none; }
+  #tip b { font-weight:600; }
+  .key { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--muted); }
+  .key i { width:14px; height:10px; border-radius:2px; display:inline-block; }
   .u-legend .u-marker { border-radius:50%; }
   #login { max-width:320px; margin:15vh auto; padding:16px; background:var(--panel); border:1px solid var(--border);
     border-radius:10px; display:none; }
@@ -46,6 +52,8 @@
   <button id="reset">Reset zoom</button>
   <button id="reload">Reload</button>
   <a href="/viz">Map</a>
+  <span class="key"><i style="background:#ff375f55"></i>link pause (both directions)</span>
+  <span class="key"><i style="background:#af52de44"></i>one-way gaps</span>
   <span id="status"></span>
   <span class="hint">Drag across a graph to zoom all of them; double-click to zoom out.</span>
 </header>
@@ -58,6 +66,7 @@
   <button class="primary" type="submit">Log in</button>
 </form>
 
+<div id="tip"></div>
 <main id="main">
   <div class="chart"><h2>Round-trip time (UDP probe), ms</h2><div id="c_rtt"></div></div>
   <div class="chart"><h2>One-way delay (UDP, clock-corrected), ms</h2><div id="c_owd"></div></div>
@@ -111,6 +120,71 @@ function axes(yLabel, extra) {
   ];
 }
 
+// Stall episodes (from the analysis): shaded in every graph, explained on hover.
+const EP_FILL = { both: "#ff375f30", uplink: "#af52de22", downlink: "#af52de22" };
+
+function shadeEpisodes(u) {
+  const eps = (data && data.stall_episodes) || [];
+  const { min, max } = u.scales.x;
+  const { top, height: h } = u.bbox;
+  const ctx = u.ctx;
+  ctx.save();
+  for (const e of eps) {
+    if (e.end < min || e.start > max) continue;
+    const x0 = u.valToPos(Math.max(e.start, min), "x", true);
+    const x1 = u.valToPos(Math.min(e.end, max), "x", true);
+    ctx.fillStyle = EP_FILL[e.directions] || EP_FILL.uplink;
+    ctx.fillRect(x0, top, Math.max(x1 - x0, 2 * (devicePixelRatio || 1)), h);
+  }
+  ctx.restore();
+}
+
+function ago(s) {
+  if (s == null) return null;
+  const m = Math.floor(s / 60), r = Math.round(s - 60 * m);
+  return m ? `${m} min ${r} s` : `${r} s`;
+}
+
+function episodeNote(e) {
+  const dur = (e.end - e.start).toFixed(1);
+  const when = new Date(e.start * 1000).toLocaleTimeString();
+  const since = ago(e.since_prev_s);
+  if (e.directions === "both") {
+    return `<b>Link pause, both directions</b> · ${when}<br>
+      ${e.stalls_downlink} downlink / ${e.stalls_uplink} uplink stalls of ~${e.stall_ms_median.toFixed(0)} ms
+      (max ${e.stall_ms_max.toFixed(0)} ms) over ${dur} s. Packets were held, not lost.<br>
+      The phone pauses its radio link on a ~5 min cycle${since ? ` (previous pause seen ${since} earlier)` : ""}:
+      a device-side pause (likely dual-SIM tune-away), not queueing.
+      Exclude it when judging head-of-line blocking.`;
+  }
+  const n = e.directions === "uplink" ? e.stalls_uplink : e.stalls_downlink;
+  const other = e.directions === "uplink" ? "downlink" : "uplink";
+  return `<b>${e.directions === "uplink" ? "Uplink" : "Downlink"} gaps</b> · ${when}<br>
+    ${n} gaps of ~${e.stall_ms_median.toFixed(0)} ms (max ${e.stall_ms_max.toFixed(0)} ms) in ${e.directions}
+    arrivals over ${dur} s; ${other} unaffected. Packets arrive in bursts after each gap
+    (radio scheduling or queueing in that direction).`;
+}
+
+let hoverPlot = null;
+function showTip(u) {
+  const tip = $("tip");
+  if (u !== hoverPlot || u.cursor.left == null || u.cursor.left < 0) { if (u === hoverPlot) tip.style.display = "none"; return; }
+  const x = u.posToVal(u.cursor.left, "x");
+  const e = ((data && data.stall_episodes) || []).find((e) => x >= e.start && x <= e.end);
+  if (!e) { tip.style.display = "none"; return; }
+  const r = u.over.getBoundingClientRect();
+  tip.innerHTML = episodeNote(e);
+  tip.style.display = "block";
+  const left = r.left + u.cursor.left + 14;
+  tip.style.left = Math.min(left, innerWidth - tip.offsetWidth - 8) + "px";
+  tip.style.top = Math.max(8, r.top + u.cursor.top - tip.offsetHeight - 10) + "px";
+}
+
+function trackHover(u) {
+  u.over.addEventListener("mouseenter", () => { hoverPlot = u; });
+  u.over.addEventListener("mouseleave", () => { hoverPlot = null; $("tip").style.display = "none"; });
+}
+
 function opts(series, yLabel, extra) {
   return Object.assign({
     width: width(), height: 220,
@@ -118,7 +192,12 @@ function opts(series, yLabel, extra) {
     scales: { x: { time: true } },
     axes: axes(yLabel),
     series: [{}].concat(series),
-    hooks: { setScale: [(u, key) => { if (key === "x") syncX(u); }] },
+    hooks: {
+      setScale: [(u, key) => { if (key === "x") syncX(u); }],
+      drawClear: [shadeEpisodes],
+      setCursor: [showTip],
+      ready: [trackHover],
+    },
   }, extra || {});
 }
 
@@ -153,7 +232,10 @@ function build() {
   plots.push(new uPlot(opts([
     line("download", COL.down, { fill: COL.down + "22" }),
     line("upload", COL.up, { fill: COL.up + "22" }),
-  ], "Mbit/s"), [t, data.down_mbps, data.up_mbps], $("c_tput")));
+  ], "Mbit/s", { scales: { x: { time: true },
+    // Fixed floor so a test without TCP traffic still gets axes (all-null data has no range).
+    y: { range: (u, lo, hi) => [0, Math.max(hi || 0, 10) * 1.05] } } }),
+  [t, data.down_mbps, data.up_mbps], $("c_tput")));
 
   const modeLevel = data.mode.map((m) => m == null ? null : (MODE_LEVEL[m] ?? 0.5));
   const radioOpts = opts([
