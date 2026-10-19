@@ -10,6 +10,7 @@ pub mod aux_log;
 pub mod log_writer;
 pub mod packet;
 pub mod timestamp;
+pub mod udp_timing;
 pub mod ue;
 
 use aux_log::{AuxContext, ClockRow, GpsRow, RadioRow};

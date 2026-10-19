@@ -31,6 +31,10 @@ pub enum Flow {
         direction: Direction,
         rate_pps: u32,
         packet_size_bytes: u32,
+        /// Sender only: limit SO_SNDBUF to this many bytes and send
+        /// non-blocking (back-pressure test; full buffer → EAGAIN, logged).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        sndbuf_bytes: Option<u32>,
     },
     #[serde(rename = "bulk_tcp")]
     BulkTcp {

@@ -20,11 +20,12 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::log_writer::{
-    packet_channel, spawn_packet_writer_multi, Direction, LogContext, LogSink, PacketRow, Protocol,
-    WriterHandle,
+    packet_channel, spawn_packet_writer_multi, Direction, LogContext, LogSink, PacketRow, PacketTiming,
+    Protocol, WriterHandle,
 };
 use crate::packet::{DscpProbePacket, ProbePacket, RealtimePacket, DSCP_UNKNOWN};
 use crate::timestamp::Timestamp;
+use crate::udp_timing::{self, Pacer, SendStatus};
 
 const RING_CAPACITY: usize = 8192;
 const BULK_CHUNK: usize = 64 * 1024;
@@ -70,6 +71,10 @@ pub struct UeFlow {
     /// DSCP values (0–63) to cycle through. Present for dscp_probe flows only.
     #[serde(default)]
     pub dscp_values: Option<Vec<u8>>,
+    /// realtime_udp sender only: limit SO_SNDBUF to this and send
+    /// non-blocking, so a full queue below the socket shows as EAGAIN.
+    #[serde(default)]
+    pub sndbuf_bytes: Option<u32>,
 }
 
 #[derive(Default)]
@@ -366,7 +371,10 @@ fn sleep_until(deadline: Instant) {
     }
 }
 
-/// Realtime ToServer: UE sends the fixed-rate padded stream. Log SENT.
+/// Realtime ToServer: UE sends the fixed-rate padded stream. Logs one SENT
+/// row per attempt, tagged with its outcome, the syscall time and the bytes
+/// still queued below the socket. With `sndbuf_bytes` the socket is small and
+/// non-blocking: a queue the modem does not drain fills it and shows as EAGAIN.
 fn realtime_send(
     socket: UdpSocket,
     mut sink: LogSink,
@@ -379,8 +387,15 @@ fn realtime_send(
     let size = flow
         .packet_size_bytes
         .unwrap_or(RealtimePacket::WIRE_LEN as u32) as usize;
+    let fd = socket.as_raw_fd();
+    if let Some(bytes) = flow.sndbuf_bytes {
+        if udp_timing::limit_send_buffer(fd, bytes).is_ok() {
+            let _ = socket.set_nonblocking(true);
+        }
+    }
     let mut seq = 0u64;
-    let mut next = Instant::now();
+    let _ = udp_timing::raise_thread_priority();
+    let mut pacer = Pacer::new(period);
 
     while !stop.load(Ordering::Acquire) {
         let ts = Timestamp::now();
@@ -391,35 +406,39 @@ fn realtime_send(
             send_utc_ns: ts.utc_ns,
         }
         .to_bytes_padded(size);
-        if socket.send(&bytes).is_ok() {
+        let t0 = Instant::now();
+        let result = socket.send(&bytes);
+        let call_ns = t0.elapsed().as_nanos().min(u32::MAX as u128) as u32;
+        let status = SendStatus::of(&result);
+        if status == SendStatus::Ok {
             counters.sent.fetch_add(1, Ordering::Relaxed);
             counters
                 .bytes_sent
                 .fetch_add(bytes.len() as u64, Ordering::Relaxed);
-            sink.push(PacketRow {
-                flow_id: flow.flow_id,
-                sequence_number: seq,
-                direction: Direction::Sent,
-                timestamp: ts,
-                payload_size: bytes.len() as u32,
-                protocol: Protocol::Udp,
-                local_port: None,
-                remote_port: None,
-                sender: None,
-                expected_interval_ns: Some(period_ns),
-                actual_interval_ns: None,
-                dscp_sent: None,
-                dscp_recv: None,
-            });
         }
+        sink.push(PacketRow {
+            flow_id: flow.flow_id,
+            sequence_number: seq,
+            direction: Direction::Sent,
+            timestamp: ts,
+            payload_size: bytes.len() as u32,
+            protocol: Protocol::Udp,
+            local_port: None,
+            remote_port: None,
+            sender: None,
+            expected_interval_ns: Some(period_ns),
+            actual_interval_ns: None,
+            dscp_sent: None,
+            dscp_recv: None,
+            timing: PacketTiming {
+                send_status: Some(status),
+                send_call_ns: Some(call_ns),
+                sock_outq_bytes: udp_timing::outq_bytes(fd),
+                ..PacketTiming::default()
+            },
+        });
         seq += 1;
-        next += period;
-        let now = Instant::now();
-        if next > now {
-            thread::sleep(next - now);
-        } else {
-            next = now;
-        }
+        pacer.wait();
     }
 }
 
@@ -436,14 +455,16 @@ fn realtime_recv(
     let mut buf = [0u8; 2048];
     let mut last_keepalive = Instant::now() - KEEPALIVE_PERIOD; // send one immediately
     let mut last_recv_mono: Option<u64> = None;
+    let fd = socket.as_raw_fd();
+    let _ = udp_timing::enable_rx_timestamps(fd);
 
     while !stop.load(Ordering::Acquire) {
         if last_keepalive.elapsed() >= KEEPALIVE_PERIOD {
             let _ = socket.send(b"mp-keepalive");
             last_keepalive = Instant::now();
         }
-        match socket.recv(&mut buf) {
-            Ok(n) => {
+        match udp_timing::recv_stamped(fd, &mut buf) {
+            Ok(udp_timing::Received { n, kernel_utc_ns, .. }) => {
                 let recv_ts = Timestamp::now();
                 counters.received.fetch_add(1, Ordering::Relaxed);
                 counters
@@ -475,6 +496,10 @@ fn realtime_recv(
                     actual_interval_ns: actual,
                     dscp_sent: None,
                     dscp_recv: None,
+                    timing: PacketTiming {
+                        kernel_rx_utc_ns: kernel_utc_ns,
+                        ..PacketTiming::default()
+                    },
                 });
             }
             Err(ref e) if would_block(e) => {}
@@ -676,6 +701,7 @@ fn dscp_probe_ue(
                 actual_interval_ns: None,
                 dscp_sent: Some(dscp_intended_ul),
                 dscp_recv: None,
+                timing: PacketTiming::default(),
             });
         }
 
@@ -706,6 +732,7 @@ fn dscp_probe_ue(
                         actual_interval_ns: None,
                         dscp_sent: Some(echo.dscp_intended_dl),
                         dscp_recv: Some(dscp_actual_dl),
+                        timing: PacketTiming::default(),
                     });
                 }
             },
@@ -729,5 +756,6 @@ fn bulk_row(flow_id: u32, seq: u64, direction: Direction, ts: Timestamp, size: u
         actual_interval_ns: None,
         dscp_sent: None,
         dscp_recv: None,
+        timing: PacketTiming::default(),
     }
 }

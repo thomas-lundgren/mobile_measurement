@@ -21,6 +21,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crate::timestamp::Timestamp;
+use crate::udp_timing::SendStatus;
 
 /// Constant-per-file join keys (remediation 2.1). Stored once on the writer;
 /// stamped onto every row.
@@ -81,6 +82,22 @@ pub struct PacketRow {
     pub dscp_sent: Option<u8>,
     /// DSCP value read from received packet IP header (dscp_probe RECEIVED rows; null otherwise).
     pub dscp_recv: Option<u8>,
+    /// Delivery-timing / back-pressure detail (realtime UDP); empty otherwise.
+    pub timing: PacketTiming,
+}
+
+/// Per-packet socket detail for realtime UDP (see `udp_timing`). All optional.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PacketTiming {
+    /// RECEIVED: kernel receive time (UTC ns, `SO_TIMESTAMPNS`).
+    pub kernel_rx_utc_ns: Option<u64>,
+    /// SENT: outcome of the send attempt. Rows are logged for failed
+    /// attempts too, so a sequence gap at the receiver can be attributed.
+    pub send_status: Option<SendStatus>,
+    /// SENT: duration of the send syscall (ns) — long when it blocked.
+    pub send_call_ns: Option<u32>,
+    /// SENT: bytes queued below the socket right after the send (`SIOCOUTQ`).
+    pub sock_outq_bytes: Option<u32>,
 }
 
 impl PacketRow {
@@ -106,6 +123,7 @@ impl PacketRow {
             actual_interval_ns: None,
             dscp_sent: None,
             dscp_recv: None,
+            timing: PacketTiming::default(),
         }
     }
 }
@@ -133,6 +151,10 @@ fn packets_schema() -> Schema {
         Field::new("actual_interval_ns", DataType::UInt64, true),
         Field::new("dscp_sent", DataType::UInt8, true),
         Field::new("dscp_recv", DataType::UInt8, true),
+        Field::new("kernel_rx_utc_ns", DataType::UInt64, true),
+        Field::new("send_status", DataType::Utf8, true),
+        Field::new("send_call_ns", DataType::UInt32, true),
+        Field::new("sock_outq_bytes", DataType::UInt32, true),
     ])
 }
 
@@ -297,6 +319,27 @@ impl SegmentedPacketWriter {
                 )) as _,
                 Arc::new(UInt8Array::from(
                     self.rows.iter().map(|r| r.dscp_recv).collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt64Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.timing.kernel_rx_utc_ns)
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(StringArray::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.timing.send_status.map(SendStatus::as_str))
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt32Array::from(
+                    self.rows.iter().map(|r| r.timing.send_call_ns).collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt32Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.timing.sock_outq_bytes)
+                        .collect::<Vec<_>>(),
                 )) as _,
             ],
         )
@@ -555,7 +598,7 @@ mod tests {
             .build()
             .unwrap();
         let batch = reader.next().unwrap().unwrap();
-        assert_eq!(batch.num_columns(), 19, "join + data columns");
+        assert_eq!(batch.num_columns(), 23, "join + data columns");
         let names: Vec<String> = batch
             .schema()
             .fields()
@@ -564,6 +607,8 @@ mod tests {
             .collect();
         assert_eq!(names[0], "device_id");
         assert!(names.iter().any(|n| n == "actual_interval_ns"));
+        assert!(names.iter().any(|n| n == "kernel_rx_utc_ns"));
+        assert!(names.iter().any(|n| n == "send_status"));
         let dev = batch
             .column(0)
             .as_any()

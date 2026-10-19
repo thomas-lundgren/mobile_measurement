@@ -19,6 +19,7 @@ TIME_COLUMNS = frozenset(
         "sender_utc_ns",
         "expected_interval_ns",
         "actual_interval_ns",
+        "kernel_rx_utc_ns",
         "uncertainty_ns",
         "estimated_offset_ns",
     }
@@ -42,6 +43,10 @@ PACKETS = [
     "sender_utc_ns",
     "expected_interval_ns",
     "actual_interval_ns",
+    "kernel_rx_utc_ns",
+    "send_status",
+    "send_call_ns",
+    "sock_outq_bytes",
 ]
 
 CLOCK = [

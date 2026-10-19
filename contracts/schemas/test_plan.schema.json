@@ -80,6 +80,10 @@
         "packet_size_bytes": {
           "type": "integer", "minimum": 30, "maximum": 1472,
           "description": "On-wire UDP payload size. Minimum 30 = RealtimePacket v1 header+core; remaining bytes are trailing-zero padding."
+        },
+        "sndbuf_bytes": {
+          "type": "integer", "minimum": 1024, "maximum": 16777216,
+          "description": "Sender only (back-pressure test): limit the sending socket's SO_SNDBUF to this many bytes and send non-blocking, so a queue the stack below does not drain shows as EAGAIN in packets.send_status. Omit for the OS default (blocking send)."
         }
       },
       "description": "Fixed-rate unidirectional UDP. For Bidirectional traffic, define two flows (one FromServer, one ToServer) with distinct flow_id."

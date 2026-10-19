@@ -756,6 +756,13 @@ This enables:
 - **Jitter** — variance in arrival intervals relative to sender spacing
 - **Packet spacing analysis** — network-induced compression or expansion of packet trains
 
+Delivery timing and back pressure (realtime UDP, both nodes):
+
+- The receiver also logs the **kernel receive time** (`SO_TIMESTAMPNS`) of each packet. Kernel-time spacing shows how the radio/modem hands packets to the host (batches per slot/TTI, HARQ-delayed packets); app time minus kernel time is the host's own wake-up latency.
+- The sender logs **every send attempt**, including failed ones, with its outcome (`OK`, `EAGAIN`, `ENOBUFS`, `ERROR`), the syscall duration and the bytes still queued below the socket (`SIOCOUTQ`). A sequence gap at the receiver whose SENT row is not `OK` is a local drop, not network loss.
+- Optional `sndbuf_bytes` on the flow limits the sender's `SO_SNDBUF` and makes it non-blocking (with `IP_RECVERR`). If the modem stops draining the host queue, the small buffer fills and sends fail with `EAGAIN`: local back pressure. If the delay grows while sends keep succeeding with an empty `SIOCOUTQ`, the queue sits inside the modem/network instead.
+- Rates up to 1000 pps (1 ms spacing) are paced to a few µs (sleep, then spin); actual send times are logged, so analysis never assumes ideal spacing.
+
 Future versions:
 
 - audio-like traffic
@@ -1164,6 +1171,8 @@ Fields:
 - sender timestamps (`sender_mono_ns`, `sender_utc_ns`) — for OWD computation
 - expected interval (`expected_interval_ns`) — nominal flow spacing
 - actual interval (`actual_interval_ns`) — measured inter-arrival gap
+- kernel receive time (`kernel_rx_utc_ns`) — realtime UDP RECEIVED rows
+- send outcome (`send_status`), send syscall time (`send_call_ns`), queued bytes below the socket (`sock_outq_bytes`) — realtime UDP SENT rows, one per attempt
 
 ---
 

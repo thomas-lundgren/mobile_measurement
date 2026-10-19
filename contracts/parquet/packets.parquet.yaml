@@ -37,3 +37,10 @@ columns:
   # See contracts/packets/dscp_probe.md for the measurement protocol.
   - { name: dscp_sent, type: uint8, nullable: true, doc: "DSCP value (0–63) this node intended to set on the outgoing IP packet. Present for dscp_probe SENT rows; null otherwise." }
   - { name: dscp_recv, type: uint8, nullable: true, doc: "DSCP value (0–63) actually observed in the received packet's IP header (via IP_RECVTOS / IPV6_RECVTCLASS). Present for dscp_probe RECEIVED rows; null otherwise." }
+
+  # Delivery timing / back pressure (realtime_udp only — null otherwise).
+  # See spec "Realtime UDP Flow" (delivery timing and back pressure) and core/src/udp_timing.rs.
+  - { name: kernel_rx_utc_ns, type: uint64, nullable: true, doc: "RECEIVED: kernel receive time (SO_TIMESTAMPNS, UTC ns) — when the driver handed the packet up. utc_ns minus this = host wake-up latency." }
+  - { name: send_status,      type: utf8,   nullable: true, doc: "SENT: OK | EAGAIN (socket send buffer full: back pressure) | ENOBUFS (qdisc/driver drop) | ERROR. One row per attempt; non-OK attempts never left the host." }
+  - { name: send_call_ns,     type: uint32, nullable: true, doc: "SENT: duration of the send syscall (long when a blocking send waited for buffer space)." }
+  - { name: sock_outq_bytes,  type: uint32, nullable: true, doc: "SENT: bytes queued below the socket after the send (SIOCOUTQ), not yet released by the qdisc/driver. Null if the ioctl is refused." }

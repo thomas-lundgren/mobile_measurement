@@ -130,6 +130,7 @@ async fn prepare(
             direction,
             rate_pps,
             packet_size_bytes,
+            sndbuf_bytes,
             ..
         } => {
             let socket = bind_udp(req.server_port)?;
@@ -142,6 +143,7 @@ async fn prepare(
                 *direction,
                 *rate_pps,
                 *packet_size_bytes as usize,
+                *sndbuf_bytes,
                 state.clone(),
                 counters.clone(),
                 stop.clone(),

@@ -15,7 +15,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use fieldtest_core::log_writer::{Direction, LogSink, PacketRow, Protocol, WriterHandle};
+use fieldtest_core::log_writer::{Direction, LogSink, PacketRow, PacketTiming, Protocol, WriterHandle};
+use fieldtest_core::udp_timing::{self, Pacer, SendStatus};
 use fieldtest_core::packet::{DscpProbePacket, ProbePacket, RealtimePacket, DSCP_UNKNOWN};
 use fieldtest_core::timestamp::Timestamp;
 use mp_contracts::Direction as FlowDir;
@@ -304,6 +305,7 @@ pub fn spawn_dscp_probe_echo(
                 actual_interval_ns: None,
                 dscp_sent: Some(pkt.dscp_intended_ul),
                 dscp_recv: Some(dscp_actual_ul),
+                timing: PacketTiming::default(),
             });
 
             // Echo strategy: mirror the UE's intended DSCP for the downlink direction.
@@ -338,6 +340,7 @@ pub fn spawn_dscp_probe_echo(
                     actual_interval_ns: None,
                     dscp_sent: Some(dscp_intended_dl),
                     dscp_recv: None,
+                    timing: PacketTiming::default(),
                 });
             }
         }
@@ -359,6 +362,7 @@ pub fn spawn_realtime_udp(
     direction: FlowDir,
     rate_pps: u32,
     packet_size: usize,
+    sndbuf_bytes: Option<u32>,
     state: Arc<Mutex<GeneratorState>>,
     counters: Arc<Counters>,
     stop: Arc<AtomicBool>,
@@ -367,6 +371,7 @@ pub fn spawn_realtime_udp(
         *state.lock().unwrap() = GeneratorState::WaitingForClient;
         let period_ns = 1_000_000_000u64 / rate_pps.max(1) as u64;
         let mut buf = [0u8; 2048];
+        let fd = socket.as_raw_fd();
 
         match direction {
             FlowDir::FromServer => {
@@ -387,9 +392,16 @@ pub fn spawn_realtime_udp(
                 };
                 *state.lock().unwrap() = GeneratorState::Running;
 
-                let period = Duration::from_nanos(period_ns);
+                // Same tagging as the UE sender (see udp_timing): one SENT row
+                // per attempt; sndbuf_bytes makes the socket small + non-blocking.
+                if let Some(bytes) = sndbuf_bytes {
+                    if udp_timing::limit_send_buffer(fd, bytes).is_ok() {
+                        let _ = socket.set_nonblocking(true);
+                    }
+                }
+                let _ = udp_timing::raise_thread_priority();
+                let mut pacer = Pacer::new(Duration::from_nanos(period_ns));
                 let mut seq = 0u64;
-                let mut next = Instant::now();
                 while !stop.load(Ordering::Acquire) {
                     let ts = Timestamp::now();
                     let pkt = RealtimePacket {
@@ -399,47 +411,54 @@ pub fn spawn_realtime_udp(
                         send_utc_ns: ts.utc_ns,
                     };
                     let bytes = pkt.to_bytes_padded(packet_size);
-                    if socket.send_to(&bytes, peer).is_ok() {
+                    let t0 = Instant::now();
+                    let result = socket.send_to(&bytes, peer);
+                    let call_ns = t0.elapsed().as_nanos().min(u32::MAX as u128) as u32;
+                    let status = SendStatus::of(&result);
+                    if status == SendStatus::Ok {
                         counters.sent.fetch_add(1, Ordering::Relaxed);
                         counters
                             .bytes_sent
                             .fetch_add(bytes.len() as u64, Ordering::Relaxed);
-                        sink.push(PacketRow {
-                            flow_id,
-                            sequence_number: seq,
-                            direction: Direction::Sent,
-                            timestamp: ts,
-                            payload_size: bytes.len() as u32,
-                            protocol: Protocol::Udp,
-                            local_port: None,
-                            remote_port: None,
-                            sender: None,
-                            expected_interval_ns: Some(period_ns),
-                            actual_interval_ns: None,
-                            dscp_sent: None,
-                            dscp_recv: None,
-                        });
                     }
+                    sink.push(PacketRow {
+                        flow_id,
+                        sequence_number: seq,
+                        direction: Direction::Sent,
+                        timestamp: ts,
+                        payload_size: bytes.len() as u32,
+                        protocol: Protocol::Udp,
+                        local_port: None,
+                        remote_port: None,
+                        sender: None,
+                        expected_interval_ns: Some(period_ns),
+                        actual_interval_ns: None,
+                        dscp_sent: None,
+                        dscp_recv: None,
+                        timing: PacketTiming {
+                            send_status: Some(status),
+                            send_call_ns: Some(call_ns),
+                            sock_outq_bytes: udp_timing::outq_bytes(fd),
+                            ..PacketTiming::default()
+                        },
+                    });
                     seq += 1;
-                    next += period;
-                    let now = Instant::now();
-                    if next > now {
-                        thread::sleep(next - now);
-                    } else {
-                        next = now;
-                    }
+                    pacer.wait();
                 }
             }
             FlowDir::ToServer => {
                 let mut last_recv_mono: Option<u64> = None;
                 let mut started = false;
+                let _ = udp_timing::enable_rx_timestamps(fd);
                 while !stop.load(Ordering::Acquire) {
-                    match socket.recv_from(&mut buf) {
-                        Ok((n, addr)) => {
+                    match udp_timing::recv_stamped(fd, &mut buf) {
+                        Ok(udp_timing::Received { n, from, kernel_utc_ns }) => {
                             let recv_ts = Timestamp::now();
                             if !started {
                                 started = true;
-                                counters.note_peer(addr);
+                                if let Some(addr) = from {
+                                    counters.note_peer(addr);
+                                }
                                 *state.lock().unwrap() = GeneratorState::Running;
                             }
                             counters.received.fetch_add(1, Ordering::Relaxed);
@@ -472,6 +491,10 @@ pub fn spawn_realtime_udp(
                                 actual_interval_ns: actual,
                                 dscp_sent: None,
                                 dscp_recv: None,
+                                timing: PacketTiming {
+                                    kernel_rx_utc_ns: kernel_utc_ns,
+                                    ..PacketTiming::default()
+                                },
                             });
                         }
                         Err(ref e) if would_block(e) => continue,
@@ -596,6 +619,7 @@ fn bulk_row(flow_id: u32, seq: u64, direction: Direction, ts: Timestamp, size: u
         actual_interval_ns: None,
         dscp_sent: None,
         dscp_recv: None,
+        timing: PacketTiming::default(),
     }
 }
 

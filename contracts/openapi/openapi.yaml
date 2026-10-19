@@ -810,6 +810,15 @@ components:
             type: integer
             format: int32
             minimum: 0
+          sndbuf_bytes:
+            type:
+            - integer
+            - 'null'
+            format: int32
+            description: |-
+              Sender only: limit SO_SNDBUF to this many bytes and send
+              non-blocking (back-pressure test; full buffer → EAGAIN, logged).
+            minimum: 0
           type:
             type: string
             enum:
