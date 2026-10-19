@@ -52,6 +52,7 @@
   <button id="reset">Reset zoom</button>
   <button id="reload">Reload</button>
   <a href="/viz">Map</a>
+  <span class="key" id="modeKey"></span>
   <span class="key"><i style="background:#ff375f55"></i>link pause (both directions)</span>
   <span class="key"><i style="background:#af52de44"></i>one-way gaps</span>
   <span id="status"></span>
@@ -185,9 +186,82 @@ function trackHover(u) {
   u.over.addEventListener("mouseleave", () => { hoverPlot = null; $("tip").style.display = "none"; });
 }
 
+// Radio in use, as a coloured strip above each graph: "5G NSA · B8 + n78".
+const MODE_INFO = {
+  NR_SA: ["5G SA", "#007a3d"], NR_ADVANCED: ["5G+", "#00a3a3"], NR_NSA: ["5G NSA", "#1fb954"],
+  LTE_CA: ["4G CA", "#ff8c00"], LTE_ADVANCED_PRO: ["4G+", "#d4a000"], LTE: ["4G", "#e0301e"],
+};
+const MODE_UNKNOWN = ["mode not recorded", "#8e8e93"];
+let radioSegs = [];
+
+function radioText(i) {
+  const m = data.mode[i];
+  const lte = data.earfcn[i] != null ? ((data.channels || {}).lte || {})[data.earfcn[i]] : null;
+  if (m == null && lte == null) return null;
+  const [name, colour] = MODE_INFO[m] || MODE_UNKNOWN;
+  const lteBand = lte ? lte.split(" · ")[0] : null;
+  let nrBand = null;
+  if (m && m.startsWith("NR")) {
+    const nr = data.nrarfcn[i] != null ? ((data.channels || {}).nr || {})[data.nrarfcn[i]] : null;
+    nrBand = nr ? nr.split(" · ")[0] : "n?";
+  }
+  const bands = [lteBand, nrBand].filter(Boolean).join(" + ");
+  return { text: bands ? `${name} · ${bands}` : name, short: name, colour };
+}
+
+function buildRadioSegs() {
+  radioSegs = [];
+  let prev = null;
+  for (let i = 0; i < data.t.length; i++) {
+    const r = radioText(i);
+    const key = r && r.text;
+    if (key === prev) continue;
+    const open = radioSegs[radioSegs.length - 1];
+    if (open && open.end == null) open.end = data.t[i];  // close only the running one
+    if (r) radioSegs.push(Object.assign({ start: data.t[i], end: null }, r));
+    prev = key;
+  }
+  if (radioSegs.length && radioSegs[radioSegs.length - 1].end == null) {
+    radioSegs[radioSegs.length - 1].end = data.t[data.t.length - 1];
+  }
+  const seen = new Map();
+  for (const r of radioSegs) seen.set(r.short, r.colour);
+  $("modeKey").innerHTML = [...seen].map(([n, c]) => `<i style="background:${c}"></i>${n}`).join(" ");
+}
+
+const STRIP_H = 15;
+function radioStrip(u) {
+  const dpr = devicePixelRatio || 1;
+  const { min, max } = u.scales.x;
+  const { left, top, width: w } = u.bbox;
+  const y = top - (STRIP_H + 3) * dpr, h = STRIP_H * dpr;
+  const ctx = u.ctx;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(left, y, w, h);
+  ctx.clip();
+  ctx.font = `${10.5 * dpr}px system-ui, sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  for (const r of radioSegs) {
+    if (r.end < min || r.start > max) continue;
+    const x0 = u.valToPos(Math.max(r.start, min), "x", true);
+    const x1 = u.valToPos(Math.min(r.end, max), "x", true);
+    ctx.fillStyle = r.colour + "dd";
+    ctx.fillRect(x0, y, Math.max(x1 - x0, dpr), h);
+    const label = [r.text, r.short].find((t) => ctx.measureText(t).width + 8 * dpr <= x1 - x0);
+    if (label) {
+      ctx.fillStyle = "#fff";
+      ctx.fillText(label, x0 + 4 * dpr, y + h / 2);
+    }
+  }
+  ctx.restore();
+}
+
 function opts(series, yLabel, extra) {
   return Object.assign({
-    width: width(), height: 220,
+    width: width(), height: 220 + STRIP_H + 4,
+    padding: [STRIP_H + 6, null, null, null],
     cursor: { sync: { key: "mp" }, drag: { x: true, y: false } },
     scales: { x: { time: true } },
     axes: axes(yLabel),
@@ -195,6 +269,7 @@ function opts(series, yLabel, extra) {
     hooks: {
       setScale: [(u, key) => { if (key === "x") syncX(u); }],
       drawClear: [shadeEpisodes],
+      draw: [radioStrip],
       setCursor: [showTip],
       ready: [trackHover],
     },
@@ -210,6 +285,7 @@ function build() {
   for (const p of plots) p.destroy();
   plots = [];
   if (!data || !data.t.length) return;
+  buildRadioSegs();
   const t = data.t;
   const logy = $("logy").checked;
   const ydelay = logy ? { y: { distr: 3 } } : {};
@@ -303,7 +379,7 @@ function cellsPlot(t) {
   ], "dBm");
   o.height = 300;
   o.scales.y = { range: [-140, -50] };
-  o.hooks.draw = [(u) => {
+  o.hooks.draw = o.hooks.draw.concat([(u) => {
     const ctx = u.ctx;
     const dpr = devicePixelRatio || 1;
     const { min, max } = u.scales.x;
@@ -358,7 +434,7 @@ function cellsPlot(t) {
       }
     }
     ctx.restore();
-  }];
+  }]);
   return new uPlot(o, [t, data.lte_rsrp, data.nr_rsrp, t.map(() => null)], $("c_cells"));
 }
 
@@ -421,7 +497,7 @@ $("reset").addEventListener("click", () => {
 let resizeTimer;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => plots.forEach((p) => p.setSize({ width: width(), height: 220 })), 150);
+  resizeTimer = setTimeout(() => plots.forEach((p) => p.setSize({ width: width(), height: p.height })), 150);
 });
 
 load();
