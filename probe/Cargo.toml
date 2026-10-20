@@ -1,0 +1,13 @@
+[package]
+name = "mp-probe"
+version = "0.1.0"
+edition = "2021"
+description = "Shell-privileged on-phone collector: modem-link qdisc stats, UDP counters and radio-log events, served to the Logger over localhost."
+
+[[bin]]
+name = "mp-probe"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+serde_json = { workspace = true }

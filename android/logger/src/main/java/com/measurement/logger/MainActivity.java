@@ -94,6 +94,12 @@ public final class MainActivity extends AppCompatActivity {
         // Dev/automation: `adb shell am start -n .../.MainActivity -e server URL -e token TOK`
         // prefills the fields and auto-starts the service. The URL is also
         // remembered so it shows up in the dropdown next time.
+        // "-e screen_on false" turns off keeping the screen on during tests.
+        String screenOn = getIntent().getStringExtra(LoggerService.EXTRA_SCREEN_ON);
+        if (screenOn != null) {
+            getSharedPreferences(LoggerService.PREFS, MODE_PRIVATE).edit()
+                    .putBoolean(LoggerService.PREF_SCREEN_ON, !"false".equalsIgnoreCase(screenOn)).apply();
+        }
         String extraServer = getIntent().getStringExtra(LoggerService.EXTRA_SERVER);
         String extraToken = getIntent().getStringExtra(LoggerService.EXTRA_TOKEN);
         if (extraServer != null && !extraServer.isEmpty()) {

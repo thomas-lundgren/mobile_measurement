@@ -232,7 +232,7 @@ public final class RadioSampler {
                         if (valid(id.getBandwidth())) {
                             row.put("bandwidth_mhz", id.getBandwidth() / 1000);
                         }
-                        putLteExtras(row, ss); // fallback; SignalStrength's copy wins below
+                        putLteExtras(row, ss);
                     } else {
                         neighbors.put(neighbor(id.getPci(), ss.getRsrp()));
                     }
@@ -260,15 +260,19 @@ public final class RadioSampler {
                     }
                 }
             }
-            // LTE extras (RSRQ, RS-SNR, CQI, timing advance) from SignalStrength:
-            // the modem's current view. CellInfoLte's copy can lag (seen: CQI 8
-            // / TA 4 there vs 10 / 12 in SignalStrength at the same moment).
+            // LTE extras (RSRQ, RS-SNR, CQI, timing advance) come from the
+            // CellInfoLte above: requestCellInfoUpdate makes the modem measure
+            // now. SignalStrength only changes on modem indications, which
+            // Android switches off while the screen is off and the phone is
+            // not charging (power saving): on the road it froze for a whole
+            // ride while CellInfo kept changing. Fall back to it only for
+            // fields CellInfo leaves unavailable.
             if (haveLte && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 SignalStrength sig = tm.getSignalStrength();
                 if (sig != null) {
                     for (CellSignalStrengthLte ss : sig.getCellSignalStrengths(CellSignalStrengthLte.class)) {
                         if (valid(ss.getRsrp())) {
-                            putLteExtras(row, ss);
+                            putLteExtrasIfMissing(row, ss);
                             break;
                         }
                     }
@@ -282,6 +286,13 @@ public final class RadioSampler {
             RustCore.pushRadio(handle, row.toString());
         } catch (Exception ignored) {
         }
+    }
+
+    private static void putLteExtrasIfMissing(JSONObject row, CellSignalStrengthLte ss) throws Exception {
+        if (!row.has("lte_rsrq")) putIfValid(row, "lte_rsrq", ss.getRsrq());
+        if (!row.has("lte_rssnr")) putIfValid(row, "lte_rssnr", ss.getRssnr());
+        if (!row.has("lte_cqi")) putIfValid(row, "lte_cqi", ss.getCqi());
+        if (!row.has("lte_ta")) putIfValid(row, "lte_ta", ss.getTimingAdvance());
     }
 
     private static void putLteExtras(JSONObject row, CellSignalStrengthLte ss) throws Exception {

@@ -35,7 +35,7 @@ public final class LoggerService extends Service {
     /** Start-service action: run a reachability check now (the app's button). */
     public static final String ACTION_REACH_CHECK = "com.measurement.logger.REACH_CHECK";
     private static final String CHANNEL = "logger";
-    private static final String PREFS = "mp_logger";
+    static final String PREFS = "mp_logger";
 
     /** Coarse state surfaced to the UI. */
     public static volatile String STATE = "idle";
@@ -60,6 +60,8 @@ public final class LoggerService extends Service {
      *  the CPU would otherwise suspend, stalling flow threads and timers and
      *  distorting every measurement. */
     private PowerManager.WakeLock wakeLock;
+    static final String EXTRA_SCREEN_ON = "screen_on";
+    static final String PREF_SCREEN_ON = "screen_on_during_tests";
     private int loggingConfigVersion = 1;
     private JSONObject loggingConfig; // latest server-pushed config (SET_LOGGING_CONFIG)
     private ReachabilityChecker reach;
@@ -128,6 +130,23 @@ public final class LoggerService extends Service {
             uploader.start();
         }
         return START_STICKY;
+    }
+
+    /** Keep the screen on (dimmed) during a test unless turned off: with the
+     *  screen off and not charging, Android stops the modem's signal-strength,
+     *  physical-channel-config and link-capacity indications to save power,
+     *  so CQI/SNR, carrier aggregation and LCE freeze for the whole test. */
+    @SuppressWarnings("deprecation")
+    private PowerManager.WakeLock screenOnDuringTest() {
+        if (!getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(PREF_SCREEN_ON, true)) {
+            return null;
+        }
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        PowerManager.WakeLock wl = pm.newWakeLock(
+                PowerManager.SCREEN_DIM_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, "mp:test-screen");
+        wl.setReferenceCounted(false);
+        wl.acquire(6 * 3600_000L); // safety timeout
+        return wl;
     }
 
     private void acquireWakeLock() {
@@ -378,6 +397,7 @@ public final class LoggerService extends Service {
 
         setState("RUNNING_TEST " + testId);
         int durationSec = payload.getJSONObject("test_plan").optInt("duration_sec", 30);
+        PowerManager.WakeLock screen = screenOnDuringTest();
         try {
             for (int i = 0; i < durationSec && running; i++) {
                 Thread.sleep(1000);
@@ -385,6 +405,9 @@ public final class LoggerService extends Service {
         } finally {
             // Always seal and queue what was recorded — even if the test is cut
             // short — so no measured data is ever stranded on the device.
+            if (screen != null && screen.isHeld()) {
+                screen.release();
+            }
             gps.stop();
             radio.stop();
             clock.stop();

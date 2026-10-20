@@ -6,6 +6,7 @@ members = [
     "server/data-generator",
     "server/test-control",
     "spikes/stage-a-harness",
+    "probe",
 ]
 resolver = "2"
 

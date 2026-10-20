@@ -1619,6 +1619,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mp-probe"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde_json",
+]
+
+[[package]]
 name = "mp-server-main"
 version = "0.1.0"
 dependencies = [

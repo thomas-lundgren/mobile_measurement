@@ -35,7 +35,7 @@ from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 13
+SERIES_VERSION = 14
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -46,11 +46,24 @@ COLUMNS = [
     "lte_rsrp", "nr_rsrp", "nr_rsrq", "mode",
     "lte_pci", "earfcn", "nr_pci", "nrarfcn",
     "transport", "wifi_freq_mhz", "wifi_channel", "wifi_bw_mhz", "wifi_standard", "wifi_rssi",
+    "lte_rsrq", "lte_rssnr", "lte_cqi", "lte_ta", "ca_mhz", "ca_carriers",
 ]  # fmt: skip
 RADIO_COLUMNS = [
     "lte_rsrp", "nr_rsrp", "nr_rsrq", "mode", "lte_pci", "earfcn", "nr_pci", "nrarfcn",
     "transport", "wifi_freq_mhz", "wifi_channel", "wifi_bw_mhz", "wifi_standard", "wifi_rssi",
+    "lte_rsrq", "lte_rssnr", "lte_cqi", "lte_ta", "ca_mhz", "ca_carriers",
 ]  # fmt: skip
+
+
+def _ca(bws) -> tuple[float | None, int | None]:
+    """Total aggregated bandwidth (MHz) and carrier count from "10000,100000"."""
+    if not isinstance(bws, str) or not bws:
+        return None, None
+    try:
+        vals = [int(v) for v in bws.split(",") if v.strip()]
+    except ValueError:
+        return None, None
+    return (sum(vals) / 1000, len(vals)) if vals else (None, None)
 
 
 def _bins(t_ns: pd.Series) -> pd.Series:
@@ -203,6 +216,8 @@ def test_series(
             for c in cells:
                 if c is not None and c.get("rsrp") is not None and c.get("pci") is not None:
                     neighbors.append([round(t_ns / 1e9, 1), int(c["pci"]), int(c["rsrp"])])
+        ca = r["ca_bandwidths_khz"].map(_ca) if "ca_bandwidths_khz" in r else pd.Series([(None, None)] * len(r), index=r.index)
+        r = r.assign(ca_mhz=[c[0] for c in ca], ca_carriers=[c[1] for c in ca])
         last = r.assign(bin=_bins(r["t"])).groupby("bin").last()
         parts.append(
             pd.DataFrame(
@@ -221,6 +236,12 @@ def test_series(
                     "wifi_bw_mhz": last["wifi_bw_mhz"],
                     "wifi_standard": last["wifi_standard"],
                     "wifi_rssi": last["wifi_rssi"],
+                    "lte_rsrq": last["lte_rsrq"],
+                    "lte_rssnr": last["lte_rssnr"],
+                    "lte_cqi": last["lte_cqi"],
+                    "lte_ta": last["lte_ta"],
+                    "ca_mhz": last["ca_mhz"],
+                    "ca_carriers": last["ca_carriers"],
                 }
             )
         )
@@ -266,7 +287,8 @@ def test_series(
     for col in COLUMNS:
         vals = df[col].astype(object).where(df[col].notna(), None).tolist()
         out[col] = [round(v, 2) if isinstance(v, float) else v for v in vals]
-    for col in ("lte_pci", "earfcn", "nr_pci", "nrarfcn", "wifi_freq_mhz", "wifi_channel", "wifi_bw_mhz", "wifi_rssi"):
+    for col in ("lte_pci", "earfcn", "nr_pci", "nrarfcn", "wifi_freq_mhz", "wifi_channel", "wifi_bw_mhz", "wifi_rssi",
+                "lte_rsrq", "lte_rssnr", "lte_cqi", "lte_ta", "ca_carriers"):
         out[col] = [None if v is None else int(v) for v in out[col]]
     return out
 

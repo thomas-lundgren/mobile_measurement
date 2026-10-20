@@ -75,6 +75,7 @@
   <div class="chart"><h2>One-way delay (UDP, clock-corrected), ms — RTT dashed for comparison; all delays at the packet's send time</h2><div id="c_owd"></div></div>
   <div class="chart"><h2>TCP throughput, Mbit/s</h2><div id="c_tput"></div></div>
   <div class="chart"><h2>Signal (RSRP), dBm, and network mode</h2><div id="c_radio"></div></div>
+  <div class="chart"><h2>Link quality: LTE CQI (0–15), RS-SNR dB, timing advance (distance to the cell), aggregated bandwidth</h2><div id="c_quality"></div></div>
   <div class="chart"><h2>Cell measurements: serving cells (PCI · band · downlink frequency) and neighbour cells, RSRP dBm</h2><div id="c_cells"></div></div>
 </main>
 
@@ -352,6 +353,27 @@ function build() {
     splits: () => [1, 2, 3, 4], values: (u, vals) => vals.map((v) => MODE_NAME[v] || ""),
   }]);
   plots.push(new uPlot(radioOpts, [t, data.lte_rsrp, data.nr_rsrp, modeLevel], $("c_radio")));
+
+  // Link quality: CQI and RS-SNR share the left axis; aggregated bandwidth
+  // (sum over carriers) on the right; timing advance as distance in the legend.
+  if (data.lte_cqi) {
+    const ta_km = (data.lte_ta || []).map((v) => v == null ? null : v * 0.0781);
+    const q = opts([
+      line("CQI", COL.lte, { scale: "q", width: 2, paths: uPlot.paths.stepped({ align: 1 }), value: (u, v) => v == null ? "–" : String(v) }),
+      line("RS-SNR dB", COL.med2, { scale: "q" }),
+      line("RSRQ dB", COL.max2, { scale: "q", dash: [3, 3] }),
+      line("aggregated MHz", COL.nr, { scale: "mhz", width: 2, paths: uPlot.paths.stepped({ align: 1 }),
+        value: (u, v, si, i) => v == null ? "–" : `${v} MHz (${data.ca_carriers[i] ?? "?"} carriers)` }),
+      line("timing advance", COL.mode, { scale: "km", dash: [6, 3], value: (u, v) => v == null ? "–" : `${v.toFixed(2)} km` }),
+    ], "CQI / dB");
+    q.scales = { x: { time: true }, q: { range: [-20, 30] }, mhz: { range: (u, lo, hi) => [0, Math.max(hi || 0, 20) * 1.1] },
+      km: { range: (u, lo, hi) => [0, Math.max(hi || 0, 1) * 1.2] } };
+    q.axes = axes("CQI / dB", { scale: "q" }).concat([
+      { scale: "mhz", side: 1, stroke: COL.nr, grid: { show: false }, size: 56, values: (u, v) => v.map((x) => x + " MHz") },
+      { scale: "km", show: false },
+    ]);
+    plots.push(new uPlot(q, [t, data.lte_cqi, data.lte_rssnr, data.lte_rsrq, data.ca_mhz, ta_km], $("c_quality")));
+  }
 
   plots.push(cellsPlot(t));
 
