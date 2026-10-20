@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pandas as pd
 from conftest import make_packets, synthetic_test
 
 from fieldtest_analysis import app
@@ -110,3 +111,17 @@ def test_v2_llm_stream_and_tool_call():
     assert acts["mcp_call"]["think_ms"]["p50"] == 399.0
     p = acts["photo_upload"]
     assert p["complete_share"] == 1.0 and p["done_ms"]["p50"] == 150.0 and p["gap_ms"] is None
+
+
+def test_sends_after_the_receiver_stopped_are_not_loss():
+    """The test ends on the receiver first; the sender's last seconds never
+    had a chance to arrive."""
+    td = _test()
+    pk = td.packets
+    tail = pk[(pk["node"] == "mobile") & (pk["flow_id"] == 1) & (pk["direction"] == "SENT")].tail(500).copy()
+    tail["sequence_number"] += 3000
+    tail["utc_ns"] += 5000 * MS
+    tail["mono_ns"] += 5000 * MS
+    td.packets = pd.concat([pk, tail], ignore_index=True)
+    [i] = app.impact(td, app.objects(td))
+    assert i["idle"]["loss"] == 0.0

@@ -748,6 +748,9 @@ fn transfer(ctx: &Ctx, conn: &mut TcpStream, f: Fetch, object_id: u64) -> io::Re
     let mut buf = vec![0u8; CHUNK];
     let mut left = f.up;
     while left > 0 {
+        if ctx.stop.load(Ordering::Acquire) {
+            return Err(io::ErrorKind::Interrupted.into());
+        }
         let n = left.min(CHUNK as u64) as usize;
         write_all_until(conn, &buf[..n], ctx.stop, deadline)?;
         push(Direction::Sent, n);
@@ -770,6 +773,11 @@ fn transfer(ctx: &Ctx, conn: &mut TcpStream, f: Fetch, object_id: u64) -> io::Re
                 push(Direction::Received, n);
                 ctx.tally.received(n as u64);
                 left -= n as u64;
+                // a stream that keeps delivering never times out: check here
+                // too, or the test's end waits for the reply to finish
+                if ctx.stop.load(Ordering::Acquire) {
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
             }
             Err(e) if is_timeout(&e) || e.kind() == io::ErrorKind::Interrupted => {
                 if give_up(ctx.stop, deadline) {
