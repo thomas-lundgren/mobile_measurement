@@ -154,9 +154,9 @@ def impact(td, obj: pd.DataFrame) -> list[dict]:
         # the server's send clock is placed on the mobile clock via the delay minimum
         if sender_node == "server":
             s_t = s_t + np.nanmin(owd)
-        # packets sent after the receiver stopped (the test ending on one
-        # side first) were never going to arrive: not loss
-        keep = s_t <= np.nanmax(place) + 1e9 if direction == "downlink" else s_t <= np.nanmax(send.to_numpy()) + 1e9
+        # packets sent after the last one that arrived (the test ending on the
+        # receiver first) never had a chance: not loss
+        keep = s_t <= np.nanmax(send.to_numpy() if direction == "uplink" else send.to_numpy() + np.nanmin(owd))
         s_t, s_seq = s_t[keep], s_seq[keep]
         s_active = _active_mask(s_t, obj)
         lost = ~np.isin(s_seq, list(got))
