@@ -74,5 +74,13 @@ Core size: **22 bytes**. On-wire size: **24 bytes** (2-byte header + core).
 | 4 | `mail_attachment` | 9 | `llm_call` |
 | | | 10 | `mcp_call` |
 | | | 11 | `web_fetch` |
+| | | 12 | `cloud_tool` |
+| | | 13 | `llm_resume` |
+
+`cloud_tool` and `llm_resume` (agent with tools in the cloud): the provider's
+reply to one LLM call, continued after a tool ran on its side — the tool
+result text, then the next turn's tokens. Each is its own exchange with
+`up_bytes = 0`; its 44-byte request is a protocol artifact (a real provider
+keeps streaming on the open response).
 
 Golden vectors: `contracts/testvectors/packets/app_request_v1.json`.

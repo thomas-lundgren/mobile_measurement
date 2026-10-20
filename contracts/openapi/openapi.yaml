@@ -512,6 +512,13 @@ components:
       - mixed
       - agent
       - script
+    AppToolPlacement:
+      type: string
+      description: Where an AI agent's tools run (app_traffic profile "agent").
+      enum:
+      - device
+      - cloud
+      - hybrid
     Battery:
       type: object
       required:
@@ -1007,6 +1014,11 @@ components:
             type: integer
             format: int32
             minimum: 0
+          placement:
+            oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/AppToolPlacement'
+              description: 'profile "agent" only: where the tools run (default device).'
           profile:
             $ref: '#/components/schemas/AppProfile'
             description: 'User model: web | mail | video | social | mixed | script.'

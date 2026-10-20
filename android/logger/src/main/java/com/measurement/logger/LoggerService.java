@@ -500,7 +500,7 @@ public final class LoggerService extends Service {
                 uf.put("rate_kbps", f.getInt("rate_kbps"));
             }
             // app_traffic: user model, passed through as the core reads it
-            for (String k : new String[] {"profile", "workers", "seed", "scale", "actions"}) {
+            for (String k : new String[] {"profile", "workers", "seed", "scale", "actions", "placement"}) {
                 if (f.has(k)) {
                     uf.put(k, f.get(k));
                 }

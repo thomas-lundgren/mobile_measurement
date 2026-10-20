@@ -33,7 +33,7 @@ use crate::packet::AppExchange;
 use crate::timestamp::Timestamp;
 
 /// Activity codes on the wire (the index) and the names logged for them.
-pub const ACTIVITIES: [&str; 12] = [
+pub const ACTIVITIES: [&str; 14] = [
     "other",
     "web_page",
     "web_object",
@@ -46,6 +46,8 @@ pub const ACTIVITIES: [&str; 12] = [
     "llm_call",
     "mcp_call",
     "web_fetch",
+    "cloud_tool",
+    "llm_resume",
 ];
 const WEB_PAGE: u8 = 1;
 const WEB_OBJECT: u8 = 2;
@@ -58,8 +60,41 @@ const PHOTO_UPLOAD: u8 = 8;
 const LLM_CALL: u8 = 9;
 const MCP_CALL: u8 = 10;
 const WEB_FETCH: u8 = 11;
+const CLOUD_TOOL: u8 = 12;
+const LLM_RESUME: u8 = 13;
 
 pub const PROFILES: [&str; 7] = ["web", "mail", "video", "social", "mixed", "agent", "script"];
+
+/// Where an AI agent's tools run (profile "agent").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    /// On the phone: every tool call is phone traffic.
+    Device,
+    /// At the LLM provider, inside the call (server-side tools): no tool
+    /// connections from the phone; the reply pauses while a tool runs, then
+    /// carries the result text down.
+    Cloud,
+    /// MCP calls on the phone, web fetches in the cloud.
+    Hybrid,
+}
+
+impl Placement {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "cloud" => Self::Cloud,
+            "hybrid" => Self::Hybrid,
+            _ => Self::Device,
+        }
+    }
+
+    fn on_device(self, tool: &Fetch) -> bool {
+        match self {
+            Self::Device => true,
+            Self::Cloud => false,
+            Self::Hybrid => tool.activity == MCP_CALL,
+        }
+    }
+}
 
 /// Objects in flight at once per agent (a browser's per-host connection cap).
 pub const MAX_PARALLEL: usize = 6;
@@ -238,6 +273,10 @@ pub struct Agent {
     /// in the current task.
     context: u64,
     turns_left: u32,
+    placement: Placement,
+    /// A cloud tool round left the provider's reply open: the next turn
+    /// resumes it instead of sending a new request.
+    in_call: bool,
 }
 
 impl Agent {
@@ -265,7 +304,14 @@ impl Agent {
             video_bytes: 0,
             context: 0,
             turns_left: 0,
+            placement: Placement::Device,
+            in_call: false,
         }
+    }
+
+    pub fn with_placement(mut self, placement: Placement) -> Self {
+        self.placement = placement;
+        self
     }
 
     fn bytes(&mut self, median: f64, sigma: f64, lo: f64, hi: f64) -> u64 {
@@ -336,9 +382,13 @@ impl Agent {
     /// An AI agent at work: a task is a loop of LLM calls. Each call sends the
     /// whole context up (prompt caching saves compute, not bytes), waits for
     /// the first token, then streams the reply. Unless it is the task's last
-    /// call, the reply asks for tools — MCP calls and web fetches, run in
-    /// parallel — whose results join the context for the next call. Between
-    /// tasks the user reads the answer and types the next request.
+    /// turn, the reply asks for tools — MCP calls and web fetches, run in
+    /// parallel — whose results join the context for the next turn. Tools on
+    /// the phone end the call: their results go up with the next one. Tools in
+    /// the cloud run inside it: the reply pauses for the slowest, carries the
+    /// results' text down and resumes with the next turn (`llm_resume`), no
+    /// new request. Between tasks the user reads the answer and types the
+    /// next request.
     fn agent(&mut self, now: Duration) -> Step {
         if self.turns_left == 0 {
             if self.context > 0 {
@@ -348,20 +398,34 @@ impl Agent {
             self.turns_left = self.rng.lognormal(6.0, 0.6).clamp(1.0, 30.0) as u32;
             // system prompt, tool definitions and the user's request
             self.context = self.rng.lognormal(12e3, 0.4).clamp(4e3, 60e3) as u64;
+            self.in_call = false;
         }
         self.turns_left -= 1;
         let tokens = self.rng.lognormal(250.0, 0.9).clamp(20.0, 3000.0);
         let tokens_per_s = self.rng.uniform(40.0, 90.0);
-        let llm = Fetch {
-            activity: LLM_CALL,
-            up: ((self.context as f64 * self.scale) as u64).max(1),
+        let stream = Fetch {
             down: (((tokens * SSE_BYTES_PER_TOKEN + 1200.0) * self.scale) as u64).max(1),
-            // time to first token
-            delay_ms: (self.rng.lognormal(0.9, 0.5).clamp(0.25, 10.0) * 1000.0) as u32,
             rate_bps: (tokens_per_s * SSE_BYTES_PER_TOKEN * 8.0) as u32,
             chunk: SSE_EVENT,
+            ..Fetch::download(LLM_CALL, 0)
+        };
+        let llm = if self.in_call {
+            // the provider processes the tool results, then generates on
+            Fetch {
+                activity: LLM_RESUME,
+                delay_ms: (self.rng.lognormal(0.5, 0.5).clamp(0.1, 5.0) * 1000.0) as u32,
+                ..stream
+            }
+        } else {
+            Fetch {
+                up: ((self.context as f64 * self.scale) as u64).max(1),
+                // time to first token
+                delay_ms: (self.rng.lognormal(0.9, 0.5).clamp(0.25, 10.0) * 1000.0) as u32,
+                ..stream
+            }
         };
         self.context += tokens as u64 * CONTEXT_BYTES_PER_TOKEN;
+        self.in_call = false;
         if self.turns_left > 0 {
             let r = self.rng.unit();
             let n = if r < 0.6 { 1 } else if r < 0.85 { 2 } else { 3 + (self.rng.next() % 2) as usize };
@@ -372,7 +436,20 @@ impl Agent {
             if self.context > COMPACT_AT {
                 self.context = COMPACT_TO;
             }
-            self.queue.push_back(Plan::Burst(tools, n));
+            let (here, cloud): (Vec<Fetch>, Vec<Fetch>) = tools.into_iter().partition(|t| self.placement.on_device(t));
+            if !cloud.is_empty() {
+                let result = Fetch {
+                    delay_ms: cloud.iter().map(|t| t.delay_ms).max().unwrap_or(0),
+                    ..Fetch::download(CLOUD_TOOL, cloud.iter().map(|t| t.down.min(TOOL_RESULT_MAX) + 300).sum())
+                };
+                self.queue.push_back(Plan::Burst(vec![result], 1));
+            }
+            if here.is_empty() {
+                self.in_call = true;
+            } else {
+                let n = here.len();
+                self.queue.push_back(Plan::Burst(here, n));
+            }
         }
         Step::Burst { fetches: vec![llm], parallel: 1 }
     }
@@ -474,6 +551,8 @@ pub struct AppTraffic {
     pub seed: u64,
     pub scale: f64,
     pub actions: Vec<AppAction>,
+    /// profile "agent": where the tools run.
+    pub placement: Placement,
 }
 
 struct Ctx<'a> {
@@ -500,7 +579,7 @@ pub fn run(cfg: &AppTraffic, sink: LogSink, tally: &dyn Tally, stop: &AtomicBool
 
 fn worker(ctx: &Ctx, w: u32, start: Instant) {
     let seed = ctx.cfg.seed.wrapping_add((w as u64).wrapping_mul(0x9E37_79B9));
-    let mut agent = Agent::new(&ctx.cfg.profile, seed, ctx.cfg.scale, &ctx.cfg.actions);
+    let mut agent = Agent::new(&ctx.cfg.profile, seed, ctx.cfg.scale, &ctx.cfg.actions).with_placement(ctx.cfg.placement);
     let mut pool: Vec<TcpStream> = Vec::new();
     let mut episode = 0u64;
     while !ctx.stop.load(Ordering::Acquire) {
@@ -778,6 +857,43 @@ mod tests {
         let llm = Fetch { up: 500, delay_ms: 800, rate_bps: 24_000, ..Fetch::download(LLM_CALL, 3000) };
         assert_eq!(a.next_step(Duration::from_secs(6)), Step::Burst { fetches: vec![llm], parallel: 1 });
         assert_eq!(a.next_step(Duration::from_secs(7)), Step::Done);
+    }
+
+    /// (llm_call, llm_resume, mcp, web_fetch, cloud_tool) objects and bytes up
+    /// over half an hour of an agent with tools placed `p`.
+    fn agent_mix(p: Placement) -> ([usize; 5], u64, u64) {
+        let mut a = Agent::new("agent", 9, 1.0, &[]).with_placement(p);
+        let (mut now, mut n, mut up, mut down) = (Duration::ZERO, [0usize; 5], 0, 0);
+        while now < Duration::from_secs(1800) {
+            match a.next_step(now) {
+                Step::Burst { fetches, .. } => {
+                    for f in &fetches {
+                        let i = [LLM_CALL, LLM_RESUME, MCP_CALL, WEB_FETCH, CLOUD_TOOL].iter().position(|c| *c == f.activity).unwrap();
+                        n[i] += 1;
+                        up += f.up;
+                        down += f.down;
+                        now += f.server_time();
+                    }
+                }
+                Step::Until(t) => now = t,
+                Step::Done => unreachable!(),
+            }
+        }
+        (n, up, down)
+    }
+
+    #[test]
+    fn tool_placement_moves_tool_traffic_off_the_phone() {
+        let (dev, dev_up, dev_down) = agent_mix(Placement::Device);
+        assert!(dev[2] > 0 && dev[3] > 0 && dev[1] == 0 && dev[4] == 0, "device {dev:?}");
+        let (cloud, cloud_up, cloud_down) = agent_mix(Placement::Cloud);
+        assert!(cloud[2] == 0 && cloud[3] == 0 && cloud[1] > 0 && cloud[4] > 0, "cloud {cloud:?}");
+        // one request per task: no context resent within it
+        assert!(cloud[0] < cloud[1], "cloud {cloud:?}");
+        assert!(cloud_up < dev_up / 3, "cloud up {cloud_up} vs device {dev_up}");
+        assert!(cloud_down < dev_down / 2, "cloud down {cloud_down} vs device {dev_down}");
+        let (hyb, _, _) = agent_mix(Placement::Hybrid);
+        assert!(hyb[2] > 0 && hyb[3] == 0 && hyb[4] > 0, "hybrid {hyb:?}");
     }
 
     #[test]

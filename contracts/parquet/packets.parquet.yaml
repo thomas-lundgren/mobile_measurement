@@ -49,6 +49,6 @@ columns:
   # one object shares its object_id as sequence_number: the request (24 B), then
   # the data, then for uploads the server's 24-B acknowledgement.
   # See contracts/packets/app_request.md.
-  - { name: app_activity,     type: utf8,   nullable: true, doc: "What the object is for: web_page, web_object, mail_sync, mail_attachment, mail_send, video_chunk, feed_image, photo_upload or other." }
+  - { name: app_activity,     type: utf8,   nullable: true, doc: "What the object is for: web_page, web_object, mail_sync, mail_attachment, mail_send, video_chunk, feed_image, photo_upload, llm_call, mcp_call, web_fetch, cloud_tool, llm_resume or other (contracts/packets/app_request.md)." }
   - { name: app_object_bytes, type: uint64, nullable: true, doc: "Size of the object this row belongs to: the response (0 = an upload that only gets an acknowledgement). v1 rows (app_up_bytes null): the download or the upload." }
   - { name: app_up_bytes,     type: uint64, nullable: true, doc: "Bytes the UE sends up for this object (request body, LLM context, upload). Set from AppRequest v2 on; null on rows of v1 requests." }

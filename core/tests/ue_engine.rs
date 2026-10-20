@@ -84,6 +84,7 @@ fn probe_against_echo_peer() {
             seed: None,
             scale: None,
             actions: None,
+            placement: None,
         },
     ))
     .unwrap();
@@ -196,6 +197,7 @@ fn probe_rtt_not_inflated_after_late_echo() {
             seed: None,
             scale: None,
             actions: None,
+            placement: None,
         },
     ))
     .unwrap();
@@ -258,6 +260,7 @@ fn realtime_to_server_send() {
             seed: None,
             scale: None,
             actions: None,
+            placement: None,
         },
     ))
     .unwrap();
@@ -315,6 +318,7 @@ fn realtime_from_server_recv() {
             seed: None,
             scale: None,
             actions: None,
+            placement: None,
         },
     ))
     .unwrap();
@@ -370,6 +374,7 @@ fn bulk_to_server_upload() {
             seed: None,
             scale: None,
             actions: None,
+            placement: None,
         },
     ))
     .unwrap();
@@ -418,6 +423,7 @@ fn bulk_from_server_download() {
             seed: None,
             scale: None,
             actions: None,
+            placement: None,
         },
     ))
     .unwrap();

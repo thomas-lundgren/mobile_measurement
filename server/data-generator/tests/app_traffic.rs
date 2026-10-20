@@ -72,6 +72,7 @@ async fn scripted_user_downloads_and_uploads_objects() {
             act(300, "up", 400_000, 1, 1, "photo_upload"),
             llm,
         ],
+        placement: app_traffic::Placement::Device,
     };
     let (sink, mut rx, _) = packet_channel(1 << 16);
     let stop = AtomicBool::new(false);

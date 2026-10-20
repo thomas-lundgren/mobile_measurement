@@ -88,6 +88,9 @@ pub enum Flow {
         /// profile "script" only: the timeline to run.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         actions: Option<Vec<AppAction>>,
+        /// profile "agent" only: where the tools run (default device).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        placement: Option<AppToolPlacement>,
     },
 }
 
@@ -104,6 +107,20 @@ pub enum AppProfile {
     /// (MCP, web fetch) in task loops.
     Agent,
     Script,
+}
+
+/// Where an AI agent's tools run (app_traffic profile "agent").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AppToolPlacement {
+    /// On the phone: tool calls are phone traffic; each LLM call after one
+    /// sends the results up with the context.
+    Device,
+    /// At the LLM provider, inside the call: the reply pauses while the tool
+    /// runs and carries the result text down; no tool traffic of its own.
+    Cloud,
+    /// MCP calls on the phone, web fetches in the cloud.
+    Hybrid,
 }
 
 /// One step of a scripted app_traffic timeline.

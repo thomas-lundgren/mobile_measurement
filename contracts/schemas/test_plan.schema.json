@@ -124,6 +124,10 @@
         "workers": { "type": "integer", "minimum": 1, "maximum": 16, "description": "Concurrent simulated users, each with its own connections. Default 1; a script runs on one." },
         "seed":    { "type": "integer", "minimum": 0, "description": "Seed of the users' choices (default 1): the same seed asks for the same objects in the same order." },
         "scale":   { "type": "number", "exclusiveMinimum": 0, "description": "Multiplies every object size (default 1.0); below 1 saves data, timing behaviour stays." },
+        "placement": {
+          "enum": ["device", "cloud", "hybrid"],
+          "description": "profile agent only: where the tools run (default device). device: tool calls are phone traffic, and the next LLM call sends their results up with the context. cloud: the LLM provider runs them inside the call (server-side tools); the reply stream pauses for the slowest tool, carries the results' text down (cloud_tool) and resumes with the next turn (llm_resume) without a new request, so the context goes up once per call chain. hybrid: MCP calls on the phone, web fetches in the cloud. Each resume costs the phone a 44-byte request a real provider would not need (a protocol artifact, outside app_up_bytes)."
+        },
         "actions": {
           "type": "array",
           "description": "profile script only: the timeline, e.g. written by an AI agent playing a user.",

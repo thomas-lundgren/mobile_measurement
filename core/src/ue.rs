@@ -94,6 +94,8 @@ pub struct UeFlow {
     pub scale: Option<f64>,
     #[serde(default)]
     pub actions: Option<Vec<crate::app_traffic::AppAction>>,
+    #[serde(default)]
+    pub placement: Option<String>,
 }
 
 #[derive(Default)]
@@ -257,6 +259,7 @@ fn spawn_flow(
                         seed: flow.seed.unwrap_or(1),
                         scale: flow.scale.unwrap_or(1.0),
                         actions: flow.actions.clone().unwrap_or_default(),
+                        placement: crate::app_traffic::Placement::parse(flow.placement.as_deref().unwrap_or("device")),
                     };
                     Ok(thread::spawn(move || {
                         crate::app_traffic::run(&app, sink, counters.as_ref(), &stop)

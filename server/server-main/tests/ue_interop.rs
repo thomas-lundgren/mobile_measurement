@@ -108,6 +108,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 seed: None,
                 scale: None,
                 actions: None,
+                placement: None,
             },
             Flow::RealtimeUdp {
                 flow_id,
@@ -131,6 +132,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 seed: None,
                 scale: None,
                 actions: None,
+                placement: None,
             },
             Flow::BulkTcp {
                 flow_id,
@@ -153,6 +155,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 seed: None,
                 scale: None,
                 actions: None,
+                placement: None,
             },
             Flow::GatewayPing { flow_id, .. } => UeFlow {
                 flow_id: *flow_id,
@@ -170,8 +173,9 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 seed: None,
                 scale: None,
                 actions: None,
+                placement: None,
             },
-            Flow::AppTraffic { flow_id, profile, workers, seed, scale, actions } => UeFlow {
+            Flow::AppTraffic { flow_id, profile, workers, seed, scale, actions, placement } => UeFlow {
                 flow_id: *flow_id,
                 flow_type: "app_traffic".into(),
                 direction: None,
@@ -188,6 +192,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale: *scale,
                 // same JSON on both sides: what the Logger forwards verbatim
                 actions: actions.as_ref().map(|a| serde_json::from_value(serde_json::to_value(a).unwrap()).unwrap()),
+                placement: placement.map(|p| serde_json::to_value(p).unwrap().as_str().unwrap().to_string()),
             },
             Flow::DscpProbe { flow_id, rate_pps, dscp_values, .. } => UeFlow {
                 flow_id: *flow_id,
@@ -205,6 +210,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 seed: None,
                 scale: None,
                 actions: None,
+                placement: None,
             },
         })
         .collect();

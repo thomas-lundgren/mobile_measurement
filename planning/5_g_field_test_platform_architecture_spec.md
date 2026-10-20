@@ -824,7 +824,10 @@ and how the apps themselves fare (page load time, video segment time).
 - Profiles: `web`, `mail`, `video`, `social`, `mixed` (switches among web,
   social and video every 2–5 min with mail in the background), `agent` (an AI
   agent at work: LLM calls that send the growing context up and stream the
-  reply, between them parallel MCP calls and web fetches) and `script` (an
+  reply, between them parallel MCP calls and web fetches; `placement` puts the
+  tools on the phone, in the provider's cloud inside the call — the reply
+  pauses and carries the result text, no tool traffic — or MCP on the phone
+  and web fetches in the cloud) and `script` (an
   explicit timeline of actions, so an AI agent playing a user can write the
   plan). `workers` runs several users at once, `seed` makes their choices
   reproducible, `scale` shrinks every object to save data.
