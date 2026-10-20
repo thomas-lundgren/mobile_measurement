@@ -349,6 +349,26 @@ pub fn spawn_dscp_probe_echo(
     })
 }
 
+/// How often a FromServer realtime sender looks for keepalives from a new
+/// UE address.
+const PEER_CHECK: Duration = Duration::from_millis(50);
+
+/// Source of the newest datagram waiting on `socket`, draining the queue
+/// without blocking. `stay_nonblocking` keeps the socket non-blocking after.
+fn latest_sender(socket: &UdpSocket, buf: &mut [u8], stay_nonblocking: bool) -> Option<SocketAddr> {
+    if socket.set_nonblocking(true).is_err() {
+        return None;
+    }
+    let mut last = None;
+    while let Ok((_, addr)) = socket.recv_from(buf) {
+        last = Some(addr);
+    }
+    if !stay_nonblocking {
+        let _ = socket.set_nonblocking(false);
+    }
+    last
+}
+
 /// Realtime UDP flow. FromServer: learn the peer from the UE's keepalive, then
 /// send a fixed-rate padded stream (log SENT). ToServer: receive the UE's
 /// stream, logging RECEIVED with the embedded sender timestamps + measured
@@ -399,10 +419,22 @@ pub fn spawn_realtime_udp(
                         let _ = socket.set_nonblocking(true);
                     }
                 }
+                let nonblocking = sndbuf_bytes.is_some();
+                let mut peer = peer;
+                let mut last_peer_check = Instant::now();
                 let _ = udp_timing::raise_thread_priority();
                 let mut pacer = Pacer::new(Duration::from_nanos(period_ns));
                 let mut seq = 0u64;
                 while !stop.load(Ordering::Acquire) {
+                    // Follow the UE to a new address: after a Wi-Fi <-> mobile
+                    // switch it reopens its socket and keepalives arrive from
+                    // there. Logged as remote_port on the SENT rows.
+                    if last_peer_check.elapsed() >= PEER_CHECK {
+                        if let Some(addr) = latest_sender(&socket, &mut buf, nonblocking) {
+                            peer = addr;
+                        }
+                        last_peer_check = Instant::now();
+                    }
                     let ts = Timestamp::now();
                     let pkt = RealtimePacket {
                         flow_id,
@@ -429,7 +461,7 @@ pub fn spawn_realtime_udp(
                         payload_size: bytes.len() as u32,
                         protocol: Protocol::Udp,
                         local_port: None,
-                        remote_port: None,
+                        remote_port: Some(peer.port() as u32),
                         sender: None,
                         expected_interval_ns: Some(period_ns),
                         actual_interval_ns: None,

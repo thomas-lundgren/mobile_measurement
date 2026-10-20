@@ -22,6 +22,9 @@ pub struct AppState {
     /// Hold mobile uploads that arrive over the mobile network (see
     /// `uploads::upload_held`); None uploads over any network.
     pub upload_hold: Option<UploadHold>,
+    /// Address each device last reported its status from (see
+    /// `device::post_status`), to log when it changes network.
+    pub status_peers: Arc<std::sync::Mutex<std::collections::HashMap<String, std::net::IpAddr>>>,
 }
 
 /// Mobile uploads are accepted only from the local network (home Wi-Fi), or
@@ -46,6 +49,7 @@ impl AppState {
             test_control_url: Arc::new(None),
             time_udp_port: 8081,
             upload_hold: None,
+            status_peers: Arc::default(),
         }
     }
 

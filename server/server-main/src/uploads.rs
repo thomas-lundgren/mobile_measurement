@@ -81,7 +81,7 @@ impl<S: Send + Sync> FromRequestParts<S> for Peer {
 /// Local network: private, loopback or link-local ranges, or the server's own
 /// public address (the router's hairpin NAT when the phone is on home Wi-Fi).
 /// Carrier-grade NAT (100.64/10) counts as the mobile network.
-fn is_local(ip: IpAddr, server_host: &str) -> bool {
+pub(crate) fn is_local(ip: IpAddr, server_host: &str) -> bool {
     if server_host.parse::<IpAddr>().is_ok_and(|h| h == ip) {
         return true;
     }

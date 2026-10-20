@@ -196,11 +196,21 @@ pub async fn post_reachability(
 )]
 pub async fn post_status(
     State(st): State<AppState>,
+    peer: crate::uploads::Peer,
     headers: HeaderMap,
     Path(device_id): Path<String>,
     Json(status): Json<DeviceStatus>,
 ) -> Result<StatusCode, AppError> {
     let device_id = authed_for(&st, &headers, Some(&device_id)).await?;
+    if let Some(ip) = peer.0 {
+        // One log line per network change; operator scripts read it to
+        // tell home Wi-Fi from the mobile network.
+        let changed = st.status_peers.lock().unwrap().insert(device_id.clone(), ip) != Some(ip);
+        if changed {
+            let net = if crate::uploads::is_local(ip, &st.server_host) { "local" } else { "remote" };
+            println!("status: {device_id} reports from {ip} ({net})");
+        }
+    }
 
     let radio_json = match &status.radio {
         Some(r) => Some(serde_json::to_string(r).map_err(|_| AppError::Internal)?),

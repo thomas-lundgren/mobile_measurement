@@ -31,6 +31,10 @@ const RING_CAPACITY: usize = 8192;
 const BULK_CHUNK: usize = 64 * 1024;
 const RECV_TIMEOUT: Duration = Duration::from_millis(100);
 const KEEPALIVE_PERIOD: Duration = Duration::from_secs(1);
+/// Sends must fail this long before a flow reopens its UDP socket.
+const REOPEN_AFTER: Duration = Duration::from_millis(200);
+/// At most one reopen attempt per this interval while sends keep failing.
+const REOPEN_RETRY: Duration = Duration::from_millis(500);
 
 /// What the UE engine needs to run one test (lean merge of RunTestPayload +
 /// bindings). `mobile/` log dir is `log_dir`.
@@ -204,15 +208,18 @@ fn spawn_flow(
             match (flow.flow_type.as_str(), dir) {
                 ("probe", _) => {
                     let socket = connected_udp(&server)?;
-                    Ok(thread::spawn(move || probe_ue(socket, sink, flow, counters, stop)))
+                    let reopen = Reopener::new(&server);
+                    Ok(thread::spawn(move || probe_ue(socket, reopen, sink, flow, counters, stop)))
                 }
                 ("realtime_udp", Some("ToServer")) => {
                     let socket = connected_udp(&server)?;
-                    Ok(thread::spawn(move || realtime_send(socket, sink, flow, counters, stop)))
+                    let reopen = Reopener::new(&server);
+                    Ok(thread::spawn(move || realtime_send(socket, reopen, sink, flow, counters, stop)))
                 }
                 ("realtime_udp", _) => {
                     let socket = connected_udp(&server)?;
-                    Ok(thread::spawn(move || realtime_recv(socket, sink, flow, counters, stop)))
+                    let reopen = Reopener::new(&server);
+                    Ok(thread::spawn(move || realtime_recv(socket, reopen, sink, flow, counters, stop)))
                 }
                 ("bulk_tcp", Some("ToServer")) => {
                     let stream = TcpStream::connect(&server)?;
@@ -244,6 +251,51 @@ fn connected_udp(server: &str) -> std::io::Result<UdpSocket> {
     Ok(socket)
 }
 
+/// Follows the phone's default network across a Wi-Fi <-> mobile switch.
+///
+/// A connected UDP socket keeps the source address of the network it was
+/// opened on; once that network is gone every send fails. When sends have
+/// failed for `REOPEN_AFTER`, the flow opens a fresh socket, which the OS
+/// routes over the current default network. The new socket has a new local
+/// port, logged in `local_port` on the flow's rows, so a switch shows in the
+/// packet log; the server answers whatever address the UE sends from.
+struct Reopener {
+    server: String,
+    failing_since: Option<Instant>,
+    last_try: Option<Instant>,
+}
+
+impl Reopener {
+    fn new(server: &str) -> Self {
+        Self {
+            server: server.to_string(),
+            failing_since: None,
+            last_try: None,
+        }
+    }
+
+    /// Record a send outcome; true when the socket should be reopened now.
+    fn note(&mut self, failed: bool, now: Instant) -> bool {
+        if !failed {
+            self.failing_since = None;
+            return false;
+        }
+        let since = *self.failing_since.get_or_insert(now);
+        now.duration_since(since) >= REOPEN_AFTER
+            && self.last_try.is_none_or(|t| now.duration_since(t) >= REOPEN_RETRY)
+    }
+
+    /// A fresh socket to the server (None while no network can route there).
+    fn reopen(&mut self, now: Instant) -> Option<UdpSocket> {
+        self.last_try = Some(now);
+        connected_udp(&self.server).ok()
+    }
+}
+
+fn local_port(socket: &UdpSocket) -> Option<u32> {
+    socket.local_addr().ok().map(|a| a.port() as u32)
+}
+
 fn would_block(e: &std::io::Error) -> bool {
     matches!(
         e.kind(),
@@ -259,7 +311,8 @@ fn rate_period(rate_pps: Option<u32>) -> Duration {
 
 /// Probe: UE originates, server echoes. Log SENT, then RECEIVED on echo.
 fn probe_ue(
-    socket: UdpSocket,
+    mut socket: UdpSocket,
+    mut reopen: Reopener,
     mut sink: LogSink,
     flow: UeFlow,
     counters: Arc<Counters>,
@@ -285,18 +338,22 @@ fn probe_ue(
         if size > bytes.len() {
             bytes.resize(size, 0);
         }
-        if socket.send(&bytes).is_ok() {
+        let sent = socket.send(&bytes).is_ok();
+        if sent {
             counters.sent.fetch_add(1, Ordering::Relaxed);
             counters
                 .bytes_sent
                 .fetch_add(bytes.len() as u64, Ordering::Relaxed);
-            sink.push(PacketRow::probe(
-                flow.flow_id,
-                seq,
-                Direction::Sent,
-                ts,
-                bytes.len() as u32,
-            ));
+            sink.push(PacketRow {
+                local_port: local_port(&socket),
+                ..PacketRow::probe(flow.flow_id, seq, Direction::Sent, ts, bytes.len() as u32)
+            });
+        }
+        let now = Instant::now();
+        if reopen.note(!sent, now) {
+            if let Some(s) = reopen.reopen(now) {
+                socket = s;
+            }
         }
         seq += 1;
         next = (next + period).max(Instant::now());
@@ -379,7 +436,8 @@ fn sleep_until(deadline: Instant) {
 /// still queued below the socket. With `sndbuf_bytes` the socket is small and
 /// non-blocking: a queue the modem does not drain fills it and shows as EAGAIN.
 fn realtime_send(
-    socket: UdpSocket,
+    mut socket: UdpSocket,
+    mut reopen: Reopener,
     mut sink: LogSink,
     flow: UeFlow,
     counters: Arc<Counters>,
@@ -390,12 +448,16 @@ fn realtime_send(
     let size = flow
         .packet_size_bytes
         .unwrap_or(RealtimePacket::WIRE_LEN as u32) as usize;
-    let fd = socket.as_raw_fd();
-    if let Some(bytes) = flow.sndbuf_bytes {
-        if udp_timing::limit_send_buffer(fd, bytes).is_ok() {
-            let _ = socket.set_nonblocking(true);
+    let setup = |socket: &UdpSocket| {
+        if let Some(bytes) = flow.sndbuf_bytes {
+            if udp_timing::limit_send_buffer(socket.as_raw_fd(), bytes).is_ok() {
+                let _ = socket.set_nonblocking(true);
+            }
         }
-    }
+    };
+    setup(&socket);
+    let mut fd = socket.as_raw_fd();
+    let mut port = local_port(&socket);
     let mut seq = 0u64;
     let _ = udp_timing::raise_thread_priority();
     let mut pacer = Pacer::new(period);
@@ -426,7 +488,7 @@ fn realtime_send(
             timestamp: ts,
             payload_size: bytes.len() as u32,
             protocol: Protocol::Udp,
-            local_port: None,
+            local_port: port,
             remote_port: None,
             sender: None,
             expected_interval_ns: Some(period_ns),
@@ -441,6 +503,15 @@ fn realtime_send(
             },
         });
         seq += 1;
+        let now = Instant::now();
+        if reopen.note(status == SendStatus::Error, now) {
+            if let Some(s) = reopen.reopen(now) {
+                setup(&s);
+                socket = s;
+                fd = socket.as_raw_fd();
+                port = local_port(&socket);
+            }
+        }
         pacer.wait();
     }
 }
@@ -448,7 +519,8 @@ fn realtime_send(
 /// Realtime FromServer: UE sends ~1 Hz keepalives (NAT punch-through) and
 /// receives the downlink, logging RECEIVED with sender timestamps + interval.
 fn realtime_recv(
-    socket: UdpSocket,
+    mut socket: UdpSocket,
+    mut reopen: Reopener,
     mut sink: LogSink,
     flow: UeFlow,
     counters: Arc<Counters>,
@@ -458,13 +530,26 @@ fn realtime_recv(
     let mut buf = [0u8; 2048];
     let mut last_keepalive = Instant::now() - KEEPALIVE_PERIOD; // send one immediately
     let mut last_recv_mono: Option<u64> = None;
-    let fd = socket.as_raw_fd();
+    let mut fd = socket.as_raw_fd();
     let _ = udp_timing::enable_rx_timestamps(fd);
+    let mut port = local_port(&socket);
 
     while !stop.load(Ordering::Acquire) {
         if last_keepalive.elapsed() >= KEEPALIVE_PERIOD {
-            let _ = socket.send(b"mp-keepalive");
-            last_keepalive = Instant::now();
+            let failed = socket.send(b"mp-keepalive").is_err();
+            let now = Instant::now();
+            // retry a failed keepalive every RECV_TIMEOUT, not once a second,
+            // so a dead network is noticed within REOPEN_AFTER
+            last_keepalive = if failed { now - KEEPALIVE_PERIOD + RECV_TIMEOUT } else { now };
+            if reopen.note(failed, now) {
+                if let Some(s) = reopen.reopen(now) {
+                    socket = s;
+                    fd = socket.as_raw_fd();
+                    let _ = udp_timing::enable_rx_timestamps(fd);
+                    port = local_port(&socket);
+                    last_keepalive = now - KEEPALIVE_PERIOD; // announce the new address at once
+                }
+            }
         }
         match udp_timing::recv_stamped(fd, &mut buf) {
             Ok(udp_timing::Received { n, kernel_utc_ns, .. }) => {
@@ -492,7 +577,7 @@ fn realtime_recv(
                     timestamp: recv_ts,
                     payload_size: n as u32,
                     protocol: Protocol::Udp,
-                    local_port: None,
+                    local_port: port,
                     remote_port: None,
                     sender,
                     expected_interval_ns: Some(period_ns),
@@ -770,5 +855,26 @@ fn bulk_row(flow_id: u32, seq: u64, direction: Direction, ts: Timestamp, size: u
         dscp_sent: None,
         dscp_recv: None,
         timing: PacketTiming::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reopens_only_after_sends_keep_failing() {
+        let mut r = Reopener::new("127.0.0.1:9");
+        let t0 = Instant::now();
+        assert!(!r.note(true, t0));
+        assert!(!r.note(true, t0 + Duration::from_millis(150)));
+        assert!(r.note(true, t0 + REOPEN_AFTER));
+        assert!(r.reopen(t0 + REOPEN_AFTER).is_some());
+        // still failing on the new socket: retry at most every REOPEN_RETRY
+        assert!(!r.note(true, t0 + REOPEN_AFTER + Duration::from_millis(100)));
+        assert!(r.note(true, t0 + REOPEN_AFTER + REOPEN_RETRY));
+        // one success resets the streak
+        assert!(!r.note(false, t0 + Duration::from_secs(2)));
+        assert!(!r.note(true, t0 + Duration::from_secs(2)));
     }
 }

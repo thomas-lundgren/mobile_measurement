@@ -155,6 +155,43 @@ async fn realtime_from_server_streams_after_keepalive() {
 }
 
 #[tokio::test]
+async fn realtime_from_server_follows_ue_to_new_address() {
+    let st = AppState::default();
+    let dir = tempfile::tempdir().unwrap();
+    let port = free_port();
+    let gid = prepare(&st, json!({"flow_id":3,"type":"realtime_udp","direction":"FromServer","rate_pps":200,"packet_size_bytes":80}), port, dir.path()).await;
+    // datagrams arriving on `ue` within `ms`
+    let count = |ue: &UdpSocket, ms: u64| {
+        ue.set_nonblocking(true).unwrap();
+        let mut buf = [0u8; 2048];
+        let mut n = 0;
+        let end = std::time::Instant::now() + Duration::from_millis(ms);
+        while std::time::Instant::now() < end {
+            match ue.recv_from(&mut buf) {
+                Ok(_) => n += 1,
+                Err(_) => std::thread::sleep(Duration::from_millis(1)),
+            }
+        }
+        n
+    };
+
+    // the UE's first socket gets the stream ...
+    let old = UdpSocket::bind("127.0.0.1:0").unwrap();
+    old.send_to(b"keepalive", format!("127.0.0.1:{port}")).unwrap();
+    assert!(count(&old, 200) >= 10);
+
+    // ... until it reopens (network switch) and keepalives come from a new port
+    let new = UdpSocket::bind("127.0.0.1:0").unwrap();
+    new.send_to(b"keepalive", format!("127.0.0.1:{port}")).unwrap();
+    count(&old, 100); // in flight before the switch was seen
+    let on_new = count(&new, 300);
+    assert!(on_new >= 20, "packets on the new address: {on_new}");
+    assert_eq!(count(&old, 100), 0, "stream still going to the old address");
+
+    send(&st, "POST", &format!("/internal/generators/{gid}/stop"), None).await;
+}
+
+#[tokio::test]
 async fn bulk_from_server_streams_bytes() {
     let st = AppState::default();
     let dir = tempfile::tempdir().unwrap();
