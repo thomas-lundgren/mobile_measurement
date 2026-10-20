@@ -1,0 +1,37 @@
+{
+  "packet_type": "AppExchange",
+  "version": 2,
+  "description": "Golden vectors for AppRequest v2 (pkt_t=0x04, ver=0x02), the request/response exchange on an app_traffic TCP connection. 44 bytes on wire. See contracts/packets/app_request.md. Layout: pkt_t(1) + ver(1) + activity(1) + reserved(1) + flow_id(4) + object_id(8) + up_bytes(8) + down_bytes(8) + delay_ms(4) + rate_bps(4) + chunk_bytes(4).",
+  "cases": [
+    {
+      "name": "llm_call_stream",
+      "notes": "activity 9 = llm_call: a 40 kB context goes up; after 900 ms (time to first token) 12 kB of SSE events come back, 140 B every 140*8/30000 s (30 kbit/s). object_id = agent 0, episode 5, object 2.",
+      "decoded": {
+        "activity": 9,
+        "flow_id": 7,
+        "object_id": 5242882,
+        "up_bytes": 40000,
+        "down_bytes": 12000,
+        "delay_ms": 900,
+        "rate_bps": 30000,
+        "chunk_bytes": 140
+      },
+      "hex": "040209000000000700000000005000020000000000009c400000000000002ee000000384000075300000008c"
+    },
+    {
+      "name": "photo_upload_ack",
+      "notes": "down_bytes 0: the server echoes the 44-byte header once the 2.5 MB arrived (v1 upload equivalent). activity 8 = photo_upload.",
+      "decoded": {
+        "activity": 8,
+        "flow_id": 3,
+        "object_id": 3145733,
+        "up_bytes": 2500000,
+        "down_bytes": 0,
+        "delay_ms": 0,
+        "rate_bps": 0,
+        "chunk_bytes": 0
+      },
+      "hex": "0402080000000003000000000030000500000000002625a00000000000000000000000000000000000000000"
+    }
+  ]
+}

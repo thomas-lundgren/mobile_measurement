@@ -1,15 +1,19 @@
 //! Application-like background traffic: simulated users ("agents") that
-//! browse the web, sync mail, watch video or scroll a feed, so a test can show
-//! what everyday app load does to the realtime flows running beside it.
+//! browse the web, sync mail, watch video or scroll a feed — or an AI agent
+//! working through tasks (LLM calls with streamed replies, MCP tool calls, web
+//! fetches) — so a test can show what that load does to the realtime flows
+//! running beside it.
 //!
 //! The UE runs the agents and opens every connection (invariant 5); the server
 //! side is a plain object server (data-generator `spawn_app_server`). Each
-//! request on a TCP connection asks for `size` bytes down, or announces `size`
-//! bytes up (`packet::AppRequest`). Both nodes log every object as rows sharing
-//! its `object_id` (the row's sequence_number), tagged with `app_activity` and
-//! `app_object_bytes`: the request (SENT, 24 B), then the data (RECEIVED chunks
-//! of a download; SENT chunks of an upload plus the server's RECEIVED ack). So
-//! analysis gets request → first byte → completion for every object.
+//! object is one exchange on a TCP connection (`packet::AppExchange`): bytes
+//! up, a server think time, bytes down (optionally paced like a token stream).
+//! Both nodes log every object as rows sharing its `object_id` (the row's
+//! sequence_number), tagged with `app_activity`, `app_object_bytes` and
+//! `app_up_bytes`: the request (SENT, 44 B), the upload chunks (SENT), then the
+//! response chunks (RECEIVED) — or, when nothing comes back, the server's
+//! RECEIVED acknowledgement. So analysis gets request → first byte →
+//! completion for every object, and the gaps inside a stream.
 //!
 //! Agents are seeded: what they ask for is reproducible, when it completes is
 //! up to the network. `profile = "script"` runs an explicit action timeline
@@ -25,11 +29,11 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 use crate::log_writer::{Direction, LogSink, PacketRow, PacketTiming, Protocol};
-use crate::packet::AppRequest;
+use crate::packet::AppExchange;
 use crate::timestamp::Timestamp;
 
 /// Activity codes on the wire (the index) and the names logged for them.
-pub const ACTIVITIES: [&str; 9] = [
+pub const ACTIVITIES: [&str; 12] = [
     "other",
     "web_page",
     "web_object",
@@ -39,6 +43,9 @@ pub const ACTIVITIES: [&str; 9] = [
     "video_chunk",
     "feed_image",
     "photo_upload",
+    "llm_call",
+    "mcp_call",
+    "web_fetch",
 ];
 const WEB_PAGE: u8 = 1;
 const WEB_OBJECT: u8 = 2;
@@ -48,8 +55,11 @@ const MAIL_SEND: u8 = 5;
 const VIDEO_CHUNK: u8 = 6;
 const FEED_IMAGE: u8 = 7;
 const PHOTO_UPLOAD: u8 = 8;
+const LLM_CALL: u8 = 9;
+const MCP_CALL: u8 = 10;
+const WEB_FETCH: u8 = 11;
 
-pub const PROFILES: [&str; 6] = ["web", "mail", "video", "social", "mixed", "script"];
+pub const PROFILES: [&str; 7] = ["web", "mail", "video", "social", "mixed", "agent", "script"];
 
 /// Objects in flight at once per agent (a browser's per-host connection cap).
 pub const MAX_PARALLEL: usize = 6;
@@ -62,6 +72,18 @@ const OBJECT_TIMEOUT: Duration = Duration::from_secs(120);
 const IDLE_CLOSE: Duration = Duration::from_secs(20);
 /// Video segment length: one chunk is due every SEGMENT.
 const SEGMENT: Duration = Duration::from_secs(4);
+/// LLM reply stream: bytes per output token (server-sent events carry ~3
+/// tokens of text in a ~140 B event) and per event.
+const SSE_BYTES_PER_TOKEN: f64 = 47.0;
+const SSE_EVENT: u32 = 140;
+/// Bytes a token adds to the context the next call sends (JSON text).
+const CONTEXT_BYTES_PER_TOKEN: u64 = 4;
+/// A tool result adds at most this much text to the context.
+const TOOL_RESULT_MAX: u64 = 25_000;
+/// The context is compacted to COMPACT_TO once it passes COMPACT_AT (~150k
+/// tokens), as coding agents do.
+const COMPACT_AT: u64 = 600_000;
+const COMPACT_TO: u64 = 60_000;
 
 pub fn activity_code(name: &str) -> u8 {
     ACTIVITIES.iter().position(|a| *a == name).unwrap_or(0) as u8
@@ -72,7 +94,7 @@ pub fn activity_name(code: u8) -> &'static str {
 }
 
 /// One action of a scripted timeline (`profile = "script"`).
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 pub struct AppAction {
     /// Start this long after the test starts (ms). Actions run in order; one
     /// that falls due while the previous is still running starts after it.
@@ -90,14 +112,47 @@ pub struct AppAction {
     /// Activity name for the log (one of ACTIVITIES; default "other").
     #[serde(default)]
     pub activity: Option<String>,
+    /// "down" only: bytes sent up first (request body, LLM context).
+    #[serde(default)]
+    pub up_bytes: Option<u64>,
+    /// "down" only: server think time before the first byte.
+    #[serde(default)]
+    pub delay_ms: Option<u32>,
+    /// "down" only: pace the response at this rate (a token stream).
+    #[serde(default)]
+    pub rate_kbps: Option<u32>,
+    /// "down" with rate_kbps: bytes per paced write (default 5 ms worth).
+    #[serde(default)]
+    pub chunk_bytes: Option<u32>,
 }
 
-/// One object transfer.
+/// One object: `up` bytes to the server, `delay_ms` think time, `down` bytes
+/// back (paced at `rate_bps` in `chunk`-byte writes when `rate_bps > 0`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Fetch {
-    pub upload: bool,
     pub activity: u8,
-    pub bytes: u64,
+    pub up: u64,
+    pub down: u64,
+    pub delay_ms: u32,
+    pub rate_bps: u32,
+    pub chunk: u32,
+}
+
+impl Fetch {
+    pub fn download(activity: u8, bytes: u64) -> Self {
+        Self { activity, up: 0, down: bytes, delay_ms: 0, rate_bps: 0, chunk: 0 }
+    }
+
+    pub fn upload(activity: u8, bytes: u64) -> Self {
+        Self { activity, up: bytes, down: 0, delay_ms: 0, rate_bps: 0, chunk: 0 }
+    }
+
+    /// How long the server takes beyond moving the bytes: think time plus,
+    /// for a paced stream, its length.
+    fn server_time(&self) -> Duration {
+        let stream = if self.rate_bps > 0 { self.down as f64 * 8.0 / self.rate_bps as f64 } else { 0.0 };
+        Duration::from_millis(self.delay_ms as u64) + Duration::from_secs_f64(stream)
+    }
 }
 
 /// What an agent does next.
@@ -154,6 +209,7 @@ enum Mode {
     Mail,
     Video,
     Social,
+    Agent,
 }
 
 /// Queued plan item; Think turns into an absolute `Until` when reached.
@@ -178,6 +234,10 @@ pub struct Agent {
     video_due: Duration,
     video_end: Duration,
     video_bytes: u64,
+    /// AI agent: bytes of context the next LLM call sends, and LLM calls left
+    /// in the current task.
+    context: u64,
+    turns_left: u32,
 }
 
 impl Agent {
@@ -187,6 +247,7 @@ impl Agent {
             "mail" => Mode::Mail,
             "video" => Mode::Video,
             "social" => Mode::Social,
+            "agent" => Mode::Agent,
             _ => Mode::Web,
         };
         let mail_at = Duration::from_secs_f64(rng.uniform(5.0, 60.0));
@@ -202,6 +263,8 @@ impl Agent {
             video_due: Duration::ZERO,
             video_end: Duration::ZERO,
             video_bytes: 0,
+            context: 0,
+            turns_left: 0,
         }
     }
 
@@ -210,7 +273,8 @@ impl Agent {
     }
 
     fn fetch(&mut self, activity: u8, upload: bool, median: f64, sigma: f64, lo: f64, hi: f64) -> Fetch {
-        Fetch { upload, activity, bytes: self.bytes(median, sigma, lo, hi) }
+        let bytes = self.bytes(median, sigma, lo, hi);
+        if upload { Fetch::upload(activity, bytes) } else { Fetch::download(activity, bytes) }
     }
 
     pub fn next_step(&mut self, now: Duration) -> Step {
@@ -220,10 +284,17 @@ impl Agent {
                 Some(a) if now < Duration::from_millis(a.at_ms) => Step::Until(Duration::from_millis(a.at_ms)),
                 Some(_) => {
                     let a = script.pop_front().unwrap();
-                    let f = Fetch {
-                        upload: a.kind == "up",
-                        activity: activity_code(a.activity.as_deref().unwrap_or("other")),
-                        bytes: a.bytes.max(1),
+                    let activity = activity_code(a.activity.as_deref().unwrap_or("other"));
+                    let f = if a.kind == "up" {
+                        Fetch::upload(activity, a.bytes.max(1))
+                    } else {
+                        Fetch {
+                            up: a.up_bytes.unwrap_or(0),
+                            delay_ms: a.delay_ms.unwrap_or(0),
+                            rate_bps: a.rate_kbps.unwrap_or(0).saturating_mul(1000),
+                            chunk: a.chunk_bytes.unwrap_or(0),
+                            ..Fetch::download(activity, a.bytes.max(1))
+                        }
                     };
                     let n = a.count.unwrap_or(1).max(1) as usize;
                     let parallel = (a.parallel.unwrap_or(1).max(1) as usize).min(MAX_PARALLEL);
@@ -258,6 +329,69 @@ impl Agent {
             }
             Mode::Video => self.video(now),
             Mode::Social => self.feed(),
+            Mode::Agent => self.agent(now),
+        }
+    }
+
+    /// An AI agent at work: a task is a loop of LLM calls. Each call sends the
+    /// whole context up (prompt caching saves compute, not bytes), waits for
+    /// the first token, then streams the reply. Unless it is the task's last
+    /// call, the reply asks for tools — MCP calls and web fetches, run in
+    /// parallel — whose results join the context for the next call. Between
+    /// tasks the user reads the answer and types the next request.
+    fn agent(&mut self, now: Duration) -> Step {
+        if self.turns_left == 0 {
+            if self.context > 0 {
+                self.context = 0;
+                return Step::Until(now + self.rng.secs(45.0, 0.7, 5.0, 300.0));
+            }
+            self.turns_left = self.rng.lognormal(6.0, 0.6).clamp(1.0, 30.0) as u32;
+            // system prompt, tool definitions and the user's request
+            self.context = self.rng.lognormal(12e3, 0.4).clamp(4e3, 60e3) as u64;
+        }
+        self.turns_left -= 1;
+        let tokens = self.rng.lognormal(250.0, 0.9).clamp(20.0, 3000.0);
+        let tokens_per_s = self.rng.uniform(40.0, 90.0);
+        let llm = Fetch {
+            activity: LLM_CALL,
+            up: ((self.context as f64 * self.scale) as u64).max(1),
+            down: (((tokens * SSE_BYTES_PER_TOKEN + 1200.0) * self.scale) as u64).max(1),
+            // time to first token
+            delay_ms: (self.rng.lognormal(0.9, 0.5).clamp(0.25, 10.0) * 1000.0) as u32,
+            rate_bps: (tokens_per_s * SSE_BYTES_PER_TOKEN * 8.0) as u32,
+            chunk: SSE_EVENT,
+        };
+        self.context += tokens as u64 * CONTEXT_BYTES_PER_TOKEN;
+        if self.turns_left > 0 {
+            let r = self.rng.unit();
+            let n = if r < 0.6 { 1 } else if r < 0.85 { 2 } else { 3 + (self.rng.next() % 2) as usize };
+            let tools: Vec<Fetch> = (0..n).map(|_| self.tool()).collect();
+            for t in &tools {
+                self.context += t.down.min(TOOL_RESULT_MAX) + 300;
+            }
+            if self.context > COMPACT_AT {
+                self.context = COMPACT_TO;
+            }
+            self.queue.push_back(Plan::Burst(tools, n));
+        }
+        Step::Burst { fetches: vec![llm], parallel: 1 }
+    }
+
+    /// One tool call: an MCP request (small JSON up, the tool's latency, a JSON
+    /// result) or a web fetch (GET, the site's first-byte time, the page).
+    fn tool(&mut self) -> Fetch {
+        if self.rng.chance(0.5) {
+            Fetch {
+                up: self.bytes(1.2e3, 0.6, 200.0, 20e3),
+                delay_ms: (self.rng.lognormal(0.4, 0.8).clamp(0.05, 10.0) * 1000.0) as u32,
+                ..Fetch::download(MCP_CALL, self.bytes(4e3, 1.2, 200.0, 300e3))
+            }
+        } else {
+            Fetch {
+                up: 600,
+                delay_ms: (self.rng.lognormal(0.25, 0.6).clamp(0.03, 3.0) * 1000.0) as u32,
+                ..Fetch::download(WEB_FETCH, self.bytes(150e3, 1.0, 5e3, 3e6))
+            }
         }
     }
 
@@ -299,7 +433,7 @@ impl Agent {
             self.video_bytes = ((mbps * 1e6 / 8.0 * SEGMENT.as_secs_f64()) * self.scale).max(1.0) as u64;
             self.video_end = now + Duration::from_secs_f64(self.rng.uniform(60.0, 300.0));
             self.video_due = now + SEGMENT * 3;
-            let f = Fetch { upload: false, activity: VIDEO_CHUNK, bytes: self.video_bytes };
+            let f = Fetch::download(VIDEO_CHUNK, self.video_bytes);
             return Step::Burst { fetches: vec![f; 3], parallel: 1 };
         }
         if now < self.video_due {
@@ -307,7 +441,7 @@ impl Agent {
         }
         // a late segment (the buffer ran dry) is fetched at once, not caught up
         self.video_due = (self.video_due + SEGMENT).max(now);
-        let f = Fetch { upload: false, activity: VIDEO_CHUNK, bytes: self.video_bytes };
+        let f = Fetch::download(VIDEO_CHUNK, self.video_bytes);
         Step::Burst { fetches: vec![f], parallel: 1 }
     }
 
@@ -444,7 +578,7 @@ fn connect(server: &str) -> io::Result<TcpStream> {
     Ok(c)
 }
 
-fn row(flow_id: u32, object_id: u64, direction: Direction, size: u32, activity: u8, object_bytes: u64) -> PacketRow {
+fn row(flow_id: u32, object_id: u64, direction: Direction, size: u32, f: &Fetch) -> PacketRow {
     PacketRow {
         flow_id,
         sequence_number: object_id,
@@ -460,8 +594,9 @@ fn row(flow_id: u32, object_id: u64, direction: Direction, size: u32, activity: 
         dscp_sent: None,
         dscp_recv: None,
         timing: PacketTiming {
-            app_activity: Some(activity_name(activity)),
-            app_object_bytes: Some(object_bytes),
+            app_activity: Some(activity_name(f.activity)),
+            app_object_bytes: Some(f.down),
+            app_up_bytes: Some(f.up),
             ..PacketTiming::default()
         },
     }
@@ -512,54 +647,57 @@ pub fn read_exact_until(conn: &mut TcpStream, mut buf: &mut [u8], stop: &AtomicB
 
 fn transfer(ctx: &Ctx, conn: &mut TcpStream, f: Fetch, object_id: u64) -> io::Result<()> {
     let flow_id = ctx.cfg.flow_id;
-    let deadline = Instant::now() + OBJECT_TIMEOUT;
-    let req = AppRequest {
-        kind: if f.upload { AppRequest::UPLOAD } else { AppRequest::DOWNLOAD },
+    let deadline = Instant::now() + OBJECT_TIMEOUT + f.server_time();
+    let req = AppExchange {
         activity: f.activity,
         flow_id,
         object_id,
-        size: f.bytes,
+        up_bytes: f.up,
+        down_bytes: f.down,
+        delay_ms: f.delay_ms,
+        rate_bps: f.rate_bps,
+        chunk_bytes: f.chunk,
     };
-    let push = |r: PacketRow| {
-        ctx.sink.lock().unwrap().push(r);
+    let push = |dir: Direction, n: usize| {
+        ctx.sink.lock().unwrap().push(row(flow_id, object_id, dir, n as u32, &f));
     };
     let head = req.to_bytes();
-    push(row(flow_id, object_id, Direction::Sent, head.len() as u32, f.activity, f.bytes));
+    push(Direction::Sent, head.len());
     write_all_until(conn, &head, ctx.stop, deadline)?;
     ctx.tally.sent(head.len() as u64);
 
     let mut buf = vec![0u8; CHUNK];
-    if f.upload {
-        let mut left = f.bytes;
-        while left > 0 {
-            let n = left.min(CHUNK as u64) as usize;
-            write_all_until(conn, &buf[..n], ctx.stop, deadline)?;
-            push(row(flow_id, object_id, Direction::Sent, n as u32, f.activity, f.bytes));
-            ctx.tally.sent(n as u64);
-            left -= n as u64;
-        }
-        let mut ack = [0u8; AppRequest::WIRE_LEN];
+    let mut left = f.up;
+    while left > 0 {
+        let n = left.min(CHUNK as u64) as usize;
+        write_all_until(conn, &buf[..n], ctx.stop, deadline)?;
+        push(Direction::Sent, n);
+        ctx.tally.sent(n as u64);
+        left -= n as u64;
+    }
+    if f.down == 0 {
+        let mut ack = [0u8; AppExchange::WIRE_LEN];
         read_exact_until(conn, &mut ack, ctx.stop, deadline)?;
-        push(row(flow_id, object_id, Direction::Received, ack.len() as u32, f.activity, f.bytes));
+        push(Direction::Received, ack.len());
         ctx.tally.received(ack.len() as u64);
-    } else {
-        let mut left = f.bytes;
-        while left > 0 {
-            let want = left.min(CHUNK as u64) as usize;
-            match conn.read(&mut buf[..want]) {
-                Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
-                Ok(n) => {
-                    push(row(flow_id, object_id, Direction::Received, n as u32, f.activity, f.bytes));
-                    ctx.tally.received(n as u64);
-                    left -= n as u64;
-                }
-                Err(e) if is_timeout(&e) || e.kind() == io::ErrorKind::Interrupted => {
-                    if give_up(ctx.stop, deadline) {
-                        return Err(io::ErrorKind::TimedOut.into());
-                    }
-                }
-                Err(e) => return Err(e),
+        return Ok(());
+    }
+    let mut left = f.down;
+    while left > 0 {
+        let want = left.min(CHUNK as u64) as usize;
+        match conn.read(&mut buf[..want]) {
+            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(n) => {
+                push(Direction::Received, n);
+                ctx.tally.received(n as u64);
+                left -= n as u64;
             }
+            Err(e) if is_timeout(&e) || e.kind() == io::ErrorKind::Interrupted => {
+                if give_up(ctx.stop, deadline) {
+                    return Err(io::ErrorKind::TimedOut.into());
+                }
+            }
+            Err(e) => return Err(e),
         }
     }
     Ok(())
@@ -583,7 +721,8 @@ mod tests {
                 Step::Burst { fetches, parallel } => {
                     assert!(!fetches.is_empty() && *parallel >= 1 && *parallel <= MAX_PARALLEL);
                     for f in fetches {
-                        if f.upload { up += f.bytes } else { down += f.bytes }
+                        up += f.up;
+                        down += f.down;
                     }
                 }
                 Step::Done => break,
@@ -613,7 +752,7 @@ mod tests {
         assert_eq!(fetches.len(), 1);
         assert_eq!(fetches[0].activity, WEB_PAGE);
         let Step::Burst { fetches, parallel } = a.next_step(Duration::ZERO) else { panic!() };
-        assert!(fetches.len() >= 5 && fetches.iter().all(|f| f.activity == WEB_OBJECT && !f.upload));
+        assert!(fetches.len() >= 5 && fetches.iter().all(|f| f.activity == WEB_OBJECT && f.up == 0));
         assert_eq!(parallel, MAX_PARALLEL);
         let Step::Until(t) = a.next_step(Duration::from_secs(1)) else { panic!() };
         assert!(t >= Duration::from_secs(3));
@@ -622,20 +761,65 @@ mod tests {
     #[test]
     fn script_runs_actions_in_order_then_stops() {
         let actions = vec![
-            AppAction { at_ms: 0, kind: "down".into(), bytes: 1000, count: Some(3), parallel: Some(9), activity: Some("web_object".into()) },
-            AppAction { at_ms: 5000, kind: "up".into(), bytes: 2000, count: None, parallel: None, activity: None },
+            AppAction { at_ms: 0, kind: "down".into(), bytes: 1000, count: Some(3), parallel: Some(9), activity: Some("web_object".into()), ..AppAction::default() },
+            AppAction { at_ms: 5000, kind: "up".into(), bytes: 2000, ..AppAction::default() },
+            AppAction { at_ms: 6000, kind: "down".into(), bytes: 3000, up_bytes: Some(500), delay_ms: Some(800), rate_kbps: Some(24), activity: Some("llm_call".into()), ..AppAction::default() },
         ];
         let mut a = Agent::new("script", 0, 1.0, &actions);
         assert_eq!(
             a.next_step(Duration::ZERO),
-            Step::Burst { fetches: vec![Fetch { upload: false, activity: WEB_OBJECT, bytes: 1000 }; 3], parallel: MAX_PARALLEL }
+            Step::Burst { fetches: vec![Fetch::download(WEB_OBJECT, 1000); 3], parallel: MAX_PARALLEL }
         );
         assert_eq!(a.next_step(Duration::from_secs(1)), Step::Until(Duration::from_secs(5)));
         assert_eq!(
             a.next_step(Duration::from_secs(5)),
-            Step::Burst { fetches: vec![Fetch { upload: true, activity: 0, bytes: 2000 }], parallel: 1 }
+            Step::Burst { fetches: vec![Fetch::upload(0, 2000)], parallel: 1 }
         );
-        assert_eq!(a.next_step(Duration::from_secs(6)), Step::Done);
+        let llm = Fetch { up: 500, delay_ms: 800, rate_bps: 24_000, ..Fetch::download(LLM_CALL, 3000) };
+        assert_eq!(a.next_step(Duration::from_secs(6)), Step::Burst { fetches: vec![llm], parallel: 1 });
+        assert_eq!(a.next_step(Duration::from_secs(7)), Step::Done);
+    }
+
+    #[test]
+    fn agent_alternates_llm_calls_and_tools_with_a_growing_context() {
+        let mut a = Agent::new("agent", 4, 1.0, &[]);
+        let (mut now, mut last_up, mut tasks, mut calls) = (Duration::ZERO, 0u64, 0, 0);
+        let mut prev_llm = false;
+        for _ in 0..2000 {
+            match a.next_step(now) {
+                Step::Burst { fetches, parallel } if fetches[0].activity == LLM_CALL => {
+                    let f = fetches[0];
+                    assert_eq!((fetches.len(), parallel), (1, 1));
+                    assert!(f.delay_ms >= 250 && f.rate_bps > 0 && f.chunk == SSE_EVENT);
+                    // the context only grows within a task (until compaction)
+                    assert!(f.up > last_up || f.up == COMPACT_TO, "call {calls}: {} after {last_up}", f.up);
+                    last_up = f.up;
+                    calls += 1;
+                    prev_llm = true;
+                    now += f.server_time();
+                }
+                Step::Burst { fetches, parallel } => {
+                    assert!(prev_llm, "tools follow an LLM call");
+                    assert_eq!(parallel, fetches.len());
+                    assert!(fetches.iter().all(|f| matches!(f.activity, MCP_CALL | WEB_FETCH) && f.up > 0 && f.down > 0));
+                    prev_llm = false;
+                }
+                Step::Until(t) => {
+                    assert!(t > now);
+                    now = t;
+                    tasks += 1;
+                    calls = 0;
+                    last_up = 0;
+                }
+                Step::Done => panic!(),
+            }
+        }
+        assert!(tasks > 10, "tasks {tasks}");
+        // average: a few hundred kbit/s down, mostly LLM context up
+        let (down, up, _) = steps("agent", 1, 1800);
+        let (d, u) = (down as f64 * 8.0 / 1800.0 / 1e6, up as f64 * 8.0 / 1800.0 / 1e6);
+        assert!((0.02..1.0).contains(&d), "agent down {d} Mbit/s");
+        assert!((0.02..1.0).contains(&u), "agent up {u} Mbit/s");
     }
 
     #[test]

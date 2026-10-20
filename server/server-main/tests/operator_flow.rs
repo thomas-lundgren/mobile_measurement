@@ -190,3 +190,34 @@ async fn tests_list_and_stop() {
     let (s, _) = send(&st, "POST", "/api/v1/tests/nope/stop", Some(&jwt)).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
+
+/// Every flow type the test plan accepts must fit the flows table (the CHECK
+/// refused app_traffic, so such tests failed at creation).
+#[tokio::test]
+async fn flows_table_takes_every_flow_type() {
+    let st = state().await;
+    seed_device(&st).await;
+    sqlx::query("INSERT INTO sessions(session_id, device_id, started_at) VALUES('ses_a','dev_a',0)")
+        .execute(&st.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO tests(test_id, session_id, device_id, plan_name, plan_version, plan_json, \
+            server_host, logging_config_json, logging_config_version, state, created_at) \
+         VALUES('tst_a','ses_a','dev_a','p',1,'{}','h','{}',1,'RUNNING',5)",
+    )
+    .execute(&st.pool)
+    .await
+    .unwrap();
+    let types = ["probe", "realtime_udp", "bulk_tcp", "gateway_ping", "dscp_probe", "app_traffic"];
+    for (i, t) in types.iter().enumerate() {
+        sqlx::query("INSERT INTO flows(test_id, flow_id, type) VALUES('tst_a', ?, ?)")
+            .bind(i as i64)
+            .bind(t)
+            .execute(&st.pool)
+            .await
+            .unwrap_or_else(|e| panic!("{t}: {e}"));
+    }
+    let schema = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../contracts/enums/enums.yaml")).unwrap();
+    assert!(types.iter().all(|t| schema.contains(t)), "flow types listed in contracts/enums");
+}

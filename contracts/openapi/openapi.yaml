@@ -452,12 +452,26 @@ components:
           format: int64
           description: Size of each object.
           minimum: 0
+        chunk_bytes:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: 'kind "down" with rate_kbps: bytes per paced write.'
+          minimum: 0
         count:
           type:
           - integer
           - 'null'
           format: int32
           description: Number of objects (default 1).
+          minimum: 0
+        delay_ms:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: 'kind "down": server think time before the first byte (ms).'
           minimum: 0
         kind:
           $ref: '#/components/schemas/AppActionKind'
@@ -467,6 +481,20 @@ components:
           - 'null'
           format: int32
           description: Objects in flight at once (default 1, at most 6).
+          minimum: 0
+        rate_kbps:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: 'kind "down": pace the response at this rate, like a token stream.'
+          minimum: 0
+        up_bytes:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: 'kind "down": bytes sent up first (request body, LLM context).'
           minimum: 0
     AppActionKind:
       type: string
@@ -482,6 +510,7 @@ components:
       - video
       - social
       - mixed
+      - agent
       - script
     Battery:
       type: object

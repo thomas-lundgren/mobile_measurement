@@ -71,3 +71,42 @@ def test_no_app_traffic():
     rows = [{"node": "mobile", "flow_id": 1, "sequence_number": 0, "direction": "SENT", "protocol": "UDP",
              "utc_ns": 0, "mono_ns": 0, "payload_size": 200}]
     assert app.analyze(synthetic_test(packets=make_packets(rows))) is None
+
+
+def test_v2_llm_stream_and_tool_call():
+    """An LLM call (20 kB up, 800 ms to the first token, a stream with one
+    1.5 s stall), a parallel MCP call and an upload that only gets an ack."""
+    rows = []
+
+    def tag(oid, act, down, up):
+        return {"flow_id": 9, "sequence_number": oid, "protocol": "TCP", "node": "mobile",
+                "app_activity": act, "app_object_bytes": down, "app_up_bytes": up}
+
+    def at(t, d, n, **k):
+        rows.append(dict(k, direction=d, utc_ns=t, mono_ns=t, payload_size=n))
+
+    llm = tag(1 << 20, "llm_call", 6000, 20_000)
+    at(0, "SENT", 44, **llm)
+    at(10 * MS, "SENT", 20_000, **llm)
+    reads = [810 + 20 * i for i in range(20)] + [2600 + 20 * i for i in range(23)]
+    for i, t in enumerate(reads):
+        at(t * MS, "RECEIVED", 6000 // 43 + (6000 % 43 if i == 0 else 0), **llm)
+    mcp = tag(2 << 20, "mcp_call", 4000, 1200)
+    at(3500 * MS, "SENT", 44, **mcp)
+    at(3501 * MS, "SENT", 1200, **mcp)
+    at(3900 * MS, "RECEIVED", 4000, **mcp)
+    up = tag(3 << 20, "photo_upload", 0, 300_000)
+    at(5000 * MS, "SENT", 44, **up)
+    at(5100 * MS, "SENT", 300_000, **up)
+    at(5150 * MS, "RECEIVED", 44, **up)
+    r = app.analyze(synthetic_test(packets=make_packets(rows)))
+    acts = {a["activity"]: a for a in r["activities"]}
+    assert r["mbytes_up"] == round((20_000 + 1200 + 300_000) / 1e6, 2)
+    assert r["mbytes_down"] == 0.01
+    a = acts["llm_call"]
+    assert a["complete_share"] == 1.0
+    assert a["think_ms"]["p50"] == 800.0  # after the context went up
+    assert a["gap_ms"]["max"] == 1410.0 and a["stalls_1s"] == 1
+    assert acts["mcp_call"]["think_ms"]["p50"] == 399.0
+    p = acts["photo_upload"]
+    assert p["complete_share"] == 1.0 and p["done_ms"]["p50"] == 150.0 and p["gap_ms"] is None

@@ -100,6 +100,9 @@ pub enum AppProfile {
     Video,
     Social,
     Mixed,
+    /// An AI agent: LLM calls (context up, streamed reply) and tool calls
+    /// (MCP, web fetch) in task loops.
+    Agent,
     Script,
 }
 
@@ -120,6 +123,18 @@ pub struct AppAction {
     /// Activity name for the logs (contracts/packets/app_request.md).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub activity: Option<String>,
+    /// kind "down": bytes sent up first (request body, LLM context).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub up_bytes: Option<u64>,
+    /// kind "down": server think time before the first byte (ms).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub delay_ms: Option<u32>,
+    /// kind "down": pace the response at this rate, like a token stream.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub rate_kbps: Option<u32>,
+    /// kind "down" with rate_kbps: bytes per paced write.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub chunk_bytes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

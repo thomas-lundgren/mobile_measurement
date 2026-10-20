@@ -2,15 +2,20 @@
 users' objects fared, and what their load did to the realtime streams.
 
 Every object's rows share its ``object_id`` (``sequence_number``) and carry
-``app_activity`` / ``app_object_bytes`` (contracts/packets/app_request.md). On
-the mobile node an object is the request (SENT, 24 B), then the data: RECEIVED
-chunks of a download, or SENT chunks of an upload followed by the server's
-RECEIVED 24-B acknowledgement. So per object:
+``app_activity`` / ``app_object_bytes`` / ``app_up_bytes``
+(contracts/packets/app_request.md). On the mobile node an object is the
+request (SENT), the bytes going up (SENT: request body, LLM context, upload),
+then RECEIVED: the response, or the server's acknowledgement when there is
+none (``app_object_bytes`` 0). v1 rows (no ``app_up_bytes``) are either a
+download or an upload. So per object:
 
-- ``wait_ms``: request → first byte (download) / acknowledgement (upload)
-  minus the send time — for a download, time to first byte;
-- ``done_ms``: request → last byte (download) / acknowledgement (upload);
-- ``complete``: all bytes arrived (download) or acknowledged (upload).
+- ``wait_ms``: request → first response byte (or acknowledgement);
+- ``think_ms``: last byte up → first response byte: the server's think time
+  (an LLM's time to first token, a tool's latency) plus the network;
+- ``done_ms``: request → last byte (or acknowledgement);
+- ``gap_ms``: the longest pause between response reads after the first — a
+  stalled token stream or download;
+- ``complete``: all response bytes arrived (or the upload was acknowledged).
 
 Objects of one *episode* (``object_id >> 20``: a page view with its objects, a
 mail sync, a video segment burst) together give e.g. the **page load time**.
@@ -29,7 +34,7 @@ import pandas as pd
 
 from . import schema
 
-REQUEST_BYTES = 24
+REQUEST_BYTES = 24  # v1 request and acknowledgement
 #: An app burst affects packets around it too; treat this much after the last
 #: byte as still "active" (queues drain).
 ACTIVE_TAIL_NS = 200_000_000
@@ -55,29 +60,41 @@ def objects(td) -> pd.DataFrame:
     m["size"] = pd.to_numeric(m["payload_size"], errors="coerce").fillna(0)
     m = m.sort_values("t", kind="stable")
     out = []
+    has_up = "app_up_bytes" in m
     for (flow, oid), g in m.groupby(["flow_id", "sequence_number"], sort=False):
         req = g.iloc[0]
         rest = g.iloc[1:]
         total = int(pd.to_numeric(req.get("app_object_bytes"), errors="coerce") or 0)
         sent = rest[rest["direction"] == schema.DIR_SENT]
         got = rest[rest["direction"] == schema.DIR_RECEIVED]
-        upload = int(sent["size"].sum()) > 0
+        up_col = pd.to_numeric(req.get("app_up_bytes"), errors="coerce") if has_up else np.nan
+        if pd.notna(up_col):  # v2: response size and upload size both known
+            up, down = int(up_col), total
+            upload = down == 0
+        else:  # v1: either a download or an upload of `total` bytes
+            upload = int(sent["size"].sum()) > 0
+            up, down = (total, 0) if upload else (0, total)
+        t_up_end = sent["t"].iloc[-1] if len(sent) else req["t"]
         if upload:
-            ack = got[got["size"] == REQUEST_BYTES]
-            end = ack["t"].iloc[0] if len(ack) else None
-            first = sent["t"].iloc[0] if len(sent) else None
-            complete = len(ack) > 0
+            end = got["t"].iloc[0] if len(got) else None
+            first = end
+            complete = len(got) > 0
+            gap = None
         else:
             end = got["t"].iloc[-1] if len(got) else None
             first = got["t"].iloc[0] if len(got) else None
-            complete = int(got["size"].sum()) >= total > 0
+            complete = int(got["size"].sum()) >= down > 0
+            gap = float(np.diff(got["t"].to_numpy(dtype="float")).max()) / 1e6 if len(got) >= 2 else None
         out.append({
             "flow_id": int(flow), "object_id": int(oid), "episode": int(oid) >> 20,
-            "activity": req["app_activity"], "upload": upload, "bytes": total,
-            "t_req": req["t"], "t_first": first, "t_end": end, "complete": bool(complete),
+            "activity": req["app_activity"], "upload": upload, "bytes": down if down else up,
+            "up_bytes": up, "down_bytes": down,
+            "t_req": req["t"], "t_up_end": t_up_end, "t_first": first, "t_end": end,
+            "complete": bool(complete), "gap_ms": gap,
         })  # fmt: skip
     df = pd.DataFrame(out)
     df["wait_ms"] = (df["t_first"].astype("float") - df["t_req"]) / 1e6
+    df["think_ms"] = (df["t_first"].astype("float") - df["t_up_end"].astype("float")) / 1e6
     df["done_ms"] = (df["t_end"].astype("float") - df["t_req"]) / 1e6
     return df
 
@@ -164,8 +181,12 @@ def analyze(td) -> dict | None:
         done = g[g["complete"]]
         acts.append({
             "activity": act, "objects": len(g), "complete_share": round(float(g["complete"].mean()), 3),
-            "mbytes": round(float(g["bytes"].sum()) / 1e6, 2),
+            "mbytes": round(float(g["down_bytes"].sum()) / 1e6, 2),
+            "mbytes_up": round(float(g["up_bytes"].sum()) / 1e6, 2),
             "wait_ms": _pcts(done["wait_ms"]), "done_ms": _pcts(done["done_ms"]),
+            "think_ms": _pcts(done["think_ms"]) if (done["up_bytes"] > 0).any() else None,
+            "gap_ms": _pcts(done["gap_ms"]),
+            "stalls_1s": int((g["gap_ms"] > 1000).sum()),
         })  # fmt: skip
     episodes = []
     for kind, g in ep.groupby("kind"):
@@ -175,8 +196,8 @@ def analyze(td) -> dict | None:
     span = (obj["t_end"].astype("float").max() - obj["t_req"].min()) / 1e9
     return {
         "objects": len(obj),
-        "mbytes_down": round(float(obj.loc[~obj["upload"], "bytes"].sum()) / 1e6, 2),
-        "mbytes_up": round(float(obj.loc[obj["upload"], "bytes"].sum()) / 1e6, 2),
+        "mbytes_down": round(float(obj["down_bytes"].sum()) / 1e6, 2),
+        "mbytes_up": round(float(obj["up_bytes"].sum()) / 1e6, 2),
         "span_s": round(float(span), 1) if np.isfinite(span) else None,
         "activities": sorted(acts, key=lambda a: -a["objects"]),
         "episodes": episodes,

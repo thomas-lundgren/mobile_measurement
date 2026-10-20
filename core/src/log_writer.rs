@@ -100,8 +100,13 @@ pub struct PacketTiming {
     pub sock_outq_bytes: Option<u32>,
     /// app_traffic rows: the user activity the object belongs to.
     pub app_activity: Option<&'static str>,
-    /// app_traffic rows: total size of the object this row is part of.
+    /// app_traffic rows: size of the response of the object this row is part
+    /// of (0 = an upload that only gets an acknowledgement; v1 rows: the
+    /// download or the upload).
     pub app_object_bytes: Option<u64>,
+    /// app_traffic rows: bytes the UE sends up for this object (request body,
+    /// LLM context, upload). Null on rows of v1 requests.
+    pub app_up_bytes: Option<u64>,
 }
 
 impl PacketRow {
@@ -161,6 +166,7 @@ fn packets_schema() -> Schema {
         Field::new("sock_outq_bytes", DataType::UInt32, true),
         Field::new("app_activity", DataType::Utf8, true),
         Field::new("app_object_bytes", DataType::UInt64, true),
+        Field::new("app_up_bytes", DataType::UInt64, true),
     ])
 }
 
@@ -357,6 +363,12 @@ impl SegmentedPacketWriter {
                     self.rows
                         .iter()
                         .map(|r| r.timing.app_object_bytes)
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt64Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.timing.app_up_bytes)
                         .collect::<Vec<_>>(),
                 )) as _,
             ],
@@ -616,7 +628,7 @@ mod tests {
             .build()
             .unwrap();
         let batch = reader.next().unwrap().unwrap();
-        assert_eq!(batch.num_columns(), 25, "join + data columns");
+        assert_eq!(batch.num_columns(), 26, "join + data columns");
         let names: Vec<String> = batch
             .schema()
             .fields()

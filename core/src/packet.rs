@@ -12,6 +12,7 @@ pub const PKT_DSCP_PROBE: u8 = 0x03;
 pub const PKT_APP_REQUEST: u8 = 0x04;
 /// Initial per-type format version.
 pub const VER_1: u8 = 0x01;
+pub const VER_2: u8 = 0x02;
 
 /// Sentinel: field not yet filled by the remote (set in the first UE send).
 pub const DSCP_UNKNOWN: u8 = 0xFF;
@@ -241,6 +242,76 @@ impl AppRequest {
     }
 }
 
+/// App-traffic exchange (`pkt_t = 0x04`, `ver = 0x02`), 44 bytes on the wire:
+/// `up_bytes` follow the header; once the server has them it waits `delay_ms`
+/// (think time: an LLM's time to first token, a tool's or web server's
+/// latency), then answers with `down_bytes`, paced at `rate_bps` in
+/// `chunk_bytes` pieces when `rate_bps > 0` (a token stream), else as fast as
+/// it can. With `down_bytes = 0` it echoes these 44 bytes instead, so the UE
+/// sees when the upload completed. v1 requests are the two plain cases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppExchange {
+    pub activity: u8,
+    pub flow_id: u32,
+    pub object_id: u64,
+    pub up_bytes: u64,
+    pub down_bytes: u64,
+    pub delay_ms: u32,
+    pub rate_bps: u32,
+    pub chunk_bytes: u32,
+}
+
+impl AppExchange {
+    pub const CORE_LEN: usize = 42;
+    pub const WIRE_LEN: usize = 2 + Self::CORE_LEN; // 44
+
+    pub fn to_bytes(&self) -> [u8; Self::WIRE_LEN] {
+        let mut b = [0u8; Self::WIRE_LEN];
+        b[0] = PKT_APP_REQUEST;
+        b[1] = VER_2;
+        b[2] = self.activity;
+        // b[3] reserved, 0
+        b[4..8].copy_from_slice(&self.flow_id.to_be_bytes());
+        b[8..16].copy_from_slice(&self.object_id.to_be_bytes());
+        b[16..24].copy_from_slice(&self.up_bytes.to_be_bytes());
+        b[24..32].copy_from_slice(&self.down_bytes.to_be_bytes());
+        b[32..36].copy_from_slice(&self.delay_ms.to_be_bytes());
+        b[36..40].copy_from_slice(&self.rate_bps.to_be_bytes());
+        b[40..44].copy_from_slice(&self.chunk_bytes.to_be_bytes());
+        b
+    }
+
+    pub fn decode(buf: &[u8]) -> Result<Self, PacketError> {
+        if buf.len() < 2 {
+            return Err(PacketError::ShortBuffer);
+        }
+        if buf[0] != PKT_APP_REQUEST || buf[1] != VER_2 {
+            return Err(PacketError::UnknownType(buf[0], buf[1]));
+        }
+        if buf.len() < Self::WIRE_LEN {
+            return Err(PacketError::ShortBuffer);
+        }
+        let u32_at = |i: usize| u32::from_be_bytes(buf[i..i + 4].try_into().unwrap());
+        let u64_at = |i: usize| u64::from_be_bytes(buf[i..i + 8].try_into().unwrap());
+        Ok(Self {
+            activity: buf[2],
+            flow_id: u32_at(4),
+            object_id: u64_at(8),
+            up_bytes: u64_at(16),
+            down_bytes: u64_at(24),
+            delay_ms: u32_at(32),
+            rate_bps: u32_at(36),
+            chunk_bytes: u32_at(40),
+        })
+    }
+
+    /// The v2 equivalent of a v1 request.
+    pub fn from_v1(r: &AppRequest) -> Self {
+        let (up_bytes, down_bytes) = if r.kind == AppRequest::UPLOAD { (r.size, 0) } else { (0, r.size) };
+        Self { activity: r.activity, flow_id: r.flow_id, object_id: r.object_id, up_bytes, down_bytes, delay_ms: 0, rate_bps: 0, chunk_bytes: 0 }
+    }
+}
+
 /// Either packet type, dispatched on the header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Packet {
@@ -276,6 +347,19 @@ mod tests {
         assert_eq!(AppRequest::decode(&b[..10]), Err(PacketError::ShortBuffer));
         assert_eq!(AppRequest::decode(&[0x02, 0x01, 0, 0]), Err(PacketError::UnknownType(2, 1)));
     }
+    #[test]
+    fn app_exchange_round_trips_and_reads_v1() {
+        let x = AppExchange { activity: 9, flow_id: 7, object_id: 5 << 20 | 2, up_bytes: 40_000, down_bytes: 12_000, delay_ms: 900, rate_bps: 30_000, chunk_bytes: 140 };
+        let b = x.to_bytes();
+        assert_eq!(&b[..4], &[0x04, 0x02, 0x09, 0x00]);
+        assert_eq!(AppExchange::decode(&b), Ok(x));
+        assert_eq!(AppExchange::decode(&b[..43]), Err(PacketError::ShortBuffer));
+        assert_eq!(AppExchange::decode(&[0x04, 0x01, 0, 0]), Err(PacketError::UnknownType(4, 1)));
+        let up = AppRequest { kind: AppRequest::UPLOAD, activity: 8, flow_id: 3, object_id: 1, size: 500 };
+        let v = AppExchange::from_v1(&up);
+        assert_eq!((v.up_bytes, v.down_bytes, v.delay_ms, v.rate_bps), (500, 0, 0, 0));
+    }
+
     use std::path::PathBuf;
 
     #[test]
@@ -370,6 +454,32 @@ mod tests {
             let expected = hex_to_bytes(case["hex"].as_str().unwrap());
             assert_eq!(pkt.to_bytes().to_vec(), expected, "encode `{name}`");
             assert_eq!(AppRequest::decode(&expected).unwrap(), pkt, "decode `{name}`");
+        }
+    }
+
+    #[test]
+    fn golden_app_exchange_v2() {
+        let doc: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(vectors_dir().join("app_exchange_v2.json")).unwrap(),
+        )
+        .unwrap();
+        for case in doc["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let d = &case["decoded"];
+            let n = |k: &str| d[k].as_u64().unwrap();
+            let pkt = AppExchange {
+                activity: n("activity") as u8,
+                flow_id: n("flow_id") as u32,
+                object_id: n("object_id"),
+                up_bytes: n("up_bytes"),
+                down_bytes: n("down_bytes"),
+                delay_ms: n("delay_ms") as u32,
+                rate_bps: n("rate_bps") as u32,
+                chunk_bytes: n("chunk_bytes") as u32,
+            };
+            let expected = hex_to_bytes(case["hex"].as_str().unwrap());
+            assert_eq!(pkt.to_bytes().to_vec(), expected, "encode `{name}`");
+            assert_eq!(AppExchange::decode(&expected).unwrap(), pkt, "decode `{name}`");
         }
     }
 

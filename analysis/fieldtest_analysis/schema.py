@@ -49,6 +49,7 @@ PACKETS = [
     "sock_outq_bytes",
     "app_activity",
     "app_object_bytes",
+    "app_up_bytes",
 ]
 
 CLOCK = [
