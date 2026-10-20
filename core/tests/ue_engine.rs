@@ -102,6 +102,47 @@ fn probe_against_echo_peer() {
         parquet_rows(dir.path()) >= 16,
         "rows: SENT + RECEIVED expected"
     );
+    // echoes carry the kernel receive time, at or before the app's read
+    let (with, without) = kernel_rx_on_received(dir.path());
+    assert!(with >= 8 && without == 0, "kernel rx stamps: {with} with, {without} without");
+}
+
+/// RECEIVED rows with / without a kernel receive time no later than utc_ns.
+fn kernel_rx_on_received(dir: &std::path::Path) -> (usize, usize) {
+    use arrow::array::{Array, StringArray, UInt64Array};
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    let (mut with, mut without) = (0, 0);
+    for e in std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok()) {
+        let p = e.path();
+        if p.extension().map(|x| x == "parquet") != Some(true) {
+            continue;
+        }
+        let r = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(&p).unwrap())
+            .unwrap()
+            .build()
+            .unwrap();
+        for b in r {
+            let b = b.unwrap();
+            let col = |n: &str| b.column(b.schema().index_of(n).unwrap()).clone();
+            let dir = col("direction");
+            let dir = dir.as_any().downcast_ref::<StringArray>().unwrap();
+            let utc = col("utc_ns");
+            let utc = utc.as_any().downcast_ref::<UInt64Array>().unwrap();
+            let k = col("kernel_rx_utc_ns");
+            let k = k.as_any().downcast_ref::<UInt64Array>().unwrap();
+            for i in 0..b.num_rows() {
+                if dir.value(i) != "RECEIVED" {
+                    continue;
+                }
+                if k.is_valid(i) && k.value(i) <= utc.value(i) {
+                    with += 1;
+                } else {
+                    without += 1;
+                }
+            }
+        }
+    }
+    (with, without)
 }
 
 /// (sequence_number → mono_ns) for SENT and RECEIVED rows of one flow.

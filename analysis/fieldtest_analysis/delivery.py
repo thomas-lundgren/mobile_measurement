@@ -159,7 +159,9 @@ def _delivery_stats(recv: pd.DataFrame) -> dict:
     out["excess_delay_peaks_ms"] = histogram_peaks(excess, EXCESS_BIN_MS, EXCESS_MAX_MS)
 
     if use_kernel:
-        wake = (pd.to_numeric(recv["utc_ns"], errors="coerce") - kernel).dropna() / 1e3
+        # the app's read time (the loader moves utc_ns to the kernel's)
+        read = recv["read_utc_ns"] if "read_utc_ns" in recv else recv["utc_ns"]
+        wake = (pd.to_numeric(read, errors="coerce") - kernel).dropna() / 1e3
         out["host_wakeup_us"] = {"p50": _r(_pct(wake, 50)), "p99": _r(_pct(wake, 99)), "max": _r(float(wake.max()))}
     return out
 

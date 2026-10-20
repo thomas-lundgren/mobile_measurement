@@ -66,6 +66,31 @@ def _read_segmented(node_dir: Path, stem: str, columns: list[str]) -> pd.DataFra
     return _normalize(pd.concat(frames, ignore_index=True), columns)
 
 
+#: Kernel receive times further than this before the app's read are not trusted.
+MAX_READ_LAG_NS = 10_000_000_000
+
+
+def _arrival_times(pk: pd.DataFrame) -> pd.DataFrame:
+    """Make a RECEIVED row's time its arrival, not the app's read.
+
+    Where the row carries a kernel receive time (``kernel_rx_utc_ns``,
+    ``SO_TIMESTAMPNS``), ``utc_ns`` becomes that time and ``mono_ns`` moves
+    back by the same read lag, so RTT, one-way delay and arrival gaps leave
+    out how late the receiving thread got to the packet. The app's read time
+    stays in ``read_utc_ns`` (every row; equal to ``utc_ns`` where unchanged).
+    """
+    pk["read_utc_ns"] = pk["utc_ns"]
+    if pk.empty:
+        return pk
+    kernel = pd.to_numeric(pk["kernel_rx_utc_ns"], errors="coerce").astype("Int64")
+    lag = pk["utc_ns"] - kernel
+    ok = ((pk["direction"] == schema.DIR_RECEIVED) & lag.notna() & (lag >= 0) & (lag < MAX_READ_LAG_NS)).fillna(False)
+    if ok.any():
+        pk.loc[ok, "utc_ns"] = kernel[ok]
+        pk.loc[ok, "mono_ns"] = pk.loc[ok, "mono_ns"] - lag[ok]
+    return pk
+
+
 @dataclass
 class TestData:
     """All recordings for one test, normalized. Frames may be empty but the
@@ -130,7 +155,7 @@ def load_test(test_dir: str | Path) -> TestData:
     return TestData(
         path=root,
         header=header,
-        packets=_concat(packet_frames, schema.PACKETS),
+        packets=_arrival_times(_concat(packet_frames, schema.PACKETS)),
         clock=_concat(clock_frames, schema.CLOCK),
         events=_concat(event_frames, schema.EVENTS),
         gps=_read_one(root / "gps.parquet", schema.GPS),

@@ -75,3 +75,26 @@ def test_unclosed_segment_is_skipped(twonode_test_dir, tmp_path):
     (d / "server" / "packets_f9_0000.parquet").write_bytes(b"PAR1")
     td = load_test(d)
     assert set(td.nodes) == {"mobile", "server"}
+
+
+def test_received_rows_take_the_kernel_arrival_time(tmp_path):
+    # RECEIVED with a kernel stamp 300 ns before the app read it; one without;
+    # a SENT row (never moved); a stamp after the read (bogus, ignored)
+    node = tmp_path / "mobile"
+    node.mkdir()
+    tbl = pa.table(
+        {
+            "flow_id": pa.array([1, 1, 1, 1], pa.uint32()),
+            "sequence_number": pa.array([0, 1, 2, 3], pa.uint64()),
+            "direction": ["RECEIVED", "RECEIVED", "SENT", "RECEIVED"],
+            "mono_ns": pa.array([1_000, 2_000, 3_000, 4_000], pa.uint64()),
+            "utc_ns": pa.array([10_000, 20_000, 30_000, 40_000], pa.uint64()),
+            "kernel_rx_utc_ns": pa.array([9_700, None, 29_000, 40_500], pa.uint64()),
+        }
+    )
+    pq.write_table(tbl, node / "packets.parquet")
+
+    pk = load_test(tmp_path).packets.sort_values("sequence_number")
+    assert pk["utc_ns"].tolist() == [9_700, 20_000, 30_000, 40_000]
+    assert pk["mono_ns"].tolist() == [700, 2_000, 3_000, 4_000]
+    assert pk["read_utc_ns"].tolist() == [10_000, 20_000, 30_000, 40_000]

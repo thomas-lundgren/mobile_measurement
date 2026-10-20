@@ -64,10 +64,12 @@ pub fn spawn_probe_echo(
         *state.lock().unwrap() = GeneratorState::WaitingForClient;
         let mut buf = [0u8; 2048];
         let mut seen_client = false;
+        let fd = socket.as_raw_fd();
+        let _ = udp_timing::enable_rx_timestamps(fd);
 
         while !stop.load(Ordering::Acquire) {
-            match socket.recv_from(&mut buf) {
-                Ok((n, peer)) => {
+            match udp_timing::recv_stamped(fd, &mut buf) {
+                Ok(udp_timing::Received { n, from: Some(peer), kernel_utc_ns }) => {
                     let recv_ts = Timestamp::now();
                     if !seen_client {
                         seen_client = true;
@@ -81,13 +83,10 @@ pub fn spawn_probe_echo(
                     let seq = ProbePacket::decode(&buf[..n])
                         .map(|p| p.sequence_number)
                         .unwrap_or(0);
-                    sink.push(PacketRow::probe(
-                        flow_id,
-                        seq,
-                        Direction::Received,
-                        recv_ts,
-                        n as u32,
-                    ));
+                    sink.push(PacketRow {
+                        timing: PacketTiming { kernel_rx_utc_ns: kernel_utc_ns, ..PacketTiming::default() },
+                        ..PacketRow::probe(flow_id, seq, Direction::Received, recv_ts, n as u32)
+                    });
 
                     // echo verbatim
                     let send_ts = Timestamp::now();
@@ -103,10 +102,8 @@ pub fn spawn_probe_echo(
                         ));
                     }
                 }
-                Err(ref e)
-                    if e.kind() == std::io::ErrorKind::WouldBlock
-                        || e.kind() == std::io::ErrorKind::TimedOut =>
-                {
+                Ok(_) => {} // no source address: cannot echo
+                Err(ref e) if would_block(e) => {
                     // read timeout — loop to re-check stop
                 }
                 Err(_) => { /* transient; keep serving */ }

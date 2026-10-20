@@ -7,7 +7,8 @@
 //! clock as the Logger's rows), as JSON lines:
 //!
 //! - `{"k":"q",…}` root qdisc of every modem / Wi-Fi link carrying traffic,
-//!   polled at `--hz` (default 100) and written on change or every second:
+//!   polled at `--hz` (default 100) while a test runs, else at `--idle-hz`
+//!   (default 2), and written on change or every second:
 //!   bytes/packets sent, drops, overlimits, **requeues** (the driver refused a
 //!   packet because the modem stopped the queue: flow control) and backlog.
 //! - `{"k":"u",…}` UDP counters from `/proc/net/snmp` (SndbufErrors: sends
@@ -16,8 +17,10 @@
 //!   estimates, signal-strength / network-state / data-call indications.
 //!
 //! Lines go to hourly files `<dir>/probe-<YYYYMMDDHH>.jsonl` (kept
-//! `--keep-hours`). The Logger fetches a test's window over
-//! `127.0.0.1:<port>`: `RANGE <t0_ns> <t1_ns>\n` → the matching lines;
+//! `--keep-hours`). The Logger talks to it over `127.0.0.1:<port>`:
+//! `FAST <seconds>\n` → poll at `--hz` for that long (a test starts; `FAST 0`
+//! when it ends), so the 100 Hz wake-ups never run outside a measurement;
+//! `RANGE <t0_ns> <t1_ns>\n` → the matching lines;
 //! `PING\n` → `PONG <version> <started_utc_ns>`.
 
 use std::collections::HashMap;
@@ -26,6 +29,7 @@ use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -35,6 +39,8 @@ mod netlink;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const HEARTBEAT: Duration = Duration::from_secs(1);
 const SNMP_EVERY: Duration = Duration::from_millis(100);
+/// Longest fast-polling window one FAST command can ask for.
+const FAST_MAX_S: u64 = 3600;
 
 fn utc_ns() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0)
@@ -130,9 +136,13 @@ fn emit(store: &Shared, t: u64, v: serde_json::Value) {
     store.lock().unwrap().write(t, &v.to_string());
 }
 
+fn period(hz: u32) -> Duration {
+    Duration::from_micros(1_000_000 / hz.max(1) as u64)
+}
+
 /// qdisc + UDP counters. Links named rmnet* / wlan* that have sent packets.
-fn poll_loop(store: Shared, hz: u32) {
-    let period = Duration::from_micros(1_000_000 / hz.max(1) as u64);
+/// Polls at `hz` until `fast_until` (UTC ns), else at `idle_hz`.
+fn poll_loop(store: Shared, hz: u32, idle_hz: u32, fast_until: Arc<AtomicU64>) {
     let mut nl = match netlink::QdiscDumper::new() {
         Ok(n) => Some(n),
         Err(e) => {
@@ -168,7 +178,7 @@ fn poll_loop(store: Shared, hz: u32) {
             }
         }
         if Instant::now() >= next_snmp {
-            next_snmp += SNMP_EVERY;
+            next_snmp = Instant::now() + SNMP_EVERY;
             if let Some(u) = read_udp_snmp() {
                 let vals: Vec<u64> = u.values().copied().collect();
                 let fresh = match &last_u {
@@ -185,7 +195,7 @@ fn poll_loop(store: Shared, hz: u32) {
                 }
             }
         }
-        next += period;
+        next += if t < fast_until.load(Ordering::Relaxed) { period(hz) } else { period(idle_hz) };
         let now = Instant::now();
         if next > now {
             thread::sleep(next - now);
@@ -268,7 +278,7 @@ fn range(dir: &Path, t0: u64, t1: u64, out: &mut impl Write) -> io::Result<()> {
     Ok(())
 }
 
-fn serve(store: Shared, port: u16, started: u64) {
+fn serve(store: Shared, port: u16, started: u64, fast_until: Arc<AtomicU64>) {
     let listener = match TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
         Err(e) => {
@@ -278,6 +288,7 @@ fn serve(store: Shared, port: u16, started: u64) {
     };
     for stream in listener.incoming().flatten() {
         let store = store.clone();
+        let fast_until = fast_until.clone();
         thread::spawn(move || {
             let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
             let mut line = String::new();
@@ -290,6 +301,13 @@ fn serve(store: Shared, port: u16, started: u64) {
             match parts.as_slice() {
                 ["PING"] => {
                     let _ = writeln!(w, "PONG {VERSION} {started}");
+                }
+                ["FAST", secs] => {
+                    let Ok(secs) = secs.parse::<u64>() else { return };
+                    let t = utc_ns();
+                    fast_until.store(t + secs.min(FAST_MAX_S) * 1_000_000_000, Ordering::Relaxed);
+                    emit(&store, t, serde_json::json!({"t": t, "k": "fast", "s": secs.min(FAST_MAX_S)}));
+                    let _ = writeln!(w, "OK");
                 }
                 ["RANGE", a, b] => {
                     let (Ok(t0), Ok(t1)) = (a.parse(), b.parse()) else { return };
@@ -330,14 +348,16 @@ fn main() {
     let dir = PathBuf::from(arg(&args, "--dir", "/data/local/tmp/mp/probe"));
     let port: u16 = arg(&args, "--port", "47600").parse().unwrap_or(47600);
     let hz: u32 = arg(&args, "--hz", "100").parse().unwrap_or(100);
+    let idle_hz: u32 = arg(&args, "--idle-hz", "2").parse().unwrap_or(2);
     let keep_hours: u64 = arg(&args, "--keep-hours", "48").parse().unwrap_or(48);
     let _ = fs::create_dir_all(&dir);
     let started = utc_ns();
     let store: Shared = Arc::new(Mutex::new(Store { dir, hour: 0, out: None, keep_hours }));
-    emit(&store, started, serde_json::json!({"t": started, "k": "start", "version": VERSION, "hz": hz}));
+    emit(&store, started, serde_json::json!({"t": started, "k": "start", "version": VERSION, "hz": hz, "idle_hz": idle_hz}));
 
-    let s = store.clone();
-    thread::spawn(move || poll_loop(s, hz));
+    let fast_until = Arc::new(AtomicU64::new(0));
+    let (s, f) = (store.clone(), fast_until.clone());
+    thread::spawn(move || poll_loop(s, hz, idle_hz, f));
     let s = store.clone();
     thread::spawn(move || logcat_loop(s));
     let s = store.clone();
@@ -345,7 +365,7 @@ fn main() {
         thread::sleep(Duration::from_secs(1));
         s.lock().unwrap().flush();
     });
-    serve(store, port, started);
+    serve(store, port, started, fast_until);
 }
 
 #[cfg(test)]

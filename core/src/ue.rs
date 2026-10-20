@@ -365,6 +365,9 @@ fn probe_ue(
     let mut recv_buf = [0u8; 2048];
     let mut seq = 1u64;
     let mut next = Instant::now();
+    // kernel receive times: an echo's RTT must not include how late this
+    // thread got to read it (the app traffic beside it loads the CPU)
+    let _ = udp_timing::enable_rx_timestamps(socket.as_raw_fd());
 
     while !stop.load(Ordering::Acquire) {
         let ts = Timestamp::now();
@@ -392,6 +395,7 @@ fn probe_ue(
         let now = Instant::now();
         if reopen.note(!sent, now) {
             if let Some(s) = reopen.reopen(now) {
+                let _ = udp_timing::enable_rx_timestamps(s.as_raw_fd());
                 socket = s;
             }
         }
@@ -401,20 +405,23 @@ fn probe_ue(
             &socket,
             next,
             &mut recv_buf,
-            |buf| socket.recv(buf).map(|n| (n, ())),
-            |pkt, (), recv_ts| {
+            |buf| udp_timing::recv_stamped(socket.as_raw_fd(), buf).map(|r| (r.n, r.kernel_utc_ns)),
+            |pkt, kernel_rx_utc_ns, recv_ts| {
                 if let Ok(echo) = ProbePacket::decode(pkt) {
                     counters.received.fetch_add(1, Ordering::Relaxed);
                     counters
                         .bytes_received
                         .fetch_add(pkt.len() as u64, Ordering::Relaxed);
-                    sink.push(PacketRow::probe(
-                        flow.flow_id,
-                        echo.sequence_number,
-                        Direction::Received,
-                        recv_ts,
-                        pkt.len() as u32,
-                    ));
+                    sink.push(PacketRow {
+                        timing: PacketTiming { kernel_rx_utc_ns, ..PacketTiming::default() },
+                        ..PacketRow::probe(
+                            flow.flow_id,
+                            echo.sequence_number,
+                            Direction::Received,
+                            recv_ts,
+                            pkt.len() as u32,
+                        )
+                    });
                 }
             },
         );

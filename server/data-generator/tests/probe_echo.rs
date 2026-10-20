@@ -124,6 +124,30 @@ async fn probe_echo_end_to_end() {
         !files.is_empty(),
         "expected server packets.parquet segments"
     );
+    // the server's RECEIVED rows carry the kernel receive time
+    let mut stamped = 0;
+    for f in files.iter().filter(|f| f.file_name().unwrap().to_string_lossy().starts_with("packets")) {
+        let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+            std::fs::File::open(f).unwrap(),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        for b in reader {
+            let b = b.unwrap();
+            let dir = b.column_by_name("direction").unwrap().as_any()
+                .downcast_ref::<arrow::array::StringArray>().unwrap().clone();
+            let k = b.column_by_name("kernel_rx_utc_ns").unwrap().as_any()
+                .downcast_ref::<arrow::array::UInt64Array>().unwrap().clone();
+            for i in 0..b.num_rows() {
+                if dir.value(i) == "RECEIVED" {
+                    assert!(arrow::array::Array::is_valid(&k, i), "RECEIVED row without kernel time");
+                    stamped += 1;
+                }
+            }
+        }
+    }
+    assert!(stamped >= 18, "{stamped} stamped RECEIVED rows");
 
     // CLIENT_CONNECTED records the UE's address as the server saw it.
     let events = std::fs::read_dir(&log_dir)

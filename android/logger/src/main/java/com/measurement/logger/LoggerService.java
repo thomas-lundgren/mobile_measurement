@@ -35,6 +35,7 @@ public final class LoggerService extends Service {
     /** Start-service action: run a reachability check now (the app's button). */
     public static final String ACTION_REACH_CHECK = "com.measurement.logger.REACH_CHECK";
     private static final String CHANNEL = "logger";
+    private static final int MP_PROBE_PORT = 47600;
     static final String PREFS = "mp_logger";
 
     /** Coarse state surfaced to the UI. */
@@ -56,6 +57,10 @@ public final class LoggerService extends Service {
      *  reconnecting (the uploader then waits). */
     private volatile String currentSession;
     private final Object uploadSignal = new Object();
+    /** True from a test's start to its seal. The uploader stays off the
+     *  network meanwhile, so an upload never shares the link with a
+     *  measurement; it resumes (missing files only) once the test is sealed. */
+    private volatile boolean measuring;
     /** Held for the service's lifetime: with the screen off (phone in a pocket)
      *  the CPU would otherwise suspend, stalling flow threads and timers and
      *  distorting every measurement. */
@@ -359,6 +364,7 @@ public final class LoggerService extends Service {
         setState("PREPARING " + testId);
         String ueConfig = buildUeConfig(payload, deviceId, sessionId, mobileDir.getAbsolutePath());
 
+        measuring = true;
         long h = RustCore.coreNew();
         // The core reports a failed start either as a non-zero return or as a
         // thrown exception (e.g. "start failed: Connection refused").
@@ -372,6 +378,8 @@ public final class LoggerService extends Service {
         }
         if (startError != null) {
             RustCore.destroy(h);
+            measuring = false;
+            wakeUploader();
             // Leave it unacked so the server redelivers it (coverage may be
             // back by then), but give up after a few tries so one bad test
             // can't block the command queue forever.
@@ -397,6 +405,7 @@ public final class LoggerService extends Service {
 
         setState("RUNNING_TEST " + testId);
         int durationSec = payload.getJSONObject("test_plan").optInt("duration_sec", 30);
+        probeFast(durationSec + 30);
         PowerManager.WakeLock screen = screenOnDuringTest();
         try {
             for (int i = 0; i < durationSec && running; i++) {
@@ -411,9 +420,11 @@ public final class LoggerService extends Service {
             gps.stop();
             radio.stop();
             clock.stop();
+            probeFast(0);
             RustCore.stopTest(h);
             JSONArray sealed = new JSONArray(RustCore.sealedFiles(h));
             RustCore.destroy(h);
+            measuring = false;
             queueUpload(testRoot, testId, sealed);
         }
 
@@ -422,6 +433,19 @@ public final class LoggerService extends Service {
         // blocks the next test.
         ack(client, session, deviceId, commandId);
         setState("IDLE");
+    }
+
+    /** mp-probe (the adb-started collector, if running) polls the modem queues
+     *  at full rate only for this long; 0 = back to idle now. Best-effort. */
+    private static void probeFast(int seconds) {
+        try (java.net.Socket s = new java.net.Socket()) {
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", MP_PROBE_PORT), 200);
+            s.setSoTimeout(500);
+            s.getOutputStream().write(("FAST " + seconds + "\n").getBytes(StandardCharsets.US_ASCII));
+            s.getInputStream().read(); // "OK": the window is set
+        } catch (java.io.IOException ignored) {
+            // not running (e.g. after a reboot): nothing to slow down
+        }
     }
 
     /** Ack a command; a 404 means it was already acked (our earlier ack landed
@@ -590,7 +614,7 @@ public final class LoggerService extends Service {
             try {
                 List<File> pending = pendingUploads();
                 String session = currentSession;
-                if (pending.isEmpty() || session == null) {
+                if (pending.isEmpty() || session == null || measuring) {
                     synchronized (uploadSignal) {
                         uploadSignal.wait(pending.isEmpty() ? 60_000 : 2_000);
                     }
@@ -600,11 +624,16 @@ public final class LoggerService extends Service {
                     if (!running) {
                         return;
                     }
+                    if (measuring) {
+                        throw new UploadPaused();
+                    }
                     uploadOne(client, session, marker);
                 }
                 backoff = UPLOAD_BACKOFF_MIN_MS;
             } catch (InterruptedException e) {
                 return;
+            } catch (UploadPaused e) {
+                // a test started: wait for it (queueUpload wakes us), no backoff
             } catch (Throwable e) {
                 // Any failure (no coverage, timeout, expired session, server
                 // down): keep the marker and retry later.
@@ -665,11 +694,18 @@ public final class LoggerService extends Service {
         String uploadId = init.getString("upload_id");
         JSONArray needed = init.getJSONArray("needed_paths");
         for (int i = 0; i < needed.length(); i++) {
+            if (measuring) {
+                throw new UploadPaused();
+            }
             String rel = needed.getString(i);
             byte[] bytes = Files.readAllBytes(new File(testRoot, rel).toPath());
             client.putFile(session, testId, uploadId, rel, bytes);
         }
         client.uploadComplete(session, testId, uploadId);
+    }
+
+    /** A test started mid-upload; the rest of the files go after it. */
+    private static final class UploadPaused extends Exception {
     }
 
     private static String relPath(File root, File f) {
