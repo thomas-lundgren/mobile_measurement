@@ -35,7 +35,7 @@ from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 12
+SERIES_VERSION = 13
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -127,7 +127,9 @@ def _plan_flows(db: str | None) -> dict[str, dict[int, dict]]:
     return out
 
 
-def test_series(test_dir: Path, plan: str | None = None, plan_flows: dict[int, dict] | None = None) -> dict | None:
+def test_series(
+    test_dir: Path, plan: str | None = None, plan_flows: dict[int, dict] | None = None, bench_dir: Path | None = None
+) -> dict | None:
     td = load_test(test_dir)
     pk = td.packets
     if pk.empty:
@@ -246,7 +248,7 @@ def test_series(test_dir: Path, plan: str | None = None, plan_flows: dict[int, d
         "up_mbps": None if pd.isna(tput["up_mbps"]) else round(float(tput["up_mbps"]), 1),
         "loss": _udp_loss(td),
     }
-    timing_streams, timing_detail = timing.summarize(td, plan_flows)
+    timing_streams, timing_detail = timing.summarize(td, plan_flows, bench_dir)
     out = {
         "v": SERIES_VERSION,
         "test_id": test_dir.name,
@@ -321,7 +323,7 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
                 data = None
         if data is None:
             try:
-                data = test_series(test_dir, plans.get(test_dir.name), flows.get(test_dir.name))
+                data = test_series(test_dir, plans.get(test_dir.name), flows.get(test_dir.name), Path(root) / "bench")
             except Exception as e:  # truncated upload, unreadable parquet, ...
                 print(f"skip {test_dir.name}: {e}", file=sys.stderr)
                 continue

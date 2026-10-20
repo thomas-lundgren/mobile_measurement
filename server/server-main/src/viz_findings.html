@@ -250,10 +250,13 @@
           <div class="heatwrap"><canvas id="dWaterfall"></canvas></div></div>
       </div>
       <div id="dBufferBox">
-        <p>Uplink buffer fill: packets in the modem and the phone's OS queue (top); sent vs delivered rate (250 ms
+        <p>Uplink buffer fill: packets in the modem, the socket queue and — when the phone was on USB — the modem
+          link's qdisc backlog (top); sent vs delivered rate (250 ms
           average) and share of time blocked in send() (bottom).</p>
         <div id="dBuffer"></div><div id="dRates"></div>
       </div>
+      <div id="dEventsBox"><p>Radio events during the test (USB bench: carrier configs, modem link-capacity
+        estimates, data-call changes; seconds from the test start).</p><div class="scroll"><table id="dEvents"></table></div></div>
       <div><p>Excess-delay spectrum.</p><div id="dDelay"></div></div>
     </div>
   </div>
@@ -794,7 +797,8 @@ async function openDetail(testId, flowId, direction) {
     const bw = $("dBufferBox").clientWidth || 900;
     const s1 = [{}, { label: "packets in modem", stroke: cv("--red"), width: 1.5, scale: "p" }];
     const c1 = [b.t, b.modem_packets];
-    if (b.os_queue_kb) { s1.push({ label: "OS queue KB", stroke: cv("--purple"), width: 1.5, scale: "kb" }); c1.push(b.os_queue_kb); }
+    if (b.os_queue_kb) { s1.push({ label: "socket queue KB", stroke: cv("--purple"), width: 1.5, scale: "kb" }); c1.push(b.os_queue_kb); }
+    if (b.qdisc_backlog_kb) { s1.push({ label: `qdisc backlog KB (${b.qdisc_dev}, USB bench)`, stroke: cv("--orange"), width: 1.5, scale: "kb", spanGaps: true }); c1.push(b.qdisc_backlog_kb); }
     detailPlots.push(new uPlot({ width: bw, height: 200, scales: { x: { time: false } }, series: s1,
       axes: [{ stroke: cv("--muted"), grid: { stroke: cv("--border"), width: 0.5 }, label: "s" },
         { scale: "p", stroke: cv("--red"), grid: { stroke: cv("--border"), width: 0.5 }, size: 52, label: "packets" },
@@ -804,11 +808,17 @@ async function openDetail(testId, flowId, direction) {
       for (let j = Math.max(0, i - k + 1); j <= i; j++) if (a[j] != null) { sum += a[j]; n++; } return n ? sum / n : null; });
     const c2 = [b.t, smooth(b.sent_mbps), smooth(b.delivered_mbps)];
     if (b.blocked_share) { s2.push({ label: "blocked in send()", stroke: cv("--red"), fill: cv("--red") + "33", width: 0.5, scale: "f" }); c2.push(smooth(b.blocked_share)); }
-    detailPlots.push(new uPlot({ width: bw, height: 170, scales: { x: { time: false }, f: { range: [0, 1] } }, series: s2,
+    if (b.requeues) { s2.push({ label: "requeues (modem refused) /50 ms", stroke: cv("--orange"), width: 1, scale: "rq",
+      paths: uPlot.paths.bars({ size: [0.9] }), fill: cv("--orange") + "88" }); c2.push(b.requeues); }
+    detailPlots.push(new uPlot({ width: bw, height: 170, scales: { x: { time: false }, f: { range: [0, 1] }, rq: { range: (u, lo, hi) => [0, Math.max(4, hi * 3)] } }, series: s2,
       axes: [{ stroke: cv("--muted"), grid: { stroke: cv("--border"), width: 0.5 }, label: "s" },
         { stroke: cv("--muted"), grid: { stroke: cv("--border"), width: 0.5 }, size: 52, label: "Mbit/s" },
         { scale: "f", side: 1, stroke: cv("--red"), grid: { show: false }, size: 46, values: (u, v) => v.map((x) => Math.round(100 * x) + "%") }] }, c2, $("dRates")));
   }
+  const ev = det.radio_events || [];
+  $("dEventsBox").style.display = ev.length ? "block" : "none";
+  if (ev.length) table($("dEvents"), [["t s", "num"], ["Event"], ["Detail", "wrap"]],
+    ev.map((e) => [num(e.t, 2), esc(e.kind.replace("_", " ")), esc(e.summary || "")]), "");
   if (st.delay) detailPlots.push(new uPlot({ width: w, height: 200, scales: { x: { time: false }, y: { distr: 3 } },
     axes: axes("Hz", ""), series: [{}, { label: "excess-delay PSD", stroke: cv("--red"), width: 1 }] },
     [st.delay.f, floor(st.delay.psd)], $("dDelay")));

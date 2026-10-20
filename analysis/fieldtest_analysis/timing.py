@@ -15,7 +15,7 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
-from . import delivery, spectral
+from . import bench, delivery, spectral
 from .loader import TestData
 
 #: Streams slower than this (packets/s) are not timing streams.
@@ -84,10 +84,12 @@ def waterfall(times_s: np.ndarray) -> dict | None:
     return {"t": starts, "win_s": WATERFALL_WIN_S, "rows": rows} if rows else None
 
 
-def buffer_timeline(sent: pd.DataFrame, recv: pd.DataFrame) -> dict | None:
+def buffer_timeline(sent: pd.DataFrame, recv: pd.DataFrame, qdisc: pd.DataFrame | None = None) -> dict | None:
     """Uplink buffer fill over the test, on BUFFER_BIN_S bins: packets in the
     modem (sent OK, not yet delivered, not yet given up), the phone's OS queue
-    below the socket, time blocked in send(), and sent vs delivered rate."""
+    below the socket, time blocked in send(), and sent vs delivered rate.
+    With bench data (phone on USB): the modem link's qdisc backlog and the
+    requeues — the modem driver refusing packets, i.e. flow control."""
     if "send_status" in sent:
         ok = sent[sent["send_status"].isna() | (sent["send_status"] == "OK")]
     else:
@@ -134,6 +136,20 @@ def buffer_timeline(sent: pd.DataFrame, recv: pd.DataFrame) -> dict | None:
     if call is not None and np.isfinite(call).any():
         b = pd.Series(np.where(call > 500_000, call, 0.0)).groupby(idx_all).sum().reindex(range(n), fill_value=0)
         out["blocked_share"] = [round(min(1.0, float(v) / 1e9 / BUFFER_BIN_S), 2) for v in b]
+    if qdisc is not None and not qdisc.empty:
+        # the modem link carrying the test: the device that sent the most packets
+        sent_by_dev = qdisc.groupby("dev")["sent_pkts"].agg(lambda x: x.max() - x.min())
+        dev = sent_by_dev.idxmax()
+        q = qdisc[qdisc["dev"] == dev].sort_values("utc_ns")
+        qi = np.clip((q["utc_ns"].astype("int64").to_numpy() - t0) // bin_ns, -1, n)
+        inside = (qi >= 0) & (qi < n)
+        if inside.any():
+            backlog = pd.Series(q["backlog_bytes"].to_numpy()[inside] / 1e3).groupby(qi[inside]).max()
+            out["qdisc_dev"] = dev
+            out["qdisc_backlog_kb"] = [None if pd.isna(v) else round(float(v), 1) for v in backlog.reindex(range(n))]
+            req = q["requeues"].astype("int64")
+            delta = req.diff().clip(lower=0).fillna(0).to_numpy()[inside]
+            out["requeues"] = [int(v) for v in pd.Series(delta).groupby(qi[inside]).sum().reindex(range(n), fill_value=0)]
     return out
 
 
@@ -171,12 +187,17 @@ def _load(sent: pd.DataFrame, recv: pd.DataFrame, e: dict, planned: dict | None 
     }
 
 
-def summarize(td: TestData, plan_flows: dict[int, dict] | None = None) -> tuple[list[dict], dict]:
+def summarize(td: TestData, plan_flows: dict[int, dict] | None = None, bench_dir=None) -> tuple[list[dict], dict]:
     pk = td.packets
     if pk.empty:
         return [], {}
     streams, detail = [], []
     spectra = {(e["flow_id"], e["direction"]): e for e in spectral.analyze(td)}
+    # Bench data (USB collector) over the test, on the phone's clock.
+    mob = pd.to_numeric(pk.loc[pk["node"] == "mobile", "utc_ns"], errors="coerce").dropna()
+    qdisc = radiolog = None
+    if bench_dir is not None and len(mob):
+        qdisc, radiolog = bench.load_window(bench_dir, int(mob.min()) - 5_000_000_000, int(mob.max()) + 5_000_000_000)
     for e in delivery.analyze(td):
         sender_node = "mobile" if e["direction"] == "uplink" else "server"
         sent = pk[(pk["node"] == sender_node) & (pk["flow_id"] == e["flow_id"]) & (pk["direction"] == "SENT")]
@@ -223,9 +244,16 @@ def summarize(td: TestData, plan_flows: dict[int, dict] | None = None) -> tuple[
             rx_t = (k if k.notna().mean() > 0.9 else pd.to_numeric(recv["utc_ns"], errors="coerce")).dropna()
             item["waterfall"] = waterfall(rx_t.to_numpy(dtype=float) / 1e9)
             if e["direction"] == "uplink":
-                item["buffer"] = buffer_timeline(sent, recv)
+                item["buffer"] = buffer_timeline(sent, recv, qdisc)
             detail.append(item)
-    return streams, ({"streams": detail, "heat_step_hz": HEAT_STEP_HZ, "heat_f0_hz": HEAT_F0_HZ, "heat_db": list(HEAT_DB)} if detail else {})
+    out = {"streams": detail, "heat_step_hz": HEAT_STEP_HZ, "heat_f0_hz": HEAT_F0_HZ, "heat_db": list(HEAT_DB)}
+    if radiolog is not None and not radiolog.empty and len(mob):
+        t0 = int(mob.min())
+        out["radio_events"] = [
+            {"t": round((int(r.utc_ns) - t0) / 1e9, 2), "kind": r.kind, "summary": r.summary}
+            for r in radiolog.sort_values("utc_ns").itertuples() if r.kind in ("channel_config", "lce", "data_call")
+        ]
+    return streams, (out if detail else {})
 
 
 def day_summary(tests: list[dict]) -> dict:

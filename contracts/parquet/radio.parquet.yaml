@@ -33,7 +33,7 @@ columns:
   - { name: lte_pci,  type: uint32, nullable: true }
   - { name: lte_rsrp, type: int32,  nullable: true }
 
-  - { name: bandwidth_mhz,          type: uint32, nullable: true }
+  - { name: bandwidth_mhz,          type: uint32, nullable: true, doc: "LTE serving-cell bandwidth (MHz, CellIdentityLte)." }
   - { name: cell_connection_status, type: utf8,   nullable: true, doc: "PRIMARY | SECONDARY | UNKNOWN." }
   - { name: network_type,           type: utf8,   nullable: true, doc: "Radio mode the device reports: LTE | LTE_CA | NR_NSA | NR_ADVANCED | NR_SA (OTHER_<n> for other TelephonyManager network types). NR columns describe a serving 5G cell only when this is NR_*." }
 
@@ -47,6 +47,14 @@ columns:
   - { name: wifi_rssi,     type: int32,  nullable: true, doc: "Wi-Fi RSSI (dBm)." }
   - { name: wifi_tx_mbps,  type: uint32, nullable: true, doc: "Wi-Fi transmit (uplink) link speed (Mbit/s)." }
   - { name: wifi_rx_mbps,  type: uint32, nullable: true, doc: "Wi-Fi receive (downlink) link speed (Mbit/s)." }
+  # LTE serving-cell extras, from SignalStrength (current; CellInfo's copy can be a stale snapshot).
+  - { name: lte_rsrq,  type: int32,  nullable: true, doc: "LTE RSRQ (dB)." }
+  - { name: lte_rssnr, type: int32,  nullable: true, doc: "LTE reference-signal SNR (dB)." }
+  - { name: lte_cqi,   type: uint32, nullable: true, doc: "LTE channel quality indicator (0–15) the UE reports." }
+  - { name: lte_ta,    type: uint32, nullable: true, doc: "LTE timing advance (16·Ts units ≈ 78 m of distance each)." }
+  - { name: ca_bandwidths_khz, type: utf8, nullable: true, doc: "Bandwidth of every aggregated carrier in kHz, primary first, comma-separated (ServiceState.getCellBandwidths), e.g. \"10000,100000\" = 10 MHz LTE + 100 MHz NR." }
+  - { name: link_dn_kbps, type: uint32, nullable: true, doc: "Cellular network's downlink capacity estimate (NetworkCapabilities; the modem's LCE when reported, else the carrier's default)." }
+  - { name: link_up_kbps, type: uint32, nullable: true, doc: "Cellular network's uplink capacity estimate (as link_dn_kbps)." }
 
   # Neighbor cells from getAllCellInfo(), logged at the serving-cell rate.
   - name: neighbor_cells

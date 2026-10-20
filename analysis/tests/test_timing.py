@@ -50,3 +50,22 @@ def test_planned_rate_is_kept_beside_the_attempted_rate():
     streams, _ = timing.summarize(_uplink(), {2: {"flow_id": 2, "rate_pps": 4000, "packet_size_bytes": 200}})
     load = streams[0]["load"]
     assert load["planned_mbps"] == 6.4 and abs(load["offered_mbps"] - 1.6) < 0.05
+
+
+def test_buffer_timeline_takes_qdisc_backlog_and_requeues_from_bench():
+    import pandas as pd
+
+    td = _uplink(grant_ms=4)
+    pk = td.packets
+    sent = pk[(pk["node"] == "mobile") & (pk["direction"] == "SENT")]
+    recv = pk[(pk["node"] == "server") & (pk["direction"] == "RECEIVED")]
+    t0 = int(sent["utc_ns"].min())
+    q = pd.DataFrame({
+        "utc_ns": [t0 + k * 100_000_000 for k in range(10)], "dev": ["rmnet1"] * 10,
+        "sent_pkts": list(range(0, 1000, 100)), "requeues": [0, 0, 5, 5, 9, 9, 9, 9, 9, 9],
+        "backlog_bytes": [0, 0, 64000, 0, 128000, 0, 0, 0, 0, 0],
+    })
+    b = timing.buffer_timeline(sent, recv, q)
+    assert b["qdisc_dev"] == "rmnet1"
+    assert max(v or 0 for v in b["qdisc_backlog_kb"]) == 128.0
+    assert sum(b["requeues"]) == 9

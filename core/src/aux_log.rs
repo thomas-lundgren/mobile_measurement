@@ -107,6 +107,25 @@ pub struct RadioRow {
     pub wifi_tx_mbps: Option<u32>,
     #[serde(default)]
     pub wifi_rx_mbps: Option<u32>,
+    /// LTE serving-cell extras from SignalStrength (the modem's current view).
+    #[serde(default)]
+    pub lte_rsrq: Option<i32>,
+    #[serde(default)]
+    pub lte_rssnr: Option<i32>,
+    #[serde(default)]
+    pub lte_cqi: Option<u32>,
+    /// LTE timing advance (units of 16 Ts ≈ 78 m of distance per step).
+    #[serde(default)]
+    pub lte_ta: Option<u32>,
+    /// Bandwidth of every aggregated carrier (kHz, primary first), e.g. "10000,100000".
+    #[serde(default)]
+    pub ca_bandwidths_khz: Option<String>,
+    /// The cellular network's link-capacity estimate (kbit/s; the modem's LCE
+    /// when it reports one, else the carrier's configured default).
+    #[serde(default)]
+    pub link_dn_kbps: Option<u32>,
+    #[serde(default)]
+    pub link_up_kbps: Option<u32>,
     #[serde(default)]
     pub neighbor_cells: Option<Vec<Neighbor>>,
 }
@@ -370,6 +389,13 @@ pub fn write_radio(path: &Path, ctx: &AuxContext, rows: &[RadioRow]) -> std::io:
         Field::new("wifi_rssi", DataType::Int32, true),
         Field::new("wifi_tx_mbps", DataType::UInt32, true),
         Field::new("wifi_rx_mbps", DataType::UInt32, true),
+        Field::new("lte_rsrq", DataType::Int32, true),
+        Field::new("lte_rssnr", DataType::Int32, true),
+        Field::new("lte_cqi", DataType::UInt32, true),
+        Field::new("lte_ta", DataType::UInt32, true),
+        Field::new("ca_bandwidths_khz", DataType::Utf8, true),
+        Field::new("link_dn_kbps", DataType::UInt32, true),
+        Field::new("link_up_kbps", DataType::UInt32, true),
         Field::new("neighbor_cells", neighbors.data_type().clone(), true),
     ]));
     let u32c =
@@ -425,6 +451,17 @@ pub fn write_radio(path: &Path, ctx: &AuxContext, rows: &[RadioRow]) -> std::io:
             Arc::new(i32c(|r| r.wifi_rssi)) as _,
             Arc::new(u32c(|r| r.wifi_tx_mbps)) as _,
             Arc::new(u32c(|r| r.wifi_rx_mbps)) as _,
+            Arc::new(i32c(|r| r.lte_rsrq)) as _,
+            Arc::new(i32c(|r| r.lte_rssnr)) as _,
+            Arc::new(u32c(|r| r.lte_cqi)) as _,
+            Arc::new(u32c(|r| r.lte_ta)) as _,
+            Arc::new(StringArray::from(
+                rows.iter()
+                    .map(|r| r.ca_bandwidths_khz.clone())
+                    .collect::<Vec<_>>(),
+            )) as _,
+            Arc::new(u32c(|r| r.link_dn_kbps)) as _,
+            Arc::new(u32c(|r| r.link_up_kbps)) as _,
             neighbors,
         ],
     )
@@ -540,6 +577,13 @@ mod tests {
                 wifi_rssi: Some(-51),
                 wifi_tx_mbps: Some(540),
                 wifi_rx_mbps: Some(480),
+                lte_rsrq: Some(-14),
+                lte_rssnr: Some(1),
+                lte_cqi: Some(10),
+                lte_ta: Some(12),
+                ca_bandwidths_khz: Some("10000,100000".into()),
+                link_dn_kbps: Some(7507),
+                link_up_kbps: Some(2400),
                 neighbor_cells: Some(vec![
                     Neighbor {
                         pci: 302,
@@ -575,6 +619,13 @@ mod tests {
                 wifi_rssi: None,
                 wifi_tx_mbps: None,
                 wifi_rx_mbps: None,
+                lte_rsrq: None,
+                lte_rssnr: None,
+                lte_cqi: None,
+                lte_ta: None,
+                ca_bandwidths_khz: None,
+                link_dn_kbps: None,
+                link_up_kbps: None,
                 neighbor_cells: None,
             },
         ];

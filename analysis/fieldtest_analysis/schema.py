@@ -102,6 +102,13 @@ RADIO = [
     "wifi_rssi",
     "wifi_tx_mbps",
     "wifi_rx_mbps",
+    "lte_rsrq",
+    "lte_rssnr",
+    "lte_cqi",
+    "lte_ta",
+    "ca_bandwidths_khz",
+    "link_dn_kbps",
+    "link_up_kbps",
     "neighbor_cells",
 ]
 

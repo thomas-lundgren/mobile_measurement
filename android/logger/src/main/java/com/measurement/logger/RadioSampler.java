@@ -17,6 +17,7 @@ import android.telephony.CellSignalStrengthLte;
 import android.telephony.CellSignalStrengthNr;
 import android.telephony.CellIdentityNr;
 import android.telephony.CellIdentityLte;
+import android.telephony.ServiceState;
 import android.telephony.SignalStrength;
 import android.telephony.TelephonyCallback;
 import android.telephony.TelephonyDisplayInfo;
@@ -228,6 +229,10 @@ public final class RadioSampler {
                         putIfValid(row, "lte_pci", id.getPci());
                         putIfValid(row, "earfcn", id.getEarfcn());
                         putIfValid(row, "lte_rsrp", ss.getRsrp());
+                        if (valid(id.getBandwidth())) {
+                            row.put("bandwidth_mhz", id.getBandwidth() / 1000);
+                        }
+                        putLteExtras(row, ss); // fallback; SignalStrength's copy wins below
                     } else {
                         neighbors.put(neighbor(id.getPci(), ss.getRsrp()));
                     }
@@ -255,12 +260,73 @@ public final class RadioSampler {
                     }
                 }
             }
+            // LTE extras (RSRQ, RS-SNR, CQI, timing advance) from SignalStrength:
+            // the modem's current view. CellInfoLte's copy can lag (seen: CQI 8
+            // / TA 4 there vs 10 / 12 in SignalStrength at the same moment).
+            if (haveLte && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                SignalStrength sig = tm.getSignalStrength();
+                if (sig != null) {
+                    for (CellSignalStrengthLte ss : sig.getCellSignalStrengths(CellSignalStrengthLte.class)) {
+                        if (valid(ss.getRsrp())) {
+                            putLteExtras(row, ss);
+                            break;
+                        }
+                    }
+                }
+            }
+            putCarrierAggregation(row, tm);
             if (neighbors.length() > 0) {
                 row.put("neighbor_cells", neighbors);
             }
             putTransport(row);
             RustCore.pushRadio(handle, row.toString());
         } catch (Exception ignored) {
+        }
+    }
+
+    private static void putLteExtras(JSONObject row, CellSignalStrengthLte ss) throws Exception {
+        putIfValid(row, "lte_rsrq", ss.getRsrq());
+        putIfValid(row, "lte_rssnr", ss.getRssnr());
+        putIfValid(row, "lte_cqi", ss.getCqi());
+        putIfValid(row, "lte_ta", ss.getTimingAdvance());
+    }
+
+    /** Bandwidth of every aggregated carrier (ServiceState, primary first),
+     *  and the cellular network's link-capacity estimate — the modem's LCE
+     *  when it reports one, otherwise the carrier's configured default. Both
+     *  describe the cellular link even while data goes over Wi-Fi. */
+    @SuppressWarnings({"MissingPermission", "deprecation"})
+    private void putCarrierAggregation(JSONObject row, TelephonyManager tm) throws Exception {
+        try {
+            ServiceState st = tm.getServiceState();
+            if (st != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                int[] bws = st.getCellBandwidths();
+                if (bws != null && bws.length > 0) {
+                    StringBuilder b = new StringBuilder();
+                    for (int bw : bws) {
+                        if (b.length() > 0) {
+                            b.append(',');
+                        }
+                        b.append(bw);
+                    }
+                    row.put("ca_bandwidths_khz", b.toString());
+                }
+            }
+        } catch (SecurityException ignored) {
+        }
+        ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        for (Network n : cm.getAllNetworks()) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+            if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+                    && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                if (caps.getLinkDownstreamBandwidthKbps() > 0) {
+                    row.put("link_dn_kbps", caps.getLinkDownstreamBandwidthKbps());
+                }
+                if (caps.getLinkUpstreamBandwidthKbps() > 0) {
+                    row.put("link_up_kbps", caps.getLinkUpstreamBandwidthKbps());
+                }
+                break;
+            }
         }
     }
 
