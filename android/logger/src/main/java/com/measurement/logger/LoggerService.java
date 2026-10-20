@@ -18,6 +18,7 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 /**
  * Foreground service: the autonomous Logger. Onboards (enroll → challenge →
@@ -32,6 +33,9 @@ public final class LoggerService extends Service {
     public static final String ACTION_REACH_CHECK = "com.measurement.logger.REACH_CHECK";
     private static final String CHANNEL = "logger";
     private static final int MP_PROBE_PORT = 47600;
+    /** contracts/versions/versions.yaml — carried in every header.json. */
+    private static final int PROTOCOL_VERSION = 1;
+    private static final int SCHEMA_VERSION = 1;
     static final String PREFS = "mp_logger";
 
     /** Coarse state surfaced to the UI. */
@@ -229,6 +233,7 @@ public final class LoggerService extends Service {
                 String session = authenticate(client, deviceId);
                 JSONObject cfg = client.register(session, new JSONObject(CAPABILITY));
                 loggingConfigVersion = cfg.optInt("version", 1);
+                loggingConfig = cfg;
 
                 setState("IDLE");
                 backoff = BACKOFF_MIN_MS; // connected → reset backoff
@@ -349,6 +354,7 @@ public final class LoggerService extends Service {
         mobileDir.mkdirs();
 
         setState("PREPARING " + testId);
+        File header = writeHeader(testRoot, payload, deviceId);
         String ueConfig = buildUeConfig(payload, deviceId, sessionId, mobileDir.getAbsolutePath());
 
         uploads.setMeasuring(true);
@@ -409,6 +415,9 @@ public final class LoggerService extends Service {
             probeFast(0);
             RustCore.stopTest(h);
             JSONArray sealed = new JSONArray(RustCore.sealedFiles(h));
+            if (header != null) {
+                sealed.put(header.getAbsolutePath());
+            }
             RustCore.destroy(h);
             uploads.queue(testRoot, testId, sealed);
             uploads.setMeasuring(false);
@@ -431,6 +440,48 @@ public final class LoggerService extends Service {
             s.getInputStream().read(); // "OK": the window is set
         } catch (java.io.IOException ignored) {
             // not running (e.g. after a reboot): nothing to slow down
+        }
+    }
+
+    /** header.json at the test root (contracts/schemas/header.schema.json):
+     *  what ran — versions, identities, start time, the exact plan and port
+     *  bindings, the logging config — written before the first packet, so
+     *  analysis never needs the server's database. Null if it can't be
+     *  written (logging-first: the test runs regardless). */
+    @Nullable
+    private File writeHeader(File testRoot, JSONObject payload, String deviceId) {
+        try {
+            long[] t = Clock.now();
+            JSONObject loggingCfg = payload.optJSONObject("logging_config_override");
+            if (loggingCfg == null) {
+                loggingCfg = loggingConfig != null ? loggingConfig : new JSONObject();
+            }
+            JSONObject header = new JSONObject()
+                    .put("schema_version", SCHEMA_VERSION)
+                    .put("protocol_version", PROTOCOL_VERSION)
+                    .put("app_version", getPackageManager().getPackageInfo(getPackageName(), 0).versionName)
+                    .put("session_id", payload.getString("session_id"))
+                    .put("test_id", payload.getString("test_id"))
+                    .put("test_start_utc_ns", t[1])
+                    .put("test_start_mono_ns", t[0])
+                    .put("device", new JSONObject()
+                            .put("device_id", deviceId)
+                            .put("node_id", "mobile")
+                            .put("platform", "android")
+                            .put("model", android.os.Build.MODEL)
+                            .put("manufacturer", android.os.Build.MANUFACTURER)
+                            .put("os_version", android.os.Build.VERSION.RELEASE))
+                    .put("server", new JSONObject()
+                            .put("node_id", "server")
+                            .put("host", payload.getString("server_host")))
+                    .put("test_plan", payload.getJSONObject("test_plan"))
+                    .put("flow_bindings", payload.getJSONArray("flow_bindings"))
+                    .put("logging_config", loggingCfg);
+            File f = new File(testRoot, "header.json");
+            Files.write(f.toPath(), header.toString(2).getBytes(StandardCharsets.UTF_8));
+            return f;
+        } catch (Exception e) {
+            return null;
         }
     }
 

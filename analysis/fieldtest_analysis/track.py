@@ -14,15 +14,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sqlite3
 import sys
 import time
 from pathlib import Path
 
 import pandas as pd
 
-from . import schema
-from .loader import _read_one
+from . import plans, schema
+from .loader import read_one
 
 #: Max distance in time between a radio sample and the GPS fix it is placed at.
 MAX_GAP_NS = 5_000_000_000
@@ -98,13 +97,6 @@ def channel_label(rat: str, arfcn) -> str | None:
     return f"{band} · {freq}" if band else freq
 
 
-def _plan_names(db: str | None) -> dict[str, str]:
-    if not db:
-        return {}
-    with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as c:
-        return dict(c.execute("SELECT test_id, plan_name FROM tests"))
-
-
 def _value(v):
     if pd.isna(v):
         return None
@@ -117,8 +109,8 @@ def _round(v):
 
 def test_points(test_dir: Path, plan: str | None = None) -> list[dict]:
     # Only radio + GPS: packet files are large and not needed for the map.
-    radio = _read_one(test_dir / "radio.parquet", schema.RADIO)
-    gps = _read_one(test_dir / "gps.parquet", schema.GPS)
+    radio = read_one(test_dir / "radio.parquet", schema.RADIO)
+    gps = read_one(test_dir / "gps.parquet", schema.GPS)
     if radio is None or radio.empty or gps is None or gps.empty:
         return []
     radio = radio.dropna(subset=["utc_ns"]).sort_values("utc_ns")
@@ -166,10 +158,10 @@ def test_points(test_dir: Path, plan: str | None = None) -> list[dict]:
 
 
 def build_track(root: str | Path, db: str | None = None) -> dict:
-    plans = _plan_names(db)
+    db_plans = plans.from_db(db)
     points = []
     for test_dir in sorted(Path(root).glob("ses_*/tst_*")):
-        points.extend(test_points(test_dir, plans.get(test_dir.name)))
+        points.extend(test_points(test_dir, plans.name(plans.for_test(test_dir, db_plans))))
     points.sort(key=lambda p: p["t"])
     return {"generated_utc_ms": int(time.time() * 1000), "points": points}
 

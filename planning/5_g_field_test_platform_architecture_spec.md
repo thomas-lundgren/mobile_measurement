@@ -953,6 +953,17 @@ Logging continues during:
 - mobile handover
 - temporary packet loss
 
+Packet rows go into segmented Parquet files (`packets_NNNN.parquet` on the
+mobile, `packets_fN_NNNN.parquet` per flow on the server). A segment closes
+after 10 s or 50 000 rows, whichever comes first: each close compresses and
+writes a file beside the measurement, so segments stay long, and a crash loses
+at most the open one.
+
+Work that is not the measurement stays off the device and the link while a
+test runs: the upload manager pauses (§13), and the on-phone modem-queue
+collector (`mp-probe`) polls at its full rate only inside a test window the
+Logger announces.
+
 ---
 
 ### Traffic Execution
@@ -1140,6 +1151,12 @@ All OWD estimates must include:
 
 - estimated clock uncertainty
 
+Receive times are the kernel's (`SO_TIMESTAMPNS`, `kernel_rx_utc_ns`) where
+the row has one, not the moment the app read the packet: RTT and OWD then
+leave out how late the receiving thread was scheduled, which other load on the
+phone (e.g. app traffic) would otherwise add. The app's read time stays
+available for the host wake-up statistic.
+
 ---
 
 # 12. Log Structure
@@ -1176,14 +1193,20 @@ Notes:
 
 ## 12.2 header.json
 
-Contains:
+Written by the Logger at the test root when the test starts, before the first
+packet, and uploaded with the test (`contracts/schemas/header.schema.json`).
+It is the single home of test metadata, so analysis never needs the server's
+database to know what ran. Contains:
 
 - schema version
 - app version
 - protocol version
 - device metadata
-- test configuration
-- flow configuration
+- test start (UTC + monotonic)
+- server host
+- test configuration (the exact `test_plan` from `RUN_TEST`)
+- flow configuration (the `flow_bindings`: server ports per flow)
+- the effective logging config
 
 ---
 
@@ -1202,7 +1225,7 @@ Fields:
 - sender timestamps (`sender_mono_ns`, `sender_utc_ns`) — for OWD computation
 - expected interval (`expected_interval_ns`) — nominal flow spacing
 - actual interval (`actual_interval_ns`) — measured inter-arrival gap
-- kernel receive time (`kernel_rx_utc_ns`) — realtime UDP RECEIVED rows
+- kernel receive time (`kernel_rx_utc_ns`) — realtime UDP and probe RECEIVED rows; analysis takes it as the packet's arrival time (§11.3)
 - send outcome (`send_status`), send syscall time (`send_call_ns`), queued bytes below the socket (`sock_outq_bytes`) — realtime UDP SENT rows, one per attempt
 
 ---
@@ -1347,6 +1370,11 @@ Rule:
 ```text
 Uploads must never interrupt active measurements.
 ```
+
+The Logger's uploader therefore stays off the network while a test runs: it
+does not start an upload during a test and pauses one in progress at the next
+file boundary, resuming after the test (the server's `needed_paths` makes
+the upload resumable per file).
 
 ---
 

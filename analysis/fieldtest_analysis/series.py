@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -31,7 +30,9 @@ import pandas as pd
 
 from . import app, clock, findings, metrics, schema, stalls, timing
 from .loader import load_test
-from .track import _plan_names, channel_label
+from . import plans as plan_source
+from .stats import pcts
+from .track import channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
@@ -76,12 +77,6 @@ def _delay_stats(t_ns: pd.Series, v_ns: pd.Series, prefix: str) -> pd.DataFrame:
     return pd.DataFrame({f"{prefix}_med": g.median(), f"{prefix}_max": g.max()})
 
 
-def _pcts(values_ms) -> dict | None:
-    v = pd.to_numeric(pd.Series(values_ms), errors="coerce").dropna()
-    if v.empty:
-        return None
-    return {"p50": round(float(v.median()), 1), "p99": round(float(np.percentile(v, 99)), 1)}
-
 
 def _udp_loss(td) -> dict:
     """Worst loss ratio per direction over the one-way UDP flows (receiver
@@ -123,21 +118,6 @@ def _peer_ips(td) -> list[str]:
         except (ValueError, KeyError, TypeError):
             continue
     return sorted(ips)
-
-
-def _plan_flows(db: str | None) -> dict[str, dict[int, dict]]:
-    """Each test's planned flows by flow_id (rate, packet size), from the
-    server's database."""
-    if not db:
-        return {}
-    out = {}
-    with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as c:
-        for test_id, plan_json in c.execute("SELECT test_id, plan_json FROM tests"):
-            try:
-                out[test_id] = {int(f["flow_id"]): f for f in json.loads(plan_json).get("flows", [])}
-            except (ValueError, TypeError, KeyError):
-                continue
-    return out
 
 
 def test_series(
@@ -262,9 +242,9 @@ def test_series(
 
     tput = {c: df[c][df[c] > 0].median() if df[c].notna().any() else None for c in ("down_mbps", "up_mbps")}
     stats = {
-        "rtt_ms": _pcts(echo["rtt"] / 1e6) if not echo.empty else None,
-        "ul_ms": _pcts(pd.concat(ul_v) / 1e6) if ul_v else None,
-        "dl_ms": _pcts(pd.concat(dl_v) / 1e6) if dl_v else None,
+        "rtt_ms": pcts(echo["rtt"] / 1e6) if not echo.empty else None,
+        "ul_ms": pcts(pd.concat(ul_v) / 1e6) if ul_v else None,
+        "dl_ms": pcts(pd.concat(dl_v) / 1e6) if dl_v else None,
         "down_mbps": None if pd.isna(tput["down_mbps"]) else round(float(tput["down_mbps"]), 1),
         "up_mbps": None if pd.isna(tput["up_mbps"]) else round(float(tput["up_mbps"]), 1),
         "loss": _udp_loss(td),
@@ -334,8 +314,7 @@ def _local_day(epoch_s: float) -> str:
 def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[str]:
     """Refresh the per-test cache and rewrite every day file. Returns the days."""
     out = Path(out_dir)
-    plans = _plan_names(db)
-    flows = _plan_flows(db)
+    db_plans = plan_source.from_db(db)
     tests = []
     for test_dir in sorted(Path(root).glob("ses_*/tst_*")):
         cache = out / "tests" / f"{test_dir.name}.json"
@@ -346,7 +325,8 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
                 data = None
         if data is None:
             try:
-                data = test_series(test_dir, plans.get(test_dir.name), flows.get(test_dir.name), Path(root) / "bench")
+                plan = plan_source.for_test(test_dir, db_plans)
+                data = test_series(test_dir, plan_source.name(plan), plan_source.flows(plan), Path(root) / "bench")
             except Exception as e:  # truncated upload, unreadable parquet, ...
                 print(f"skip {test_dir.name}: {e}", file=sys.stderr)
                 continue

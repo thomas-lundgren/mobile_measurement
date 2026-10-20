@@ -30,15 +30,12 @@ This is a **distributed mobile network measurement platform** for real-world 5G 
 
 ### Current State
 
-As of the latest project state, the codebase consists solely of a planning document:
-
-- `planning/5_g_field_test_platform_architecture_spec.md` — complete architecture and functional specification
-
-**Implementation has started.** The Stage A JNI viability spike is complete and the core library exists.
-- `core/` — shared Rust engine+logger (native + JNI `cdylib`)
-- `server/` — server skeleton placeholder
-- `spikes/stage-a-harness/` — Stage A desktop-JVM test harness + peer echo server
-- See `spikes/stage-a-harness/FINDINGS.md` for results.
+Built and running live (Oct 2026): the Rust server (server-main, test-control,
+data-generator), the Android Logger (shared Rust core over JNI) and Controller,
+the on-phone `mp-probe` collector, and the Python analysis that feeds the
+server's `/viz` pages. `STATUS.md` has the history; `CLAUDE.md` the layout and
+commands. Sections below titled "Planned" describe the design the build
+follows; where they differ, the spec (`planning/5_g_field_test_platform_architecture_spec.md`) wins.
 
 ---
 
@@ -352,6 +349,19 @@ INITIALIZING → REGISTERING → IDLE → WAITING_FOR_TEST → PREPARING → RUN
    - Configurable direction: `FromServer`, `ToServer`, or `Bidirectional`
    - Both endpoints implement generator and receiver; direction determines which sends payload
    - UE always opens the TCP connection to the server port
+   - Optional `rate_kbps` cap (paced writes) for head-of-line tests
+
+4. **App Traffic** (`app_traffic`) — simulated users (web, mail, video, social,
+   mixed, AI agent with tool placement device/cloud/hybrid, or a scripted
+   timeline) as background load beside the realtime flows; the server is a plain
+   object server (`AppExchange`, contracts/packets/app_request.md)
+
+5. **DSCP probe** — probe variant cycling DSCP values to measure marking
+   transparency per direction
+
+The realtime UDP and bulk TCP send/receive loops exist once, in
+`core/src/endpoint.rs`, used by both the UE engine and the server's
+data-generator (symmetric peers); each side supplies only its socket glue.
 
 ---
 
@@ -468,66 +478,58 @@ A test may be: `COMPLETED`, `FAILED`, or `PARTIAL`. Raw logs are always preserve
 ### Build commands
 
 ```bash
-# Debug build (fast feedback)
-cargo build --workspace
-
-# Release build (size/performance checks)
-cargo build --workspace --release
-
-# Run all Rust unit tests
-cargo test --workspace
-
-# Stage A harness (smoke test)
-./spikes/stage-a-harness/run.sh
-
-# Stage A individual checks
-./spikes/stage-a-harness/test_resilience.sh
-./spikes/stage-a-harness/test_sigkill.sh
+cargo build --workspace                 # debug; servers run from target/release (--release)
+cargo test --workspace                  # all Rust tests; one: cargo test -p <crate> <name>
+ci/check.sh                             # fmt, clippy -D warnings, tests, contracts, analysis, client drift
+analysis/.venv/bin/python -m pytest -q analysis/tests
+android/build_apk.sh                    # core via cargo-ndk + Logger debug APK
+cargo ndk -t arm64-v8a build -p mp-probe --release
 ```
 
-### Java / JNI
+### Java / Android
 
-- JDK 17+ required (`javac`, `java`)
-- JNI library path: `-Djava.library.path=$(pwd)/target/debug` (or `target/release`)
-- Java classes compiled to `spikes/stage-a-harness/build/`
+- JDK 17+, Android SDK + NDK (`android/local.properties`), cargo-ndk, rustup target `aarch64-linux-android`
+- Install: `adb install -r android/logger/build/outputs/apk/debug/logger-debug.apk`
 
-### Python validation
+### Python
 
-- Use `venv/` at repo root (do not commit)
-- Required: `pyarrow` (for Parquet validation)
-- Activate: `source venv/bin/activate`
+- Analysis: `analysis/.venv` (`pip install -e ".[dev,plots]"`); contract validation: `venv/` at repo root
 
 ### Code style
 
-- Rust: standard `cargo fmt` / `cargo clippy` (enforced in CI when pipeline is added)
-- Java: standard `javac` (no special formatter yet)
+- Rust: `cargo fmt` / `cargo clippy -D warnings` (CI)
+- Java: standard `javac`; Python: pytest
 
 ### Testing strategy
 
 | Level | What | How |
 |-------|------|-----|
-| Unit | Rust modules (packet, timestamp, log_writer) | `cargo test --lib` |
-| Integration | JNI round-trip, UDP echo, Parquet read-back | `run.sh` |
-| Chaos | Blackout resilience, SIGKILL survival | `test_resilience.sh`, `test_sigkill.sh` |
+| Unit | Rust modules, analysis modules | `cargo test -p <crate> --lib`, `pytest` |
+| Integration | server flows, UE engine against the real servers (`ue_interop`), uploads | `cargo test --workspace` |
+| Contracts | schemas, golden packet vectors, OpenAPI drift, Rust↔YAML parity | `ci/validate_contracts.py`, parity tests |
+| Field | live phone tests | `scripts/fieldtest/*.sh` (cycles on `lib.sh`) |
 
 ### Versioning
 
-- Workspace-level `Cargo.toml` coordinates versions for Rust crates
-- Android apps use their own version (independent release cadence)
-- No scheme defined yet for Android or Python — will be added when those components mature
+- Workspace-level `Cargo.toml` coordinates versions for Rust crates; `mp-probe` has its own
+- Wire / log versions: `contracts/versions/versions.yaml`
+- App versions and versioned logs: planned in `planning/ota_and_versioning_plan.md`
 
 ### Repo layout
 
 ```text
 /
   Cargo.toml                # Rust workspace
-  core/                     # shared engine+logger lib (cdylib + rlib)
-  server/                   # server-main, test-control, data-generator (placeholder)
-  spikes/stage-a-harness/   # Stage A desktop-JVM spike (kept; feeds Phase 1)
-  contracts/                # (pending) single source of truth
-  analysis/                 # (pending) Python package
-  android/                  # (pending) Gradle project
-  venv/                     # Python virtualenv (gitignored)
+  core/                     # shared engine+logger lib (cdylib + rlib): endpoint, ue, app_traffic, log_writer, ...
+  server/                   # contracts-rs, server-main, test-control, data-generator
+  probe/                    # mp-probe on-phone collector
+  android/                  # logger (Java + JNI), controller (Kotlin), build_apk.sh
+  analysis/                 # Python package fieldtest_analysis + tests
+  contracts/                # single source of truth (schemas, OpenAPI, parquet, packets, vectors)
+  scripts/                  # viz_rebuild.sh, fieldtest/ cycle scripts
+  ci/                       # check.sh, contract validation, client drift
+  planning/                 # spec and plans
+  spikes/                   # stage A/B spikes (kept for reference)
 ```
 
 ---

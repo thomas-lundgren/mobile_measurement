@@ -2,16 +2,41 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current state: planning phase
+## Current state
 
-There is **no source code, build system, or tests yet**. The repository holds these documents:
+Implemented and running live (home server + one Pixel 9 Pro). `STATUS.md`
+has the history; the design documents are still authoritative:
 
-- `AGENTS.md` — agent-oriented guide (planned stack, components, state machines, REST API).
-- `planning/5_g_field_test_platform_architecture_spec.md` — the authoritative architecture & functional spec. Read this for any non-trivial detail (packet formats, field-level log schemas, OWD math, endpoint payloads).
-- `planning/development_plan.md` — build sequencing, per-invariant enforcement+test mechanisms, and the contract-first strategy for cross-component interface consistency.
-- `planning/development_guide.md` — engineering discipline for the polyglot build: how to keep the Rust server and Java mobile node *symmetric* and their *interfaces consistent* (single-source contracts, codegen, golden vectors, interop matrix, CI gate).
+- `planning/5_g_field_test_platform_architecture_spec.md` — the architecture & functional spec. Update it first for any design change.
+- `planning/development_plan.md`, `planning/development_guide.md` — contract-first build discipline (single-source contracts, golden vectors, interop tests).
+- `planning/ota_and_versioning_plan.md` — planned (parked) over-the-air updates and versioned logs.
 
-Because nothing is built, there are no build/lint/test commands. **When you add the first source files or build config, populate this file (and `AGENTS.md`) with the concrete commands**, e.g. Rust workspace (`cargo build`/`cargo test`/`cargo test <name>`), Android Gradle, and the Python analysis toolchain.
+### Layout
+
+| Path | What |
+|---|---|
+| `core/` | Shared Rust engine (rlib for the server, cdylib + JNI for Android): `endpoint` (realtime UDP / bulk TCP send+receive loops used by both nodes), `ue` (UE engine), `app_traffic` (`model` = simulated users, `runner` = TCP), `log_writer` (SPSC ring → segmented Parquet), `udp_timing` (kernel timestamps, TOS, pacing), `packet`, `aux_log`, `auth` |
+| `server/` | `contracts-rs` (DTOs), `server-main` (REST, auth, uploads, `/viz` pages), `test-control` (scheduling, ports), `data-generator` (server flow threads) |
+| `android/logger` | Logger app (Java + RustCore JNI); `android/build_apk.sh` builds core + APK. `android/controller` (Kotlin, generated client) |
+| `probe/` | `mp-probe`, adb-started on-phone collector (modem qdisc, UDP counters, radio log) on 127.0.0.1:47600 |
+| `analysis/` | Python package `fieldtest_analysis` (loader, metrics, series/findings for the pages, app/timing/spectral) |
+| `contracts/` | Single source of truth: JSON schemas, OpenAPI, Parquet YAML, packet docs, golden vectors, versions |
+| `scripts/` | `viz_rebuild.sh` (cron page data), `fieldtest/` (cycle scripts on `lib.sh`, commute watcher, bench collector) |
+
+### Commands
+
+```bash
+cargo build --workspace                      # Rust (release: --release; servers run target/release/*)
+cargo test --workspace                       # all Rust tests; one: cargo test -p fieldtest-core <name>
+ci/check.sh                                  # fmt, clippy -D warnings, tests, contracts, analysis, client drift
+analysis/.venv/bin/python -m pytest -q analysis/tests     # analysis tests (run from repo root or analysis/)
+android/build_apk.sh                         # cross-compile core (cargo-ndk) + Logger debug APK
+cargo ndk -t arm64-v8a build -p mp-probe --release        # mp-probe for the phone
+```
+
+Live deployment notes (paths, restart patterns, phone quirks) are in the
+auto-memory, not here: the servers run from `~/mp-data`, cron runs
+`scripts/viz_rebuild.sh` and `scripts/fieldtest/*`.
 
 ## What this is
 

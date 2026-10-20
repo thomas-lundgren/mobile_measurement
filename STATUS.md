@@ -1,6 +1,55 @@
 # 5G Field Test Platform — Current Status
 
-> As of 2026-05-24
+> As of 2026-10-20. The sections after "October 2026" are the May–June history.
+
+## October 2026 — live field use
+
+The platform runs live: servers on a home Linux box (public address, port
+forwards), one Pixel 9 Pro enrolled, tests started by cron scripts and by an
+automatic commute trigger, results on server-main's `/viz` pages (map,
+zoomable charts, findings). Branch `field-robustness`.
+
+**Field robustness (Oct 18–19):** at-least-once command delivery with RUN_TEST
+de-duplication; a durable, resumable upload queue on the phone; wake lock;
+radio and GPS recorded in the background, including the NSA 5G leg; UDP flows
+follow the phone across a Wi-Fi <-> mobile switch; the UE's address per flow
+(CLIENT_CONNECTED); a reachability check of which ports get through; uploads
+optionally held until the phone is on the home network.
+
+**Measurements (Oct 19–20):** delivery timing and back pressure of 1 ms
+realtime streams (kernel receive times, send outcomes, socket queue); rate-capped
+bulk TCP for head-of-line tests; `app_traffic` simulated users (web, mail,
+video, social, mixed, AI agent with LLM streams / MCP calls / web fetches and
+tool placement device / cloud / hybrid); radio detail (CQI, timing advance,
+RS-SNR, carrier-aggregation bandwidths, link capacity); `mp-probe`, an
+adb-started on-phone collector of modem queue stats and radio-log events.
+
+**Analysis and pages:** coverage map; zoomable charts (RTT, one-way delay
+binned at send time, throughput, cell measurements, link quality); findings
+per day (per-test overview, regime changes, link pauses vs congestion stalls,
+delivery timing, spectra and spectrograms, uplink saturation, app traffic and
+its impact on the realtime streams). Rebuilt every 5 minutes by
+`scripts/viz_rebuild.sh`.
+
+**Review and consolidation (Oct 20):**
+- Side work kept off measurements: the phone's uploader pauses during tests
+  (191 of 360 uploads in the week before had overlapped a test); `mp-probe`
+  polls at 100 Hz only during tests (was ~8 % of a core around the clock);
+  the page rebuild runs at nice 19 and skips while a test runs.
+- RTT and one-way delay use kernel arrival times (probe now stamped on both
+  nodes too), not the app's read time.
+- One endpoint implementation for both nodes (`core/src/endpoint.rs`); log
+  segments close every 10 s / 50k rows (was 1000 rows: ~130 files per node
+  per test); `app_traffic` split into model and runner; the phone's upload
+  queue in `Uploader.java`; field-test scripts in `scripts/fieldtest/` on a
+  shared `lib.sh`.
+- The Logger writes `header.json` (exact plan, bindings, versions) at test
+  start; analysis reads the plan from it, the server DB only for older tests.
+
+**Next:** over-the-air Logger updates and versioned logs
+(`planning/ota_and_versioning_plan.md`, parked); the user's AI-traffic plan
+(`planning/mobile_ai_traffic_generator_development_plan.md`).
+
 
 ## Summary
 

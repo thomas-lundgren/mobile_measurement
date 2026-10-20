@@ -32,20 +32,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from . import schema
+from . import schema, stats
 
 REQUEST_BYTES = 24  # v1 request and acknowledgement
 #: An app burst affects packets around it too; treat this much after the last
 #: byte as still "active" (queues drain).
 ACTIVE_TAIL_NS = 200_000_000
 
-
-def _pcts(v: pd.Series) -> dict | None:
-    v = pd.to_numeric(v, errors="coerce").dropna()
-    if v.empty:
-        return None
-    return {"p50": round(float(v.quantile(0.5)), 1), "p90": round(float(v.quantile(0.9)), 1),
-            "max": round(float(v.max()), 1)}  # fmt: skip
 
 
 def objects(td) -> pd.DataFrame:
@@ -187,16 +180,16 @@ def analyze(td) -> dict | None:
             "activity": act, "objects": len(g), "complete_share": round(float(g["complete"].mean()), 3),
             "mbytes": round(float(g["down_bytes"].sum()) / 1e6, 2),
             "mbytes_up": round(float(g["up_bytes"].sum()) / 1e6, 2),
-            "wait_ms": _pcts(done["wait_ms"]), "done_ms": _pcts(done["done_ms"]),
-            "think_ms": _pcts(done["think_ms"]) if (done["up_bytes"] > 0).any() else None,
-            "gap_ms": _pcts(done["gap_ms"]),
+            "wait_ms": stats.pcts(done["wait_ms"], (50, 90), with_max=True), "done_ms": stats.pcts(done["done_ms"], (50, 90), with_max=True),
+            "think_ms": stats.pcts(done["think_ms"], (50, 90), with_max=True) if (done["up_bytes"] > 0).any() else None,
+            "gap_ms": stats.pcts(done["gap_ms"], (50, 90), with_max=True),
             "stalls_1s": int((g["gap_ms"] > 1000).sum()),
         })  # fmt: skip
     episodes = []
     for kind, g in ep.groupby("kind"):
         done = g[g["complete"]]
         episodes.append({"kind": kind, "n": len(g), "complete_share": round(float(g["complete"].mean()), 3),
-                         "ms": _pcts(done["ms"])})  # fmt: skip
+                         "ms": stats.pcts(done["ms"], (50, 90), with_max=True)})  # fmt: skip
     span = (obj["t_end"].astype("float").max() - obj["t_req"].min()) / 1e9
     return {
         "objects": len(obj),

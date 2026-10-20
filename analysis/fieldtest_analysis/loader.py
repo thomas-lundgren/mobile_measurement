@@ -44,7 +44,7 @@ def _normalize(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     return df
 
 
-def _read_one(path: Path, columns: list[str]) -> pd.DataFrame | None:
+def read_one(path: Path, columns: list[str]) -> pd.DataFrame | None:
     if not path.exists():
         return None
     df = pq.read_table(path).to_pandas()
@@ -158,6 +158,6 @@ def load_test(test_dir: str | Path) -> TestData:
         packets=_arrival_times(_concat(packet_frames, schema.PACKETS)),
         clock=_concat(clock_frames, schema.CLOCK),
         events=_concat(event_frames, schema.EVENTS),
-        gps=_read_one(root / "gps.parquet", schema.GPS),
-        radio=_read_one(root / "radio.parquet", schema.RADIO),
+        gps=read_one(root / "gps.parquet", schema.GPS),
+        radio=read_one(root / "radio.parquet", schema.RADIO),
     )
