@@ -15,7 +15,7 @@ has the history; the design documents are still authoritative:
 
 | Path | What |
 |---|---|
-| `core/` | Shared Rust engine (rlib for the server, cdylib + JNI for Android): `endpoint` (realtime UDP / bulk TCP send+receive loops used by both nodes), `ue` (UE engine), `app_traffic` (`model` = simulated users, `runner` = TCP), `log_writer` (SPSC ring → segmented Parquet), `udp_timing` (kernel timestamps, TOS, pacing), `packet`, `aux_log`, `auth` |
+| `core/` | Shared Rust engine (rlib for the server, cdylib + JNI for Android): traffic engines used by both nodes — `endpoint` (realtime UDP / bulk TCP loops) and `exchange` (request/response: `transfer` on the UE, `serve` on the server); `ue` (UE engine); `app_traffic` workloads (`model` = simulated users, `runner` = agents, pools, bursts over `exchange`); `log_writer` (SPSC ring → segmented Parquet), `udp_timing` (kernel timestamps, TOS, pacing), `packet`, `aux_log`, `auth` |
 | `server/` | `contracts-rs` (DTOs), `server-main` (REST, auth, uploads, `/viz` pages), `test-control` (scheduling, ports), `data-generator` (server flow threads) |
 | `android/logger` | Logger app (Java + RustCore JNI); `android/build_apk.sh` builds core + APK. `android/controller` (Kotlin, generated client) |
 | `probe/` | `mp-probe`, adb-started on-phone collector (modem qdisc, UDP counters, radio log) on 127.0.0.1:47600 |

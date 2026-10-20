@@ -1,24 +1,21 @@
-//! Runs the users' steps over TCP against the server's object server: a
-//! connection pool per agent, one `AppExchange` per object, a row per
-//! request, chunk and acknowledgement.
+//! Runs the users' steps against the server's object server: a connection
+//! pool per agent and the bursts' parallelism here, each object one exchange
+//! of the request/response engine (`crate::exchange`), a row per request,
+//! chunk and acknowledgement.
 
 use std::collections::VecDeque;
-use std::io::{self, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::io;
+use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use super::{activity_name, Agent, AppAction, Fetch, Placement, Step, MAX_PARALLEL};
+use super::{Agent, AppAction, Fetch, Placement, Step, MAX_PARALLEL};
 use crate::endpoint::Counters;
-use crate::log_writer::{Direction, LogSink, PacketRow, PacketTiming};
+use crate::exchange;
+use crate::log_writer::{Direction, LogSink};
 use crate::packet::AppExchange;
-use crate::timestamp::Timestamp;
 
-const CHUNK: usize = 64 * 1024;
-const IO_TIMEOUT: Duration = Duration::from_millis(200);
-/// Give up on an object (and its connection) after this long.
-const OBJECT_TIMEOUT: Duration = Duration::from_secs(120);
 /// Idle connections are closed after this long, as browsers and apps do; the
 /// next burst then pays for a new TCP handshake (and slow start).
 const IDLE_CLOSE: Duration = Duration::from_secs(20);
@@ -116,7 +113,7 @@ fn burst(
 ) -> Vec<TcpStream> {
     let want = parallel.clamp(1, MAX_PARALLEL).min(fetches.len().max(1));
     while pool.len() < want {
-        match connect(&ctx.cfg.server) {
+        match exchange::connect(&ctx.cfg.server) {
             Ok(c) => pool.push(c),
             Err(_) => break,
         }
@@ -150,90 +147,9 @@ fn burst(
     kept.into_inner().unwrap()
 }
 
-fn connect(server: &str) -> io::Result<TcpStream> {
-    let addr = server
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| io::Error::other(format!("cannot resolve {server}")))?;
-    let c = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
-    c.set_read_timeout(Some(IO_TIMEOUT))?;
-    c.set_write_timeout(Some(IO_TIMEOUT))?;
-    let _ = c.set_nodelay(true);
-    Ok(c)
-}
-
-fn row(flow_id: u32, object_id: u64, direction: Direction, size: u32, f: &Fetch) -> PacketRow {
-    PacketRow {
-        timing: PacketTiming {
-            app_activity: Some(activity_name(f.activity)),
-            app_object_bytes: Some(f.down),
-            app_up_bytes: Some(f.up),
-            ..PacketTiming::default()
-        },
-        ..PacketRow::tcp(flow_id, object_id, direction, Timestamp::now(), size)
-    }
-}
-
-/// Should a blocked read/write give up? (stopped, or the object took too long)
-fn give_up(stop: &AtomicBool, deadline: Instant) -> bool {
-    stop.load(Ordering::Acquire) || Instant::now() >= deadline
-}
-
-fn is_timeout(e: &io::Error) -> bool {
-    matches!(
-        e.kind(),
-        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-    )
-}
-
-/// `write_all` that survives the socket's short write timeout.
-pub fn write_all_until(
-    conn: &mut TcpStream,
-    mut buf: &[u8],
-    stop: &AtomicBool,
-    deadline: Instant,
-) -> io::Result<()> {
-    while !buf.is_empty() {
-        match conn.write(buf) {
-            Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-            Ok(n) => buf = &buf[n..],
-            Err(e) if is_timeout(&e) || e.kind() == io::ErrorKind::Interrupted => {
-                if give_up(stop, deadline) {
-                    return Err(io::ErrorKind::TimedOut.into());
-                }
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(())
-}
-
-/// `read_exact` that survives the socket's short read timeout.
-pub fn read_exact_until(
-    conn: &mut TcpStream,
-    mut buf: &mut [u8],
-    stop: &AtomicBool,
-    deadline: Instant,
-) -> io::Result<()> {
-    while !buf.is_empty() {
-        match conn.read(buf) {
-            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
-            Ok(n) => buf = &mut buf[n..],
-            Err(e) if is_timeout(&e) || e.kind() == io::ErrorKind::Interrupted => {
-                if give_up(stop, deadline) {
-                    return Err(io::ErrorKind::TimedOut.into());
-                }
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(())
-}
-
 fn transfer(ctx: &Ctx, conn: &mut TcpStream, f: Fetch, object_id: u64) -> io::Result<()> {
     let flow_id = ctx.cfg.flow_id;
-    let deadline = Instant::now() + OBJECT_TIMEOUT + f.server_time();
-    let req = AppExchange {
+    let x = AppExchange {
         activity: f.activity,
         flow_id,
         object_id,
@@ -243,58 +159,14 @@ fn transfer(ctx: &Ctx, conn: &mut TcpStream, f: Fetch, object_id: u64) -> io::Re
         rate_bps: f.rate_bps,
         chunk_bytes: f.chunk,
     };
-    let push = |dir: Direction, n: usize| {
+    exchange::transfer(conn, &x, ctx.stop, |dir, n| {
         ctx.sink
             .lock()
             .unwrap()
-            .push(row(flow_id, object_id, dir, n as u32, &f));
-    };
-    let head = req.to_bytes();
-    push(Direction::Sent, head.len());
-    write_all_until(conn, &head, ctx.stop, deadline)?;
-    ctx.counters.sent(head.len() as u64);
-
-    let mut buf = vec![0u8; CHUNK];
-    let mut left = f.up;
-    while left > 0 {
-        if ctx.stop.load(Ordering::Acquire) {
-            return Err(io::ErrorKind::Interrupted.into());
+            .push(exchange::row(flow_id, &x, false, dir, n));
+        match dir {
+            Direction::Sent => ctx.counters.sent(n as u64),
+            Direction::Received => ctx.counters.received(n as u64),
         }
-        let n = left.min(CHUNK as u64) as usize;
-        write_all_until(conn, &buf[..n], ctx.stop, deadline)?;
-        push(Direction::Sent, n);
-        ctx.counters.sent(n as u64);
-        left -= n as u64;
-    }
-    if f.down == 0 {
-        let mut ack = [0u8; AppExchange::WIRE_LEN];
-        read_exact_until(conn, &mut ack, ctx.stop, deadline)?;
-        push(Direction::Received, ack.len());
-        ctx.counters.received(ack.len() as u64);
-        return Ok(());
-    }
-    let mut left = f.down;
-    while left > 0 {
-        let want = left.min(CHUNK as u64) as usize;
-        match conn.read(&mut buf[..want]) {
-            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
-            Ok(n) => {
-                push(Direction::Received, n);
-                ctx.counters.received(n as u64);
-                left -= n as u64;
-                // a stream that keeps delivering never times out: check here
-                // too, or the test's end waits for the reply to finish
-                if ctx.stop.load(Ordering::Acquire) {
-                    return Err(io::ErrorKind::Interrupted.into());
-                }
-            }
-            Err(e) if is_timeout(&e) || e.kind() == io::ErrorKind::Interrupted => {
-                if give_up(ctx.stop, deadline) {
-                    return Err(io::ErrorKind::TimedOut.into());
-                }
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(())
+    })
 }

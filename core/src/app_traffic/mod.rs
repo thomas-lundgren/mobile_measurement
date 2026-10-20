@@ -23,4 +23,4 @@ mod model;
 mod runner;
 
 pub use model::*;
-pub use runner::{read_exact_until, run, write_all_until, AppTraffic};
+pub use runner::{run, AppTraffic};

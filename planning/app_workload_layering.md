@@ -1,7 +1,8 @@
 # Application workloads over shared traffic engines — assessment and plan
 
-**Status:** accepted with adjustments, 2026-10-20. Supersedes the step order
-in `ai_traffic_implementation_plan.md` (see its "Order" section).
+**Status:** accepted with adjustments, 2026-10-20; **A done** (2026-10-20:
+`core/src/exchange.rs`). Supersedes the step order in
+`ai_traffic_implementation_plan.md` (see its "Order" section).
 
 ## 1. The proposal (summary)
 

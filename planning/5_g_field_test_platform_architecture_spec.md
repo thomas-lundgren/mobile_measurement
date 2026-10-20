@@ -821,6 +821,11 @@ and how the apps themselves fare (page load time, video segment time).
   v2 `AppExchange`, v1 still served) sends bytes up, has the server wait a
   think time, then get bytes back — as fast as TCP takes them, or paced like
   an LLM token stream. Nothing back = an upload, acknowledged by an echo.
+- Layering: the workload (the simulated users) decides what to transfer and
+  when; the transfer itself is the shared request/response traffic engine
+  (`core/src/exchange.rs`), whose client side the UE uses and whose server
+  side the data-generator runs — one implementation for both nodes, as for the
+  realtime UDP and bulk TCP engines. See `planning/app_workload_layering.md`.
 - Profiles: `web`, `mail`, `video`, `social`, `mixed` (switches among web,
   social and video every 2–5 min with mail in the background), `agent` (an AI
   agent at work: LLM calls that send the growing context up and stream the

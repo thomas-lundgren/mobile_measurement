@@ -194,7 +194,7 @@ impl DscpProbePacket {
 /// on an app_traffic TCP connection: 22-byte core, 24 on the wire. `kind` 0 =
 /// download (the server answers with `size` bytes), 1 = upload (`size` bytes
 /// follow; the server echoes this header back once it has them all).
-/// `activity` is a code from `app_traffic::ACTIVITIES`, logged by both nodes.
+/// `activity` is a code from `exchange::ACTIVITIES`, logged by both nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppRequest {
     pub kind: u8,

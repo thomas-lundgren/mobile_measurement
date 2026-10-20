@@ -6,23 +6,9 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-/// Activity codes on the wire (the index) and the names logged for them.
-pub const ACTIVITIES: [&str; 14] = [
-    "other",
-    "web_page",
-    "web_object",
-    "mail_sync",
-    "mail_attachment",
-    "mail_send",
-    "video_chunk",
-    "feed_image",
-    "photo_upload",
-    "llm_call",
-    "mcp_call",
-    "web_fetch",
-    "cloud_tool",
-    "llm_resume",
-];
+/// Activity codes and names live with the wire format (the server logs them
+/// too); the model's codes below index that table.
+pub use crate::exchange::{activity_code, activity_name, ACTIVITIES};
 const WEB_PAGE: u8 = 1;
 const WEB_OBJECT: u8 = 2;
 const MAIL_SYNC: u8 = 3;
@@ -86,14 +72,6 @@ const TOOL_RESULT_MAX: u64 = 25_000;
 /// tokens), as coding agents do.
 const COMPACT_AT: u64 = 600_000;
 const COMPACT_TO: u64 = 60_000;
-
-pub fn activity_code(name: &str) -> u8 {
-    ACTIVITIES.iter().position(|a| *a == name).unwrap_or(0) as u8
-}
-
-pub fn activity_name(code: u8) -> &'static str {
-    ACTIVITIES.get(code as usize).copied().unwrap_or("other")
-}
 
 /// One action of a scripted timeline (`profile = "script"`).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -165,13 +143,9 @@ impl Fetch {
 
     /// How long the server takes beyond moving the bytes: think time plus,
     /// for a paced stream, its length.
-    pub(crate) fn server_time(&self) -> Duration {
-        let stream = if self.rate_bps > 0 {
-            self.down as f64 * 8.0 / self.rate_bps as f64
-        } else {
-            0.0
-        };
-        Duration::from_millis(self.delay_ms as u64) + Duration::from_secs_f64(stream)
+    #[cfg(test)]
+    fn server_time(&self) -> Duration {
+        crate::exchange::server_time(self.delay_ms, self.down, self.rate_bps)
     }
 }
 
@@ -822,11 +796,24 @@ mod tests {
     }
 
     #[test]
-    fn activity_names_round_trip() {
-        for (i, name) in ACTIVITIES.iter().enumerate() {
-            assert_eq!(activity_code(name) as usize, i);
-            assert_eq!(activity_name(i as u8), *name);
+    fn activity_codes_index_the_wire_table() {
+        let codes = [
+            (WEB_PAGE, "web_page"),
+            (WEB_OBJECT, "web_object"),
+            (MAIL_SYNC, "mail_sync"),
+            (MAIL_ATTACHMENT, "mail_attachment"),
+            (MAIL_SEND, "mail_send"),
+            (VIDEO_CHUNK, "video_chunk"),
+            (FEED_IMAGE, "feed_image"),
+            (PHOTO_UPLOAD, "photo_upload"),
+            (LLM_CALL, "llm_call"),
+            (MCP_CALL, "mcp_call"),
+            (WEB_FETCH, "web_fetch"),
+            (CLOUD_TOOL, "cloud_tool"),
+            (LLM_RESUME, "llm_resume"),
+        ];
+        for (code, name) in codes {
+            assert_eq!(activity_name(code), name);
         }
-        assert_eq!(activity_code("nonsense"), 0);
     }
 }

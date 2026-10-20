@@ -7,19 +7,18 @@
 //! receive → timestamp → push, then timestamp → send → push; the writer
 //! thread does Parquet off the hot path.
 
-use std::io::Read;
-use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::net::{SocketAddr, TcpListener, UdpSocket};
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use fieldtest_core::app_traffic::{self, activity_name};
 pub use fieldtest_core::endpoint::Counters;
-use fieldtest_core::endpoint::{self, would_block, RealtimeStream, BULK_CHUNK};
+use fieldtest_core::endpoint::{self, RealtimeStream};
+use fieldtest_core::exchange;
 use fieldtest_core::log_writer::{Direction, LogSink, PacketRow, PacketTiming, WriterHandle};
-use fieldtest_core::packet::{AppExchange, AppRequest, DscpProbePacket, ProbePacket, DSCP_UNKNOWN};
+use fieldtest_core::packet::{DscpProbePacket, ProbePacket, DSCP_UNKNOWN};
 use fieldtest_core::timestamp::Timestamp;
 use fieldtest_core::udp_timing::{self, SendStatus};
 use mp_contracts::Direction as FlowDir;
@@ -398,11 +397,10 @@ pub fn spawn_bulk_tcp(
     })
 }
 
-/// app_traffic object server: accepts any number of UE connections and serves
-/// object requests on each (`AppExchange`, or a v1 `AppRequest`): it reads the
-/// upload, waits the think time, then sends the response (paced when asked) —
-/// or, with no response, acknowledges by echoing the request. Rows carry the
-/// object id, activity and sizes, like the UE's (see core `app_traffic`).
+/// app_traffic object server: accepts any number of UE connections and runs the
+/// request/response engine's server side on each (`fieldtest_core::exchange`):
+/// read the upload, wait the think time, send the response (paced when asked)
+/// or acknowledge. Rows carry the object id, activity and sizes, like the UE's.
 pub fn spawn_app_server(
     listener: TcpListener,
     sink: LogSink,
@@ -423,7 +421,7 @@ pub fn spawn_app_server(
                         counters.note_peer(addr);
                         *state.lock().unwrap() = GeneratorState::Running;
                         let (sink, counters, stop) = (&sink, &*counters, &*stop);
-                        s.spawn(move || serve_app_connection(conn, flow_id, sink, counters, stop));
+                        s.spawn(move || exchange::serve(conn, flow_id, sink, counters, stop));
                     }
                     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(ACCEPT_POLL)
@@ -434,149 +432,6 @@ pub fn spawn_app_server(
         });
         finalize(&state, sink.into_inner().unwrap(), writer);
     })
-}
-
-fn serve_app_connection(
-    mut conn: TcpStream,
-    flow_id: u32,
-    sink: &Mutex<LogSink>,
-    counters: &Counters,
-    stop: &AtomicBool,
-) {
-    let _ = conn.set_nonblocking(false);
-    let _ = conn.set_read_timeout(Some(Duration::from_millis(200)));
-    let _ = conn.set_write_timeout(Some(Duration::from_millis(200)));
-    let _ = conn.set_nodelay(true);
-    let push = |dir: Direction, size: usize, x: &AppExchange, v1: bool| {
-        let row = PacketRow {
-            timing: PacketTiming {
-                app_activity: Some(activity_name(x.activity)),
-                app_object_bytes: Some(if v1 {
-                    x.down_bytes.max(x.up_bytes)
-                } else {
-                    x.down_bytes
-                }),
-                app_up_bytes: (!v1).then_some(x.up_bytes),
-                ..PacketTiming::default()
-            },
-            ..PacketRow::tcp(flow_id, x.object_id, dir, Timestamp::now(), size as u32)
-        };
-        sink.lock().unwrap().push(row);
-    };
-    let sent = |n: usize| counters.sent(n as u64);
-    let received = |n: usize| counters.received(n as u64);
-    let mut head = [0u8; AppExchange::WIRE_LEN];
-    let mut buf = vec![0u8; BULK_CHUNK];
-    // a connection may sit idle between bursts for as long as the UE keeps it
-    let forever = Instant::now() + Duration::from_secs(365 * 86_400);
-    while !stop.load(Ordering::Acquire) {
-        // pkt_t + ver say which request layout follows
-        if app_traffic::read_exact_until(&mut conn, &mut head[..2], stop, forever).is_err() {
-            return;
-        }
-        let len = if head[1] == fieldtest_core::packet::VER_1 {
-            AppRequest::WIRE_LEN
-        } else {
-            AppExchange::WIRE_LEN
-        };
-        if app_traffic::read_exact_until(&mut conn, &mut head[2..len], stop, forever).is_err() {
-            return;
-        }
-        let (x, v1) = match (
-            AppRequest::decode(&head[..len]),
-            AppExchange::decode(&head[..len]),
-        ) {
-            (Ok(r), _) => (AppExchange::from_v1(&r), true),
-            (_, Ok(x)) => (x, false),
-            _ => return, // not our protocol
-        };
-        let head = &head[..len];
-        push(Direction::Received, len, &x, v1);
-        received(len);
-        let server_time = x.delay_ms as f64 / 1e3
-            + if x.rate_bps > 0 {
-                x.down_bytes as f64 * 8.0 / x.rate_bps as f64
-            } else {
-                0.0
-            };
-        let deadline =
-            Instant::now() + Duration::from_secs(120) + Duration::from_secs_f64(server_time);
-        let mut left = x.up_bytes;
-        while left > 0 {
-            let want = left.min(BULK_CHUNK as u64) as usize;
-            match conn.read(&mut buf[..want]) {
-                Ok(0) => return,
-                Ok(n) => {
-                    push(Direction::Received, n, &x, v1);
-                    received(n);
-                    left -= n as u64;
-                }
-                Err(ref e) if would_block(e) => {
-                    if stop.load(Ordering::Acquire) || Instant::now() >= deadline {
-                        return;
-                    }
-                }
-                Err(_) => return,
-            }
-        }
-        if x.down_bytes == 0 {
-            // acknowledge the upload: echo the request
-            if app_traffic::write_all_until(&mut conn, head, stop, deadline).is_err() {
-                return;
-            }
-            push(Direction::Sent, head.len(), &x, v1);
-            sent(head.len());
-            continue;
-        }
-        // think time (an LLM's time to first token, a tool's latency)
-        let start = Instant::now() + Duration::from_millis(x.delay_ms as u64);
-        while Instant::now() < start {
-            if stop.load(Ordering::Acquire) {
-                return;
-            }
-            thread::sleep((start - Instant::now()).min(Duration::from_millis(50)));
-        }
-        // Paced (a token stream): the reply is generated at rate_bps whatever
-        // the network does — what a stall holds back goes out in one write
-        // when it clears. Else as fast as TCP takes it.
-        let chunk = match (x.rate_bps, x.chunk_bytes) {
-            (0, _) => BULK_CHUNK as u64,
-            (bps, 0) => udp_timing::bulk_pacing(bps.div_ceil(1000), BULK_CHUNK).0 as u64,
-            (_, c) => c as u64,
-        };
-        let mut done = 0u64;
-        while done < x.down_bytes {
-            let due = if x.rate_bps == 0 {
-                x.down_bytes
-            } else {
-                let generated = start.elapsed().as_secs_f64() * x.rate_bps as f64 / 8.0;
-                // whole chunks only, and the first one at once
-                ((generated as u64 / chunk + 1) * chunk).min(x.down_bytes)
-            };
-            if due <= done {
-                // chunk k is due k chunks' worth of time after the start
-                let next = start
-                    + Duration::from_secs_f64(
-                        (done / chunk * chunk) as f64 * 8.0 / x.rate_bps as f64,
-                    );
-                thread::sleep(
-                    next.saturating_duration_since(Instant::now())
-                        .min(Duration::from_millis(50)),
-                );
-                if stop.load(Ordering::Acquire) {
-                    return;
-                }
-                continue;
-            }
-            let n = (due - done).min(BULK_CHUNK as u64) as usize;
-            if app_traffic::write_all_until(&mut conn, &buf[..n], stop, deadline).is_err() {
-                return;
-            }
-            push(Direction::Sent, n, &x, v1);
-            sent(n);
-            done += n as u64;
-        }
-    }
 }
 
 fn finalize(state: &Arc<Mutex<GeneratorState>>, sink: LogSink, writer: WriterHandle) {
