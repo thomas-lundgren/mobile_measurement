@@ -1,6 +1,9 @@
 # AI traffic — implementation plan
 
-**Status:** planned 2026-10-20; step 1 is ready to implement.
+**Status:** planned 2026-10-20. **Order superseded** by
+`app_workload_layering.md` §3: extract the request/response engine first (A),
+then this plan's step 1 as part of the scheduler split (B), step 3 as C;
+steps 2, 4, 5 follow (E). The step details below still apply.
 **Context:** `mobile_ai_traffic_generator_development_plan.md` §11 lists what
 the platform's `app_traffic` agent already covers and what is missing. This
 plan turns its suggested order into implementation steps inside this
@@ -243,6 +246,7 @@ accuracy with and without it once.
 | 4 F2–F4 | 2, 3 (F3 uses the scheduled executor) | one live phase per family |
 | 5 Server capture | — | ACK/retransmission view for one app phase |
 
+(Superseded: see `app_workload_layering.md` §3 for the current order.)
 Step 1 first: it is the foundation for every per-task and intent-vs-observed
 result that the later steps report, and it changes nothing on the wire or
 on the per-packet path.
