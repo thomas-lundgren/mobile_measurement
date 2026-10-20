@@ -16,6 +16,7 @@
 package com.measurement.controller.client.model
 
 import com.measurement.controller.client.model.MobilityCapability
+import com.measurement.controller.client.model.MonitorCapability
 import com.measurement.controller.client.model.QosCapability
 import com.measurement.controller.client.model.RadioCapability
 import com.measurement.controller.client.model.TimestampSource
@@ -29,6 +30,8 @@ import com.google.gson.annotations.SerializedName
  * @param qos 
  * @param radio 
  * @param timestampSources 
+ * @param monitor Present only on MP Monitor enrollments; absent on MP Logger enrollments.
+ * @param supportsPing Device can probe first-hop gateways and operator-pinned targets (Logger and Monitor).
  */
 
 
@@ -44,7 +47,15 @@ data class Capability (
     val radio: RadioCapability,
 
     @SerializedName("timestamp_sources")
-    val timestampSources: kotlin.collections.List<TimestampSource>
+    val timestampSources: kotlin.collections.List<TimestampSource>,
+
+    /* Present only on MP Monitor enrollments; absent on MP Logger enrollments. */
+    @SerializedName("monitor")
+    val monitor: MonitorCapability? = null,
+
+    /* Device can probe first-hop gateways and operator-pinned targets (Logger and Monitor). */
+    @SerializedName("supports_ping")
+    val supportsPing: kotlin.Boolean? = null
 
 ) {
 

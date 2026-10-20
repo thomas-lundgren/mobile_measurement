@@ -15,6 +15,7 @@
 
 package com.measurement.controller.client.model
 
+import com.measurement.controller.client.model.DeviceRole
 import com.measurement.controller.client.model.HwInfo
 import com.measurement.controller.client.model.Platform
 
@@ -29,7 +30,9 @@ import com.google.gson.annotations.SerializedName
  * @param pubkeyFormat 
  * @param sigAlg 
  * @param sigFormat 
+ * @param hardwareId Stable per-handset identifier shared between Logger and Monitor APKs on the same device (Android SSAID when both apps share the same signing key). Used by the server to group co-located enrollments under one handset view.
  * @param hwInfo 
+ * @param role What this enrollment does. Absent = \"logger\" (backward-compatible default).
  */
 
 
@@ -54,8 +57,16 @@ data class EnrollRequest (
     @SerializedName("sig_format")
     val sigFormat: kotlin.String,
 
+    /* Stable per-handset identifier shared between Logger and Monitor APKs on the same device (Android SSAID when both apps share the same signing key). Used by the server to group co-located enrollments under one handset view. */
+    @SerializedName("hardware_id")
+    val hardwareId: kotlin.String? = null,
+
     @SerializedName("hw_info")
-    val hwInfo: HwInfo? = null
+    val hwInfo: HwInfo? = null,
+
+    /* What this enrollment does. Absent = \"logger\" (backward-compatible default). */
+    @SerializedName("role")
+    val role: DeviceRole? = null
 
 ) {
 

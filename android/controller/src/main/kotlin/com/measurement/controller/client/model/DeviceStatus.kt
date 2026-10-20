@@ -17,7 +17,9 @@ package com.measurement.controller.client.model
 
 import com.measurement.controller.client.model.Battery
 import com.measurement.controller.client.model.DualClock
+import com.measurement.controller.client.model.LinkState
 import com.measurement.controller.client.model.LoggerState
+import com.measurement.controller.client.model.MonitorState
 import com.measurement.controller.client.model.RadioSnapshot
 import com.measurement.controller.client.model.Storage
 
@@ -31,6 +33,8 @@ import com.google.gson.annotations.SerializedName
  * @param sampledAt 
  * @param battery 
  * @param currentTestId 
+ * @param linkState Monitor only: current default-route gateway per interface.
+ * @param monitorState Monitor only: live capture/ping engine snapshot.
  * @param pendingUploads 
  * @param radio 
  * @param storage 
@@ -53,6 +57,14 @@ data class DeviceStatus (
 
     @SerializedName("current_test_id")
     val currentTestId: kotlin.String? = null,
+
+    /* Monitor only: current default-route gateway per interface. */
+    @SerializedName("link_state")
+    val linkState: LinkState? = null,
+
+    /* Monitor only: live capture/ping engine snapshot. */
+    @SerializedName("monitor_state")
+    val monitorState: MonitorState? = null,
 
     @SerializedName("pending_uploads")
     val pendingUploads: kotlin.Int? = null,

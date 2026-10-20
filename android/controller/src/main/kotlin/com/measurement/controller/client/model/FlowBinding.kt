@@ -19,7 +19,7 @@ package com.measurement.controller.client.model
 import com.google.gson.annotations.SerializedName
 
 /**
- * Server-allocated port for one flow, keyed by flow_id. Lives in RunTestPayload / header, not in the plan.
+ * Server-allocated binding for one flow, keyed by flow_id. Lives in RunTestPayload / header, not in the plan. `server_port` is absent for gateway_ping flows (no server endpoint).
  *
  * @param flowId 
  * @param serverPort 
@@ -32,7 +32,7 @@ data class FlowBinding (
     val flowId: kotlin.Int,
 
     @SerializedName("server_port")
-    val serverPort: kotlin.Int
+    val serverPort: kotlin.Int? = null
 
 ) {
 

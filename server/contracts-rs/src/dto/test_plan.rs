@@ -206,3 +206,22 @@ pub struct FlowBinding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_port: Option<u16>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Controller's generated client flattens the Flow union, so it sends
+    /// the fields of every flow type (placeholders for the others). They must
+    /// be ignored, not rejected.
+    #[test]
+    fn flow_ignores_fields_of_other_types() {
+        let json = r#"{"type":"probe","flow_id":1,"rate_pps":50,"packet_size_bytes":22,
+            "direction":"ToServer","dscp_values":[],"profile":"web","target_bytes":null}"#;
+        let flow: Flow = serde_json::from_str(json).expect("extra fields are ignored");
+        assert!(matches!(flow, Flow::Probe { .. }));
+        // and they do not come back out (what the server stores and forwards)
+        let out = serde_json::to_value(&flow).unwrap();
+        assert!(out.get("profile").is_none() && out.get("dscp_values").is_none());
+    }
+}

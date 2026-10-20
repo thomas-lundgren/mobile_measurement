@@ -15,10 +15,16 @@
 
 package com.measurement.controller.client.model
 
+import com.measurement.controller.client.model.AppAction
+import com.measurement.controller.client.model.AppProfile
+import com.measurement.controller.client.model.AppToolPlacement
 import com.measurement.controller.client.model.Direction
 import com.measurement.controller.client.model.FlowOneOf
 import com.measurement.controller.client.model.FlowOneOf1
 import com.measurement.controller.client.model.FlowOneOf2
+import com.measurement.controller.client.model.FlowOneOf3
+import com.measurement.controller.client.model.FlowOneOf4
+import com.measurement.controller.client.model.FlowOneOf5
 
 import com.google.gson.annotations.SerializedName
 
@@ -30,7 +36,17 @@ import com.google.gson.annotations.SerializedName
  * @param ratePps 
  * @param type 
  * @param direction 
+ * @param dscpValues DSCP values (0–63) to cycle through, one per packet (seq % len).
+ * @param profile User model: web | mail | video | social | mixed | script.
+ * @param sndbufBytes Sender only: limit SO_SNDBUF to this many bytes and send non-blocking (back-pressure test; full buffer → EAGAIN, logged).
+ * @param rateKbps Sender only: pace writes to this rate (kbit/s, application bytes) instead of sending as fast as TCP allows. Omit for uncapped bulk.
  * @param targetBytes 
+ * @param pingIntervalMs Probe cadence in ms. Default 1000.
+ * @param actions profile \"script\" only: the timeline to run.
+ * @param placement profile \"agent\" only: where the tools run (default device).
+ * @param scale Multiplies every object size (default 1.0); < 1 saves data.
+ * @param seed Seed of the users' choices (default 1): same seed, same requests.
+ * @param workers Concurrent users (1–16, default 1). A script runs on one.
  */
 
 
@@ -51,20 +67,63 @@ data class Flow (
     @SerializedName("direction")
     val direction: Direction,
 
+    /* DSCP values (0–63) to cycle through, one per packet (seq % len). */
+    @SerializedName("dscp_values")
+    val dscpValues: kotlin.collections.List<kotlin.Int>,
+
+    /* User model: web | mail | video | social | mixed | script. */
+    @SerializedName("profile")
+    val profile: AppProfile,
+
+    /* Sender only: limit SO_SNDBUF to this many bytes and send non-blocking (back-pressure test; full buffer → EAGAIN, logged). */
+    @SerializedName("sndbuf_bytes")
+    val sndbufBytes: kotlin.Int? = null,
+
+    /* Sender only: pace writes to this rate (kbit/s, application bytes) instead of sending as fast as TCP allows. Omit for uncapped bulk. */
+    @SerializedName("rate_kbps")
+    val rateKbps: kotlin.Int? = null,
+
     @SerializedName("target_bytes")
-    val targetBytes: kotlin.Int? = null
+    val targetBytes: kotlin.Int? = null,
+
+    /* Probe cadence in ms. Default 1000. */
+    @SerializedName("ping_interval_ms")
+    val pingIntervalMs: kotlin.Int? = null,
+
+    /* profile \"script\" only: the timeline to run. */
+    @SerializedName("actions")
+    val actions: kotlin.collections.List<AppAction>? = null,
+
+    /* profile \"agent\" only: where the tools run (default device). */
+    @SerializedName("placement")
+    val placement: AppToolPlacement? = null,
+
+    /* Multiplies every object size (default 1.0); < 1 saves data. */
+    @SerializedName("scale")
+    val scale: kotlin.Double? = null,
+
+    /* Seed of the users' choices (default 1): same seed, same requests. */
+    @SerializedName("seed")
+    val seed: kotlin.Long? = null,
+
+    /* Concurrent users (1–16, default 1). A script runs on one. */
+    @SerializedName("workers")
+    val workers: kotlin.Int? = null
 
 ) {
 
     /**
      * 
      *
-     * Values: probe,realtime_udp,bulk_tcp
+     * Values: probe,realtime_udp,bulk_tcp,gateway_ping,dscp_probe,app_traffic
      */
     enum class Type(val value: kotlin.String) {
         @SerializedName(value = "probe") probe("probe"),
         @SerializedName(value = "realtime_udp") realtime_udp("realtime_udp"),
-        @SerializedName(value = "bulk_tcp") bulk_tcp("bulk_tcp");
+        @SerializedName(value = "bulk_tcp") bulk_tcp("bulk_tcp"),
+        @SerializedName(value = "gateway_ping") gateway_ping("gateway_ping"),
+        @SerializedName(value = "dscp_probe") dscp_probe("dscp_probe"),
+        @SerializedName(value = "app_traffic") app_traffic("app_traffic");
     }
 
 }

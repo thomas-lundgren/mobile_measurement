@@ -23,6 +23,7 @@ import com.measurement.controller.client.model.Capability
 import com.measurement.controller.client.model.DeviceCommand
 import com.measurement.controller.client.model.DeviceStatus
 import com.measurement.controller.client.model.LoggingConfig
+import com.measurement.controller.client.model.ReachabilityReport
 
 import com.google.gson.annotations.SerializedName
 
@@ -183,6 +184,78 @@ class DeviceApi(basePath: kotlin.String = defaultBasePath, client: Call.Factory 
         return RequestConfig(
             method = RequestMethod.GET,
             path = "/api/v1/devices/{device_id}/command".replace("{"+"device_id"+"}", encodeURIComponent(deviceId.toString())),
+            query = localVariableQuery,
+            headers = localVariableHeaders,
+            requiresAuthentication = false,
+            body = localVariableBody
+        )
+    }
+
+    /**
+     * The device&#39;s own reachability check (which ports/protocols toward the server get through the network it was on). Checks run on the device without the server — on a restrictive network it cannot be reached — and are uploaded later; each report is appended as one JSON line to &#x60;&lt;upload_root&gt;/reach/&lt;device_id&gt;.jsonl&#x60;.
+     * 
+     * @param deviceId 
+     * @param reachabilityReport 
+     * @return void
+     * @throws IllegalStateException If the request is not correctly configured
+     * @throws IOException Rethrows the OkHttp execute method exception
+     * @throws UnsupportedOperationException If the API returns an informational or redirection response
+     * @throws ClientException If the API returns a client error response
+     * @throws ServerException If the API returns a server error response
+     */
+    @Throws(IllegalStateException::class, IOException::class, UnsupportedOperationException::class, ClientException::class, ServerException::class)
+    fun postReachability(deviceId: kotlin.String, reachabilityReport: ReachabilityReport) : Unit {
+        val localVarResponse = postReachabilityWithHttpInfo(deviceId = deviceId, reachabilityReport = reachabilityReport)
+
+        return when (localVarResponse.responseType) {
+            ResponseType.Success -> Unit
+            ResponseType.Informational -> throw UnsupportedOperationException("Client does not support Informational responses.")
+            ResponseType.Redirection -> throw UnsupportedOperationException("Client does not support Redirection responses.")
+            ResponseType.ClientError -> {
+                val localVarError = localVarResponse as ClientError<*>
+                throw ClientException("Client error : ${localVarError.statusCode} ${localVarError.message.orEmpty()}", localVarError.statusCode, localVarResponse)
+            }
+            ResponseType.ServerError -> {
+                val localVarError = localVarResponse as ServerError<*>
+                throw ServerException("Server error : ${localVarError.statusCode} ${localVarError.message.orEmpty()} ${localVarError.body}", localVarError.statusCode, localVarResponse)
+            }
+        }
+    }
+
+    /**
+     * The device&#39;s own reachability check (which ports/protocols toward the server get through the network it was on). Checks run on the device without the server — on a restrictive network it cannot be reached — and are uploaded later; each report is appended as one JSON line to &#x60;&lt;upload_root&gt;/reach/&lt;device_id&gt;.jsonl&#x60;.
+     * 
+     * @param deviceId 
+     * @param reachabilityReport 
+     * @return ApiResponse<Unit?>
+     * @throws IllegalStateException If the request is not correctly configured
+     * @throws IOException Rethrows the OkHttp execute method exception
+     */
+    @Throws(IllegalStateException::class, IOException::class)
+    fun postReachabilityWithHttpInfo(deviceId: kotlin.String, reachabilityReport: ReachabilityReport) : ApiResponse<Unit?> {
+        val localVariableConfig = postReachabilityRequestConfig(deviceId = deviceId, reachabilityReport = reachabilityReport)
+
+        return request<ReachabilityReport, Unit>(
+            localVariableConfig
+        )
+    }
+
+    /**
+     * To obtain the request config of the operation postReachability
+     *
+     * @param deviceId 
+     * @param reachabilityReport 
+     * @return RequestConfig
+     */
+    fun postReachabilityRequestConfig(deviceId: kotlin.String, reachabilityReport: ReachabilityReport) : RequestConfig<ReachabilityReport> {
+        val localVariableBody = reachabilityReport
+        val localVariableQuery: MultiValueMap = mutableMapOf()
+        val localVariableHeaders: MutableMap<String, String> = mutableMapOf()
+        localVariableHeaders["Content-Type"] = "application/json"
+        
+        return RequestConfig(
+            method = RequestMethod.POST,
+            path = "/api/v1/devices/{device_id}/reachability".replace("{"+"device_id"+"}", encodeURIComponent(deviceId.toString())),
             query = localVariableQuery,
             headers = localVariableHeaders,
             requiresAuthentication = false,

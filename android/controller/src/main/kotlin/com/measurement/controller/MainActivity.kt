@@ -13,6 +13,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.measurement.controller.client.api.OperatorApi
 import com.measurement.controller.client.api.OperatorAuthApi
+import com.measurement.controller.client.model.AppProfile
 import com.measurement.controller.client.model.CreateTestRequest
 import com.measurement.controller.client.model.DeviceSummary
 import com.measurement.controller.client.model.Direction
@@ -207,42 +208,51 @@ class MainActivity : AppCompatActivity() {
 
     // ---- preset plans (flattened Flow: fill all fields; server reads per type) ----
 
-    // Direction in `probe` flows is ignored by the server (it's an echo), but
-    // the generated client requires the field. `ratePps`/`packetSizeBytes` are
-    // ignored by the server for `bulk_tcp` for the same flat-Flow reason.
+    // The generated client flattens the Flow union into one class, so fields
+    // of other flow types are required too: direction in `probe` flows,
+    // ratePps/packetSizeBytes for `bulk_tcp`, dscpValues (dscp_probe) and
+    // profile (app_traffic) everywhere. The server ignores fields that don't
+    // belong to the flow's type; `flow` fills the latter two.
+    private fun flow(
+        flowId: Int, type: Flow.Type, ratePps: Int, packetSizeBytes: Int, direction: Direction,
+        targetBytes: Int? = null,
+    ) = Flow(
+        flowId = flowId, type = type, ratePps = ratePps, packetSizeBytes = packetSizeBytes,
+        direction = direction, targetBytes = targetBytes, dscpValues = emptyList(), profile = AppProfile.web,
+    )
 
     private fun probePlan() = TestPlan(
         durationSec = 30, name = "ctrl-probe", version = 1,
         flows = listOf(
-            Flow(flowId = 1, type = Flow.Type.probe, ratePps = 50, packetSizeBytes = 22, direction = Direction.ToServer)
+            flow(flowId = 1, type = Flow.Type.probe, ratePps = 50, packetSizeBytes = 22, direction = Direction.ToServer)
         )
     )
 
     private fun rtUpPlan() = TestPlan(
         durationSec = 30, name = "ctrl-rt-up", version = 1,
         flows = listOf(
-            Flow(flowId = 1, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.ToServer)
+            flow(flowId = 1, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.ToServer)
         )
     )
 
     private fun rtDownPlan() = TestPlan(
         durationSec = 30, name = "ctrl-rt-down", version = 1,
         flows = listOf(
-            Flow(flowId = 1, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.FromServer)
+            flow(flowId = 1, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.FromServer)
         )
     )
 
     private fun bulkUpPlan() = TestPlan(
         durationSec = 30, name = "ctrl-bulk-up", version = 1,
         flows = listOf(
-            Flow(flowId = 1, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.ToServer, targetBytes = 5_000_000)
+            flow(flowId = 1, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.ToServer, targetBytes = 5_000_000)
         )
     )
 
     private fun bulkDownPlan() = TestPlan(
         durationSec = 30, name = "ctrl-bulk-down", version = 1,
         flows = listOf(
-            Flow(flowId = 1, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.FromServer, targetBytes = 5_000_000)
+            flow(flowId = 1, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.FromServer, targetBytes = 5_000_000)
         )
     )
 
@@ -251,11 +261,11 @@ class MainActivity : AppCompatActivity() {
     private fun fullPlan() = TestPlan(
         durationSec = 30, name = "ctrl-full", version = 1,
         flows = listOf(
-            Flow(flowId = 1, type = Flow.Type.probe, ratePps = 50, packetSizeBytes = 22, direction = Direction.ToServer),
-            Flow(flowId = 2, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.ToServer),
-            Flow(flowId = 3, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.FromServer),
-            Flow(flowId = 4, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.ToServer, targetBytes = 3_000_000),
-            Flow(flowId = 5, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.FromServer, targetBytes = 3_000_000)
+            flow(flowId = 1, type = Flow.Type.probe, ratePps = 50, packetSizeBytes = 22, direction = Direction.ToServer),
+            flow(flowId = 2, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.ToServer),
+            flow(flowId = 3, type = Flow.Type.realtime_udp, ratePps = 100, packetSizeBytes = 200, direction = Direction.FromServer),
+            flow(flowId = 4, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.ToServer, targetBytes = 3_000_000),
+            flow(flowId = 5, type = Flow.Type.bulk_tcp, ratePps = 0, packetSizeBytes = 0, direction = Direction.FromServer, targetBytes = 3_000_000)
         )
     )
 

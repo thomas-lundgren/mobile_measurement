@@ -15,8 +15,10 @@
 
 package com.measurement.controller.client.model
 
+import com.measurement.controller.client.model.CaptureConfig
 import com.measurement.controller.client.model.GateableEvent
 import com.measurement.controller.client.model.MobilityLogging
+import com.measurement.controller.client.model.PingConfig
 import com.measurement.controller.client.model.QosLogging
 import com.measurement.controller.client.model.RadioLogging
 
@@ -32,6 +34,8 @@ import com.google.gson.annotations.SerializedName
  * @param qos 
  * @param radio 
  * @param version Monotonic config version; drives SET_LOGGING_CONFIG drift detection.
+ * @param capture Monitor only: VPN-based passive capture. Absent/null = disabled.
+ * @param ping Monitor only: background latency probing. Absent/null = disabled.
  */
 
 
@@ -58,7 +62,15 @@ data class LoggingConfig (
 
     /* Monotonic config version; drives SET_LOGGING_CONFIG drift detection. */
     @SerializedName("version")
-    val version: kotlin.Int
+    val version: kotlin.Int,
+
+    /* Monitor only: VPN-based passive capture. Absent/null = disabled. */
+    @SerializedName("capture")
+    val capture: CaptureConfig? = null,
+
+    /* Monitor only: background latency probing. Absent/null = disabled. */
+    @SerializedName("ping")
+    val ping: PingConfig? = null
 
 ) {
 

@@ -15,6 +15,7 @@
 
 package com.measurement.controller.client.model
 
+import com.measurement.controller.client.model.DeviceRole
 
 import com.google.gson.annotations.SerializedName
 
@@ -29,9 +30,11 @@ import com.google.gson.annotations.SerializedName
  * @param batteryLevelPct 
  * @param currentTestId 
  * @param deviceLabel 
+ * @param hardwareId Stable per-handset ID shared by Logger and Monitor APKs on the same device. Controller groups rows by this field to form the handset view.
  * @param lastSeenUtcNs 
  * @param loggerState 
  * @param model 
+ * @param role Enrolled app role. Absent on pre-Monitor rows — Controller treats as Logger.
  */
 
 
@@ -61,6 +64,10 @@ data class DeviceSummary (
     @SerializedName("device_label")
     val deviceLabel: kotlin.String? = null,
 
+    /* Stable per-handset ID shared by Logger and Monitor APKs on the same device. Controller groups rows by this field to form the handset view. */
+    @SerializedName("hardware_id")
+    val hardwareId: kotlin.String? = null,
+
     @SerializedName("last_seen_utc_ns")
     val lastSeenUtcNs: kotlin.Long? = null,
 
@@ -68,7 +75,11 @@ data class DeviceSummary (
     val loggerState: kotlin.String? = null,
 
     @SerializedName("model")
-    val model: kotlin.String? = null
+    val model: kotlin.String? = null,
+
+    /* Enrolled app role. Absent on pre-Monitor rows — Controller treats as Logger. */
+    @SerializedName("role")
+    val role: DeviceRole? = null
 
 ) {
 

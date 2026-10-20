@@ -25,6 +25,7 @@ import com.google.gson.annotations.SerializedName
  * @param direction 
  * @param flowId 
  * @param type 
+ * @param rateKbps Sender only: pace writes to this rate (kbit/s, application bytes) instead of sending as fast as TCP allows. Omit for uncapped bulk.
  * @param targetBytes 
  */
 
@@ -39,6 +40,10 @@ data class FlowOneOf2 (
 
     @SerializedName("type")
     val type: FlowOneOf2.Type,
+
+    /* Sender only: pace writes to this rate (kbit/s, application bytes) instead of sending as fast as TCP allows. Omit for uncapped bulk. */
+    @SerializedName("rate_kbps")
+    val rateKbps: kotlin.Int? = null,
 
     @SerializedName("target_bytes")
     val targetBytes: kotlin.Int? = null

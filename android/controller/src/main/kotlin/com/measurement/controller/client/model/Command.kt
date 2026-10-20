@@ -21,7 +21,7 @@ import com.google.gson.annotations.SerializedName
 /**
  * 
  *
- * Values: RUN_TEST,STOP_TEST,SET_LOGGING_CONFIG,REQUEST_STATUS,REQUEST_UPLOAD,REBOOT_LOGGER
+ * Values: RUN_TEST,STOP_TEST,SET_LOGGING_CONFIG,REQUEST_STATUS,REQUEST_UPLOAD,REBOOT_LOGGER,LIST_APPS
  */
 
 enum class Command(val value: kotlin.String) {
@@ -42,7 +42,10 @@ enum class Command(val value: kotlin.String) {
     REQUEST_UPLOAD("REQUEST_UPLOAD"),
 
     @SerializedName(value = "REBOOT_LOGGER")
-    REBOOT_LOGGER("REBOOT_LOGGER");
+    REBOOT_LOGGER("REBOOT_LOGGER"),
+
+    @SerializedName(value = "LIST_APPS")
+    LIST_APPS("LIST_APPS");
 
     /**
      * Override [toString()] to avoid using the enum variable name as the value, and instead use

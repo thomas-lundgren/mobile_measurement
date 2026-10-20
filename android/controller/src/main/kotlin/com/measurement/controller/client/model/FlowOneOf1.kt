@@ -27,6 +27,7 @@ import com.google.gson.annotations.SerializedName
  * @param packetSizeBytes 
  * @param ratePps 
  * @param type 
+ * @param sndbufBytes Sender only: limit SO_SNDBUF to this many bytes and send non-blocking (back-pressure test; full buffer → EAGAIN, logged).
  */
 
 
@@ -45,7 +46,11 @@ data class FlowOneOf1 (
     val ratePps: kotlin.Int,
 
     @SerializedName("type")
-    val type: FlowOneOf1.Type
+    val type: FlowOneOf1.Type,
+
+    /* Sender only: limit SO_SNDBUF to this many bytes and send non-blocking (back-pressure test; full buffer → EAGAIN, logged). */
+    @SerializedName("sndbuf_bytes")
+    val sndbufBytes: kotlin.Int? = null
 
 ) {
 
