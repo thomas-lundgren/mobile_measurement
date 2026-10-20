@@ -12,8 +12,8 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 64,
-      "pattern": "^[a-z0-9_]+$",
-      "description": "Human-readable plan identifier, e.g. \"commute_v1\". Recorded in header.json. Lowercase + underscores so it round-trips through file paths."
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "Human-readable plan identifier, e.g. \"commute_v1\". Recorded in header.json. Lowercase, digits, underscores and hyphens so it round-trips through file paths."
     },
     "version": {
       "type": "integer",
