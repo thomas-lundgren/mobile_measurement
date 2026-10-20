@@ -137,9 +137,12 @@ def buffer_timeline(sent: pd.DataFrame, recv: pd.DataFrame) -> dict | None:
     return out
 
 
-def _load(sent: pd.DataFrame, recv: pd.DataFrame, e: dict) -> dict:
-    """Offered / sent / delivered rate and the queue's size, for every stream
-    (saturation plots): wait = excess delay, held = OK send rate × p90 wait."""
+def _load(sent: pd.DataFrame, recv: pd.DataFrame, e: dict, planned: dict | None = None) -> dict:
+    """Planned / offered / sent / delivered rate and the queue's size, for
+    every stream (saturation plots): wait = excess delay, held = OK send rate
+    × p90 wait. ``planned_mbps`` is the plan's rate × packet size: under back
+    pressure send() blocks, so the attempts (``offered_mbps``) fall below it
+    and understate the load."""
     mono = pd.to_numeric(sent["mono_ns"], errors="coerce")
     span = float(mono.max() - mono.min()) / 1e9
     size = float(pd.to_numeric(sent["payload_size"], errors="coerce").median())
@@ -150,7 +153,11 @@ def _load(sent: pd.DataFrame, recv: pd.DataFrame, e: dict) -> dict:
     held = n_ok / span * p90 / 1e3 if span > 0 and p90 is not None else None
     snd = e.get("sender") or {}
     q = e.get("queue_limit") or {}
+    planned_mbps = None
+    if planned and planned.get("rate_pps") and planned.get("packet_size_bytes"):
+        planned_mbps = round(planned["rate_pps"] * planned["packet_size_bytes"] * 8 / 1e6, 2)
     return {
+        "planned_mbps": planned_mbps,
         "offered_mbps": round(len(sent) * size * 8 / span / 1e6, 2) if span > 0 else None,
         "sent_mbps": round(n_ok * size * 8 / span / 1e6, 2) if span > 0 else None,
         "delivered_mbps": round(len(recv) * size * 8 / span / 1e6, 2) if span > 0 else None,
@@ -164,7 +171,7 @@ def _load(sent: pd.DataFrame, recv: pd.DataFrame, e: dict) -> dict:
     }
 
 
-def summarize(td: TestData) -> tuple[list[dict], dict]:
+def summarize(td: TestData, plan_flows: dict[int, dict] | None = None) -> tuple[list[dict], dict]:
     pk = td.packets
     if pk.empty:
         return [], {}
@@ -201,7 +208,7 @@ def summarize(td: TestData) -> tuple[list[dict], dict]:
         }
         recv = pk[(pk["node"] == ("server" if e["direction"] == "uplink" else "mobile"))
                   & (pk["flow_id"] == e["flow_id"]) & (pk["direction"] == "RECEIVED")]
-        s["load"] = _load(sent, recv, e)
+        s["load"] = _load(sent, recv, e, (plan_flows or {}).get(e["flow_id"]))
         streams.append(s)
         if sp:
             a, dl = sp["_spectra"]["arrival"], sp["_spectra"]["delay"]

@@ -44,3 +44,9 @@ def test_load_block_for_saturation_plots():
     load = streams[0]["load"]
     assert abs(load["offered_mbps"] - 1.6) < 0.05 and abs(load["sent_mbps"] - 1.44) < 0.05
     assert load["delivered_mbps"] <= load["sent_mbps"] + 0.01
+
+
+def test_planned_rate_is_kept_beside_the_attempted_rate():
+    streams, _ = timing.summarize(_uplink(), {2: {"flow_id": 2, "rate_pps": 4000, "packet_size_bytes": 200}})
+    load = streams[0]["load"]
+    assert load["planned_mbps"] == 6.4 and abs(load["offered_mbps"] - 1.6) < 0.05

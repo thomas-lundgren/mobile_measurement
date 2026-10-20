@@ -156,14 +156,16 @@
         held ≈ send rate × the age packets reach (p90 excess delay). Click a point for the stream's buffer-fill
         timeline.</p>
       <div class="grid2">
-        <div class="chart"><h3>Offered vs delivered rate</h3><p>Points leave the diagonal where the uplink saturates.</p>
+        <div class="chart"><h3>Planned vs delivered rate</h3><p>Points leave the diagonal where the uplink saturates.
+          Planned = the test plan's packets/s × size (what the app tried to send).</p>
           <canvas id="scRate"></canvas></div>
         <div class="chart"><h3>Packets held in the modem vs packet size</h3>
           <p>A flat level across sizes = a packet-count limit.</p><canvas id="scPkts"></canvas></div>
         <div class="chart"><h3>Bytes held in the modem vs packet size</h3>
           <p>Bytes fall with packet size at the same packet count — not a byte limit.</p><canvas id="scBytes"></canvas></div>
-        <div class="chart"><h3>Delay vs load</h3><p>p90 excess delay against offered ÷ delivered: the ceiling where
-          the modem drops by age.</p><canvas id="scDelay"></canvas></div>
+        <div class="chart"><h3>Delay vs load</h3><p>Load = planned ÷ delivered rate (1 = the uplink keeps up, 2 = it
+          carries half). p90 excess delay = how long packets waited above the stream's fastest. Expect a cliff just
+          past 1, then a flat ceiling where the modem drops by age (per cell).</p><canvas id="scDelay"></canvas></div>
       </div>
       <div id="detailSlotSat"></div>
     </section>
@@ -687,14 +689,17 @@ function drawSat() {
   const colour = (s) => (s.load.backpressure_share || 0) >= 0.05 ? cv("--red")
     : (s.network_loss_share || 0) >= 0.05 ? cv("--orange") : cv("--blue");
   const tipOf = (t, s) => `<b>${esc(streamLabel(t, s))}</b><br>${esc(t.radio || "")}<br>
-    offered ${num(s.load.offered_mbps, 1)} → delivered ${num(s.load.delivered_mbps, 1)} Mbit/s<br>
+    planned ${num(s.load.planned_mbps, 1)} · attempted ${num(s.load.offered_mbps, 1)} → delivered ${num(s.load.delivered_mbps, 1)} Mbit/s<br>
     loss ${pct(s.network_loss_share)} · wait p50/p90 ${num(s.load.wait_p50_ms)}/${num(s.load.wait_p90_ms)} ms<br>
     modem holds ≈ ${num(s.load.held_packets)} pkts / ${num(s.load.held_kb)} KB<br>
     back pressure ${pct(s.load.backpressure_share)} · blocked ${pct(s.load.blocked_share)} · OS queue max ${num(s.load.os_queue_max_kb)} KB`;
   const P = (fx, fy) => ul.map(({ t, s }) => ({ x: fx(s), y: fy(s), c: colour(s), tip: tipOf(t, s),
     onClick: () => openDetail(t.test_id, s.flow_id, s.direction) }));
-  scatter($("scRate"), P((s) => s.load.offered_mbps, (s) => s.load.delivered_mbps),
-    { xlab: "offered Mbit/s", ylab: "delivered Mbit/s", xlog: true, ylog: true, diag: true });
+  // Planned rate (plan's packets/s × size): under back pressure send() blocks,
+  // so the attempted rate falls below it and would understate the load.
+  const planned = (s) => s.load.planned_mbps ?? s.load.offered_mbps;
+  scatter($("scRate"), P(planned, (s) => s.load.delivered_mbps),
+    { xlab: "planned Mbit/s", ylab: "delivered Mbit/s", xlog: true, ylog: true, diag: true });
   const bp = ul.filter(({ s }) => (s.load.backpressure_share || 0) >= 0.05).map(({ s }) => s.load.held_packets).sort((a, b) => a - b);
   const bpMed = bp.length ? bp[Math.floor(bp.length / 2)] : null;
   scatter($("scPkts"), P((s) => s.size, (s) => s.load.held_packets),
@@ -702,8 +707,8 @@ function drawSat() {
       hlines: bpMed ? [{ y: bpMed, c: cv("--red"), label: `≈ ${bpMed} packets (median under back pressure)` }] : [] });
   scatter($("scBytes"), P((s) => s.size, (s) => s.load.held_kb),
     { xlab: "packet size (B)", ylab: "KB held", xlog: true, ylog: true });
-  scatter($("scDelay"), P((s) => s.load.delivered_mbps > 0 ? s.load.offered_mbps / s.load.delivered_mbps : null, (s) => s.load.wait_p90_ms),
-    { xlab: "offered ÷ delivered", ylab: "p90 excess delay ms", xlog: true, ylog: true });
+  scatter($("scDelay"), P((s) => s.load.delivered_mbps > 0 ? planned(s) / s.load.delivered_mbps : null, (s) => s.load.wait_p90_ms),
+    { xlab: "load = planned ÷ delivered", ylab: "p90 excess delay ms", xlog: true, ylog: true });
 }
 
 // ---------- overview ----------

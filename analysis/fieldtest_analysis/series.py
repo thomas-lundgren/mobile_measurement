@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -34,7 +35,7 @@ from .track import _plan_names, channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 11
+SERIES_VERSION = 12
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -111,7 +112,22 @@ def _peer_ips(td) -> list[str]:
     return sorted(ips)
 
 
-def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
+def _plan_flows(db: str | None) -> dict[str, dict[int, dict]]:
+    """Each test's planned flows by flow_id (rate, packet size), from the
+    server's database."""
+    if not db:
+        return {}
+    out = {}
+    with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as c:
+        for test_id, plan_json in c.execute("SELECT test_id, plan_json FROM tests"):
+            try:
+                out[test_id] = {int(f["flow_id"]): f for f in json.loads(plan_json).get("flows", [])}
+            except (ValueError, TypeError, KeyError):
+                continue
+    return out
+
+
+def test_series(test_dir: Path, plan: str | None = None, plan_flows: dict[int, dict] | None = None) -> dict | None:
     td = load_test(test_dir)
     pk = td.packets
     if pk.empty:
@@ -230,7 +246,7 @@ def test_series(test_dir: Path, plan: str | None = None) -> dict | None:
         "up_mbps": None if pd.isna(tput["up_mbps"]) else round(float(tput["up_mbps"]), 1),
         "loss": _udp_loss(td),
     }
-    timing_streams, timing_detail = timing.summarize(td)
+    timing_streams, timing_detail = timing.summarize(td, plan_flows)
     out = {
         "v": SERIES_VERSION,
         "test_id": test_dir.name,
@@ -294,6 +310,7 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
     """Refresh the per-test cache and rewrite every day file. Returns the days."""
     out = Path(out_dir)
     plans = _plan_names(db)
+    flows = _plan_flows(db)
     tests = []
     for test_dir in sorted(Path(root).glob("ses_*/tst_*")):
         cache = out / "tests" / f"{test_dir.name}.json"
@@ -304,7 +321,7 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
                 data = None
         if data is None:
             try:
-                data = test_series(test_dir, plans.get(test_dir.name))
+                data = test_series(test_dir, plans.get(test_dir.name), flows.get(test_dir.name))
             except Exception as e:  # truncated upload, unreadable parquet, ...
                 print(f"skip {test_dir.name}: {e}", file=sys.stderr)
                 continue
