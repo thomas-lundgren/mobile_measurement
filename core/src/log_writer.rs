@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::timestamp::Timestamp;
 use crate::udp_timing::SendStatus;
@@ -110,13 +110,15 @@ pub struct PacketTiming {
 }
 
 impl PacketRow {
-    /// Minimal probe-style row (UDP, no ports/sender/intervals).
-    pub fn probe(
+    /// A row with every optional field empty; set the rest with struct update
+    /// syntax (`PacketRow { sender, ..PacketRow::new(..) }`).
+    pub fn new(
         flow_id: u32,
         sequence_number: u64,
         direction: Direction,
         timestamp: Timestamp,
         payload_size: u32,
+        protocol: Protocol,
     ) -> Self {
         Self {
             flow_id,
@@ -124,7 +126,7 @@ impl PacketRow {
             direction,
             timestamp,
             payload_size,
-            protocol: Protocol::Udp,
+            protocol,
             local_port: None,
             remote_port: None,
             sender: None,
@@ -134,6 +136,16 @@ impl PacketRow {
             dscp_recv: None,
             timing: PacketTiming::default(),
         }
+    }
+
+    /// Minimal probe-style row (UDP, no ports/sender/intervals).
+    pub fn probe(flow_id: u32, sequence_number: u64, direction: Direction, timestamp: Timestamp, payload_size: u32) -> Self {
+        Self::new(flow_id, sequence_number, direction, timestamp, payload_size, Protocol::Udp)
+    }
+
+    /// One TCP read or write (TCP hides segmentation: a row per app chunk).
+    pub fn tcp(flow_id: u32, sequence_number: u64, direction: Direction, timestamp: Timestamp, payload_size: u32) -> Self {
+        Self::new(flow_id, sequence_number, direction, timestamp, payload_size, Protocol::Tcp)
     }
 }
 
@@ -170,8 +182,19 @@ fn packets_schema() -> Schema {
     ])
 }
 
+/// A segment is closed once it holds `segment_rows` rows or its first row is
+/// this old, whichever comes first. Each close compresses and writes a file
+/// (on the phone, beside the measurement), so segments are long enough to keep
+/// that rare (a 1 ms stream fills 1000 rows twice a second) and short enough
+/// that a crash loses at most this much.
+pub const SEGMENT_AGE: Duration = Duration::from_secs(10);
+
+/// Default row cap per segment (~10 s of two 1 ms streams plus a probe).
+pub const SEGMENT_ROWS: usize = 50_000;
+
 /// Synchronous segmented writer. Buffers rows, closes a segment every
-/// `segment_rows`. Used by the writer thread; usable standalone in tests.
+/// `segment_rows` (and, via `rotate_if_older`, every `SEGMENT_AGE`). Used by
+/// the writer thread; usable standalone in tests.
 pub struct SegmentedPacketWriter {
     log_dir: PathBuf,
     segment_rows: usize,
@@ -182,6 +205,8 @@ pub struct SegmentedPacketWriter {
     /// flow-scoped stem (`packets_fN`) so concurrent flows don't collide.
     stem: String,
     rows: Vec<PacketRow>,
+    /// When the first buffered row arrived.
+    first_row_at: Option<Instant>,
     segment_counter: usize,
     current: Option<(ArrowWriter<File>, PathBuf)>,
 }
@@ -209,7 +234,8 @@ impl SegmentedPacketWriter {
             schema: Arc::new(packets_schema()),
             ctx,
             stem: stem.to_string(),
-            rows: Vec::with_capacity(segment_rows),
+            rows: Vec::with_capacity(segment_rows.min(SEGMENT_ROWS)),
+            first_row_at: None,
             segment_counter: 0,
             current: None,
         };
@@ -218,12 +244,27 @@ impl SegmentedPacketWriter {
     }
 
     pub fn append(&mut self, row: &PacketRow) -> std::io::Result<()> {
+        if self.rows.is_empty() {
+            self.first_row_at = Some(Instant::now());
+        }
         self.rows.push(*row);
         if self.rows.len() >= self.segment_rows {
-            self.flush_segment()?;
-            self.start_new_segment()?;
+            self.rotate()?;
         }
         Ok(())
+    }
+
+    /// Close the segment if its first row is older than `age`.
+    pub fn rotate_if_older(&mut self, age: Duration) -> std::io::Result<()> {
+        if self.first_row_at.is_some_and(|t| t.elapsed() >= age) {
+            self.rotate()?;
+        }
+        Ok(())
+    }
+
+    fn rotate(&mut self) -> std::io::Result<()> {
+        self.flush_segment()?;
+        self.start_new_segment()
     }
 
     pub fn flush(&mut self) -> std::io::Result<()> {
@@ -380,6 +421,7 @@ impl SegmentedPacketWriter {
             writer.close().map_err(std::io::Error::other)?;
         }
         self.rows.clear();
+        self.first_row_at = None;
         Ok(())
     }
 }
@@ -472,6 +514,7 @@ pub fn spawn_packet_writer(
             if stop_thread.load(Ordering::Acquire) && rx.is_empty() {
                 break;
             }
+            let _ = writer.rotate_if_older(SEGMENT_AGE);
             if !drained {
                 thread::sleep(Duration::from_millis(2));
             }
@@ -509,6 +552,7 @@ pub fn spawn_packet_writer_multi(
             if stop_thread.load(Ordering::Acquire) && rxs.iter().all(|r| r.is_empty()) {
                 break;
             }
+            let _ = writer.rotate_if_older(SEGMENT_AGE);
             if !drained {
                 thread::sleep(Duration::from_millis(2));
             }
@@ -645,6 +689,28 @@ mod tests {
             .downcast_ref::<StringArray>()
             .unwrap();
         assert_eq!(dev.value(0), "dev_1");
+    }
+
+    #[test]
+    fn old_segment_rotates_without_more_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut w = SegmentedPacketWriter::new(tmp.path(), 1000, ctx()).unwrap();
+        w.append(&PacketRow::probe(1, 0, Direction::Sent, ts(0), 64)).unwrap();
+        w.rotate_if_older(Duration::from_secs(60)).unwrap();
+        assert_eq!(count_rows_if_closed(&tmp.path().join("packets_0000.parquet")), None);
+        std::thread::sleep(Duration::from_millis(20));
+        w.rotate_if_older(Duration::from_millis(10)).unwrap();
+        assert_eq!(count_rows_if_closed(&tmp.path().join("packets_0000.parquet")), Some(1));
+        // an empty segment never rotates
+        std::thread::sleep(Duration::from_millis(20));
+        w.rotate_if_older(Duration::from_millis(10)).unwrap();
+        assert!(!tmp.path().join("packets_0002.parquet").exists());
+    }
+
+    fn count_rows_if_closed(path: &Path) -> Option<usize> {
+        let file = File::open(path).ok()?;
+        let reader = ParquetRecordBatchReaderBuilder::try_new(file).ok()?.build().ok()?;
+        Some(reader.map(|b| b.unwrap().num_rows()).sum())
     }
 
     #[test]

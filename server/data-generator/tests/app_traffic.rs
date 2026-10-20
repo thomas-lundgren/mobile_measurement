@@ -1,12 +1,13 @@
 //! app_traffic end to end on localhost: the core UE agents against the
 //! generator's object server, both nodes' logs checked per object.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
-use fieldtest_core::app_traffic::{self, AppAction, AppTraffic, Tally};
+use fieldtest_core::app_traffic::{self, AppAction, AppTraffic};
+use fieldtest_core::endpoint::Counters;
 use fieldtest_core::log_writer::{packet_channel, Direction};
 use mp_data_generator::{build_router, AppState};
 use serde_json::json;
@@ -19,21 +20,6 @@ async fn send(st: &AppState, method: &str, path: &str, body: Option<serde_json::
     assert!(resp.status() == StatusCode::OK || resp.status() == StatusCode::NO_CONTENT, "{path}: {}", resp.status());
     let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&bytes).unwrap_or(json!(null))
-}
-
-#[derive(Default)]
-struct Bytes {
-    sent: AtomicU64,
-    received: AtomicU64,
-}
-
-impl Tally for Bytes {
-    fn sent(&self, n: u64) {
-        self.sent.fetch_add(n, Ordering::Relaxed);
-    }
-    fn received(&self, n: u64) {
-        self.received.fetch_add(n, Ordering::Relaxed);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -76,12 +62,12 @@ async fn scripted_user_downloads_and_uploads_objects() {
     };
     let (sink, mut rx, _) = packet_channel(1 << 16);
     let stop = AtomicBool::new(false);
-    let tally = Bytes::default();
+    let tally = Counters::default();
     std::thread::scope(|s| {
         s.spawn(|| app_traffic::run(&cfg, sink, &tally, &stop));
         let t0 = std::time::Instant::now();
-        while tally.sent.load(Ordering::Relaxed) < 420_000 + 15 * 44
-            || tally.received.load(Ordering::Relaxed) < 50_000 + 12 * 30_000 + 44 + 6_000
+        while tally.bytes_sent.load(Ordering::Relaxed) < 420_000 + 15 * 44
+            || tally.bytes_received.load(Ordering::Relaxed) < 50_000 + 12 * 30_000 + 44 + 6_000
         {
             assert!(t0.elapsed() < Duration::from_secs(10), "transfers did not finish");
             std::thread::sleep(Duration::from_millis(20));

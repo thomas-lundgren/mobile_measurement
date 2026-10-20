@@ -9,6 +9,7 @@
 //!   the modem);
 //! - a small `SO_SNDBUF` makes the sender feel that queue as `EAGAIN`, and
 //!   `IP_RECVERR` reports qdisc drops as `ENOBUFS` (silent otherwise);
+//! - the IP TOS byte of sent and received packets (DSCP probes);
 //! - `Pacer`: sub-millisecond send spacing (sleep, then spin the last bit).
 
 use std::io;
@@ -74,6 +75,16 @@ pub fn enable_rx_timestamps(fd: RawFd) -> io::Result<()> {
     setsockopt_int(fd, libc::SOL_SOCKET, libc::SO_TIMESTAMPNS, 1)
 }
 
+/// Report each received packet's IP TOS byte (read by `recv_stamped`).
+pub fn enable_recv_tos(fd: RawFd) -> io::Result<()> {
+    setsockopt_int(fd, libc::IPPROTO_IP, libc::IP_RECVTOS, 1)
+}
+
+/// Mark this socket's next packets with `tos` (`dscp << 2`, ECN bits zero).
+pub fn set_tos(fd: RawFd, tos: u8) -> io::Result<()> {
+    setsockopt_int(fd, libc::IPPROTO_IP, libc::IP_TOS, tos as libc::c_int)
+}
+
 /// Back-pressure mode for a sending socket: `SO_SNDBUF` = `bytes` (the kernel
 /// doubles it and enforces a small minimum) and qdisc drops reported via
 /// `IP_RECVERR`. Returns the effective buffer size the kernel reports.
@@ -105,16 +116,18 @@ pub fn outq_bytes(fd: RawFd) -> Option<u32> {
     (rc == 0 && val >= 0).then_some(val as u32)
 }
 
-/// One received datagram: length, source address (if asked for) and the
-/// kernel receive time (UTC ns, from `SO_TIMESTAMPNS`) when enabled.
+/// One received datagram: length, source address, and — when enabled on the
+/// socket — the kernel receive time (UTC ns, `SO_TIMESTAMPNS`) and the IP TOS
+/// byte (`IP_RECVTOS`).
 pub struct Received {
     pub n: usize,
     pub from: Option<SocketAddr>,
     pub kernel_utc_ns: Option<u64>,
+    pub tos: Option<u8>,
 }
 
-/// `recvmsg` returning the kernel receive timestamp alongside the data.
-/// Honours `SO_RCVTIMEO` / non-blocking like `recv`.
+/// `recvmsg` returning the source and the enabled ancillary data alongside
+/// the data. Honours `SO_RCVTIMEO` / non-blocking like `recv`.
 pub fn recv_stamped(fd: RawFd, buf: &mut [u8]) -> io::Result<Received> {
     let mut addr: libc::sockaddr_storage = unsafe { mem::zeroed() };
     let mut cmsg_buf = [0u64; 16]; // 128 bytes, aligned for cmsghdr
@@ -135,6 +148,7 @@ pub fn recv_stamped(fd: RawFd, buf: &mut [u8]) -> io::Result<Received> {
         return Err(io::Error::last_os_error());
     }
     let mut kernel_utc_ns = None;
+    let mut tos = None;
     let mut cmsg = unsafe { libc::CMSG_FIRSTHDR(&msg) };
     while !cmsg.is_null() {
         let (level, typ) = unsafe { ((*cmsg).cmsg_level, (*cmsg).cmsg_type) };
@@ -142,6 +156,8 @@ pub fn recv_stamped(fd: RawFd, buf: &mut [u8]) -> io::Result<Received> {
             let ts: libc::timespec =
                 unsafe { std::ptr::read_unaligned(libc::CMSG_DATA(cmsg) as *const libc::timespec) };
             kernel_utc_ns = Some(ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64);
+        } else if level == libc::IPPROTO_IP && typ == libc::IP_TOS {
+            tos = Some(unsafe { *libc::CMSG_DATA(cmsg) });
         }
         cmsg = unsafe { libc::CMSG_NXTHDR(&msg, cmsg) };
     }
@@ -149,6 +165,7 @@ pub fn recv_stamped(fd: RawFd, buf: &mut [u8]) -> io::Result<Received> {
         n: n as usize,
         from: sockaddr_to_addr(&addr, msg.msg_namelen),
         kernel_utc_ns,
+        tos,
     })
 }
 
@@ -261,6 +278,20 @@ mod tests {
         let now = crate::timestamp::Timestamp::now().utc_ns;
         let k = r.kernel_utc_ns.expect("kernel timestamp");
         assert!(k <= now && now - k < 1_000_000_000, "kernel {k} vs now {now}");
+    }
+
+    #[test]
+    fn tos_and_timestamp_come_back_together() {
+        let rx = UdpSocket::bind("127.0.0.1:0").unwrap();
+        enable_rx_timestamps(rx.as_raw_fd()).unwrap();
+        enable_recv_tos(rx.as_raw_fd()).unwrap();
+        let tx = UdpSocket::bind("127.0.0.1:0").unwrap();
+        set_tos(tx.as_raw_fd(), 46 << 2).unwrap();
+        tx.send_to(b"ef", rx.local_addr().unwrap()).unwrap();
+        let mut buf = [0u8; 64];
+        let r = recv_stamped(rx.as_raw_fd(), &mut buf).unwrap();
+        assert_eq!(r.tos, Some(46 << 2));
+        assert!(r.kernel_utc_ns.is_some());
     }
 
     #[test]

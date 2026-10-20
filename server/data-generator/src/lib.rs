@@ -16,7 +16,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use fieldtest_core::aux_log::{write_events, AuxContext, EventRow};
-use fieldtest_core::log_writer::{packet_channel, spawn_packet_writer, LogContext};
+use fieldtest_core::log_writer::{packet_channel, spawn_packet_writer, LogContext, SEGMENT_ROWS};
 use mp_contracts::{
     Flow, GeneratorCounters, GeneratorState, InternalGeneratorPrepare, InternalGeneratorStatus,
 };
@@ -24,7 +24,6 @@ use mp_contracts::{
 use flow::Counters;
 
 const RING_CAPACITY: usize = 8192;
-const SEGMENT_ROWS: usize = 1000;
 const READ_TIMEOUT: Duration = Duration::from_millis(200);
 
 fn bind_udp(port: u16) -> Result<UdpSocket, (StatusCode, String)> {

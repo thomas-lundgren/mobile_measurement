@@ -8,8 +8,6 @@
 //! Android `.so` small). The Java shell / interop test merges the contract
 //! `RunTestPayload` (plan flows + flow_bindings + server_host) into this shape.
 
-use std::io::{Read, Write};
-use std::mem;
 use std::net::{TcpStream, UdpSocket};
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -19,16 +17,16 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::endpoint::{self, Counters, RealtimeStream};
 use crate::log_writer::{
     packet_channel, spawn_packet_writer_multi, Direction, LogContext, LogSink, PacketRow, PacketTiming,
-    Protocol, WriterHandle,
+    WriterHandle,
 };
-use crate::packet::{DscpProbePacket, ProbePacket, RealtimePacket, DSCP_UNKNOWN};
+use crate::packet::{DscpProbePacket, ProbePacket, DSCP_UNKNOWN};
 use crate::timestamp::Timestamp;
-use crate::udp_timing::{self, Pacer, SendStatus};
+use crate::udp_timing::{self, SendStatus};
 
 const RING_CAPACITY: usize = 8192;
-const BULK_CHUNK: usize = 64 * 1024;
 const RECV_TIMEOUT: Duration = Duration::from_millis(100);
 const KEEPALIVE_PERIOD: Duration = Duration::from_secs(1);
 /// Sends must fail this long before a flow reopens its UDP socket.
@@ -51,7 +49,7 @@ pub struct UeTestConfig {
 }
 
 fn default_segment_rows() -> usize {
-    1000
+    crate::log_writer::SEGMENT_ROWS
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -96,25 +94,6 @@ pub struct UeFlow {
     pub actions: Option<Vec<crate::app_traffic::AppAction>>,
     #[serde(default)]
     pub placement: Option<String>,
-}
-
-#[derive(Default)]
-struct Counters {
-    sent: AtomicU64,
-    received: AtomicU64,
-    bytes_sent: AtomicU64,
-    bytes_received: AtomicU64,
-}
-
-impl crate::app_traffic::Tally for Counters {
-    fn sent(&self, bytes: u64) {
-        self.sent.fetch_add(1, Ordering::Relaxed);
-        self.bytes_sent.fetch_add(bytes, Ordering::Relaxed);
-    }
-    fn received(&self, bytes: u64) {
-        self.received.fetch_add(1, Ordering::Relaxed);
-        self.bytes_received.fetch_add(bytes, Ordering::Relaxed);
-    }
 }
 
 /// Per-flow result counters (for status / summary).
@@ -218,7 +197,7 @@ impl FlowHandle {
 fn spawn_flow(
     flow: UeFlow,
     server_host: &str,
-    sink: LogSink,
+    mut sink: LogSink,
     counters: Arc<Counters>,
     stop: Arc<AtomicBool>,
 ) -> std::io::Result<JoinHandle<()>> {
@@ -238,17 +217,34 @@ fn spawn_flow(
                 }
                 ("realtime_udp", Some("ToServer")) => {
                     let socket = connected_udp(&server)?;
-                    let reopen = Reopener::new(&server);
-                    Ok(thread::spawn(move || realtime_send(socket, reopen, sink, flow, counters, stop)))
+                    endpoint::back_pressure_mode(&socket, flow.sndbuf_bytes);
+                    let mut out = UeOut { port: local_port(&socket), socket, reopen: Reopener::new(&server), sndbuf_bytes: flow.sndbuf_bytes };
+                    let stream = RealtimeStream {
+                        flow_id: flow.flow_id,
+                        period: rate_period(flow.rate_pps),
+                        size: flow.packet_size_bytes.unwrap_or(0) as usize,
+                    };
+                    Ok(thread::spawn(move || endpoint::realtime_send(&mut out, stream, &mut sink, &counters, &stop)))
                 }
                 ("realtime_udp", _) => {
                     let socket = connected_udp(&server)?;
-                    let reopen = Reopener::new(&server);
-                    Ok(thread::spawn(move || realtime_recv(socket, reopen, sink, flow, counters, stop)))
+                    let mut inp = UeIn {
+                        port: local_port(&socket),
+                        socket,
+                        reopen: Reopener::new(&server),
+                        last_keepalive: Instant::now() - KEEPALIVE_PERIOD, // send one immediately
+                    };
+                    let period_ns = rate_period(flow.rate_pps).as_nanos() as u64;
+                    Ok(thread::spawn(move || {
+                        endpoint::realtime_recv(&mut inp, flow.flow_id, period_ns, &mut sink, &counters, &stop)
+                    }))
                 }
                 ("bulk_tcp", Some("ToServer")) => {
-                    let stream = TcpStream::connect(&server)?;
-                    Ok(thread::spawn(move || bulk_send(stream, sink, flow, counters, stop)))
+                    let mut stream = TcpStream::connect(&server)?;
+                    stream.set_write_timeout(Some(RECV_TIMEOUT))?;
+                    Ok(thread::spawn(move || {
+                        endpoint::bulk_send(&mut stream, flow.flow_id, flow.rate_kbps, flow.target_bytes, &mut sink, &counters, &stop)
+                    }))
                 }
                 ("app_traffic", _) => {
                     let app = crate::app_traffic::AppTraffic {
@@ -262,7 +258,7 @@ fn spawn_flow(
                         placement: crate::app_traffic::Placement::parse(flow.placement.as_deref().unwrap_or("device")),
                     };
                     Ok(thread::spawn(move || {
-                        crate::app_traffic::run(&app, sink, counters.as_ref(), &stop)
+                        crate::app_traffic::run(&app, sink, &counters, &stop)
                     }))
                 }
                 ("dscp_probe", _) => {
@@ -270,8 +266,9 @@ fn spawn_flow(
                     Ok(thread::spawn(move || dscp_probe_ue(socket, sink, flow, counters, stop)))
                 }
                 _ => {
-                    let stream = TcpStream::connect(&server)?;
-                    Ok(thread::spawn(move || bulk_recv(stream, sink, flow, counters, stop)))
+                    let mut stream = TcpStream::connect(&server)?;
+                    stream.set_read_timeout(Some(RECV_TIMEOUT))?;
+                    Ok(thread::spawn(move || endpoint::bulk_recv(&mut stream, flow.flow_id, &mut sink, &counters, &stop)))
                 }
             }
         }
@@ -336,13 +333,6 @@ fn local_port(socket: &UdpSocket) -> Option<u32> {
     socket.local_addr().ok().map(|a| a.port() as u32)
 }
 
-fn would_block(e: &std::io::Error) -> bool {
-    matches!(
-        e.kind(),
-        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-    )
-}
-
 fn rate_period(rate_pps: Option<u32>) -> Duration {
     Duration::from_nanos(1_000_000_000u64 / rate_pps.unwrap_or(10).max(1) as u64)
 }
@@ -369,24 +359,20 @@ fn probe_ue(
     // thread got to read it (the app traffic beside it loads the CPU)
     let _ = udp_timing::enable_rx_timestamps(socket.as_raw_fd());
 
+    let mut bytes = vec![0u8; size.max(ProbePacket::WIRE_LEN)];
+
     while !stop.load(Ordering::Acquire) {
         let ts = Timestamp::now();
-        let mut bytes = ProbePacket {
+        let head = ProbePacket {
             flow_id: flow.flow_id,
             sequence_number: seq,
             send_mono_ns: ts.mono_ns,
         }
-        .to_bytes()
-        .to_vec();
-        if size > bytes.len() {
-            bytes.resize(size, 0);
-        }
+        .to_bytes();
+        bytes[..head.len()].copy_from_slice(&head);
         let sent = socket.send(&bytes).is_ok();
         if sent {
-            counters.sent.fetch_add(1, Ordering::Relaxed);
-            counters
-                .bytes_sent
-                .fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            counters.sent(bytes.len() as u64);
             sink.push(PacketRow {
                 local_port: local_port(&socket),
                 ..PacketRow::probe(flow.flow_id, seq, Direction::Sent, ts, bytes.len() as u32)
@@ -408,10 +394,7 @@ fn probe_ue(
             |buf| udp_timing::recv_stamped(socket.as_raw_fd(), buf).map(|r| (r.n, r.kernel_utc_ns)),
             |pkt, kernel_rx_utc_ns, recv_ts| {
                 if let Ok(echo) = ProbePacket::decode(pkt) {
-                    counters.received.fetch_add(1, Ordering::Relaxed);
-                    counters
-                        .bytes_received
-                        .fetch_add(pkt.len() as u64, Ordering::Relaxed);
+                    counters.received(pkt.len() as u64);
                     sink.push(PacketRow {
                         timing: PacketTiming { kernel_rx_utc_ns, ..PacketTiming::default() },
                         ..PacketRow::probe(
@@ -478,311 +461,77 @@ fn sleep_until(deadline: Instant) {
     }
 }
 
-/// Realtime ToServer: UE sends the fixed-rate padded stream. Logs one SENT
-/// row per attempt, tagged with its outcome, the syscall time and the bytes
-/// still queued below the socket. With `sndbuf_bytes` the socket is small and
-/// non-blocking: a queue the modem does not drain fills it and shows as EAGAIN.
-fn realtime_send(
-    mut socket: UdpSocket,
-    mut reopen: Reopener,
-    mut sink: LogSink,
-    flow: UeFlow,
-    counters: Arc<Counters>,
-    stop: Arc<AtomicBool>,
-) {
-    let period = rate_period(flow.rate_pps);
-    let period_ns = period.as_nanos() as u64;
-    let size = flow
-        .packet_size_bytes
-        .unwrap_or(RealtimePacket::WIRE_LEN as u32) as usize;
-    let setup = |socket: &UdpSocket| {
-        if let Some(bytes) = flow.sndbuf_bytes {
-            if udp_timing::limit_send_buffer(socket.as_raw_fd(), bytes).is_ok() {
-                let _ = socket.set_nonblocking(true);
-            }
-        }
-    };
-    setup(&socket);
-    let mut fd = socket.as_raw_fd();
-    let mut port = local_port(&socket);
-    let mut seq = 0u64;
-    let _ = udp_timing::raise_thread_priority();
-    let mut pacer = Pacer::new(period);
+/// The UE's realtime sender socket: connected to the server, reopened (in
+/// back-pressure mode again if asked) after sends keep failing — the OS then
+/// routes it over the current default network.
+struct UeOut {
+    socket: UdpSocket,
+    reopen: Reopener,
+    sndbuf_bytes: Option<u32>,
+    port: Option<u32>,
+}
 
-    while !stop.load(Ordering::Acquire) {
-        let ts = Timestamp::now();
-        let bytes = RealtimePacket {
-            flow_id: flow.flow_id,
-            sequence_number: seq,
-            send_mono_ns: ts.mono_ns,
-            send_utc_ns: ts.utc_ns,
-        }
-        .to_bytes_padded(size);
-        let t0 = Instant::now();
-        let result = socket.send(&bytes);
-        let call_ns = t0.elapsed().as_nanos().min(u32::MAX as u128) as u32;
-        let status = SendStatus::of(&result);
-        if status == SendStatus::Ok {
-            counters.sent.fetch_add(1, Ordering::Relaxed);
-            counters
-                .bytes_sent
-                .fetch_add(bytes.len() as u64, Ordering::Relaxed);
-        }
-        sink.push(PacketRow {
-            flow_id: flow.flow_id,
-            sequence_number: seq,
-            direction: Direction::Sent,
-            timestamp: ts,
-            payload_size: bytes.len() as u32,
-            protocol: Protocol::Udp,
-            local_port: port,
-            remote_port: None,
-            sender: None,
-            expected_interval_ns: Some(period_ns),
-            actual_interval_ns: None,
-            dscp_sent: None,
-            dscp_recv: None,
-            timing: PacketTiming {
-                send_status: Some(status),
-                send_call_ns: Some(call_ns),
-                sock_outq_bytes: udp_timing::outq_bytes(fd),
-                ..PacketTiming::default()
-            },
-        });
-        seq += 1;
+impl endpoint::DatagramOut for UeOut {
+    fn socket(&self) -> &UdpSocket {
+        &self.socket
+    }
+
+    fn send(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.socket.send(buf)
+    }
+
+    fn ports(&self) -> (Option<u32>, Option<u32>) {
+        (self.port, None)
+    }
+
+    fn after_send(&mut self, status: SendStatus) {
         let now = Instant::now();
-        if reopen.note(status == SendStatus::Error, now) {
-            if let Some(s) = reopen.reopen(now) {
-                setup(&s);
-                socket = s;
-                fd = socket.as_raw_fd();
-                port = local_port(&socket);
+        if self.reopen.note(status == SendStatus::Error, now) {
+            if let Some(s) = self.reopen.reopen(now) {
+                endpoint::back_pressure_mode(&s, self.sndbuf_bytes);
+                self.port = local_port(&s);
+                self.socket = s;
             }
         }
-        pacer.wait();
     }
 }
 
-/// Realtime FromServer: UE sends ~1 Hz keepalives (NAT punch-through) and
-/// receives the downlink, logging RECEIVED with sender timestamps + interval.
-fn realtime_recv(
-    mut socket: UdpSocket,
-    mut reopen: Reopener,
-    mut sink: LogSink,
-    flow: UeFlow,
-    counters: Arc<Counters>,
-    stop: Arc<AtomicBool>,
-) {
-    let period_ns = rate_period(flow.rate_pps).as_nanos() as u64;
-    let mut buf = [0u8; 2048];
-    let mut last_keepalive = Instant::now() - KEEPALIVE_PERIOD; // send one immediately
-    let mut last_recv_mono: Option<u64> = None;
-    let mut fd = socket.as_raw_fd();
-    let _ = udp_timing::enable_rx_timestamps(fd);
-    let mut port = local_port(&socket);
+/// The UE's realtime receiver socket: sends ~1 Hz keepalives (NAT
+/// punch-through; they also tell the server where to send after a network
+/// switch) and reopens when they keep failing.
+struct UeIn {
+    socket: UdpSocket,
+    reopen: Reopener,
+    last_keepalive: Instant,
+    port: Option<u32>,
+}
 
-    while !stop.load(Ordering::Acquire) {
-        if last_keepalive.elapsed() >= KEEPALIVE_PERIOD {
-            let failed = socket.send(b"mp-keepalive").is_err();
-            let now = Instant::now();
-            // retry a failed keepalive every RECV_TIMEOUT, not once a second,
-            // so a dead network is noticed within REOPEN_AFTER
-            last_keepalive = if failed { now - KEEPALIVE_PERIOD + RECV_TIMEOUT } else { now };
-            if reopen.note(failed, now) {
-                if let Some(s) = reopen.reopen(now) {
-                    socket = s;
-                    fd = socket.as_raw_fd();
-                    let _ = udp_timing::enable_rx_timestamps(fd);
-                    port = local_port(&socket);
-                    last_keepalive = now - KEEPALIVE_PERIOD; // announce the new address at once
-                }
+impl endpoint::DatagramIn for UeIn {
+    fn fd(&self) -> std::os::fd::RawFd {
+        self.socket.as_raw_fd()
+    }
+
+    fn local_port(&self) -> Option<u32> {
+        self.port
+    }
+
+    fn before_recv(&mut self) {
+        if self.last_keepalive.elapsed() < KEEPALIVE_PERIOD {
+            return;
+        }
+        let failed = self.socket.send(b"mp-keepalive").is_err();
+        let now = Instant::now();
+        // retry a failed keepalive every RECV_TIMEOUT, not once a second,
+        // so a dead network is noticed within REOPEN_AFTER
+        self.last_keepalive = if failed { now - KEEPALIVE_PERIOD + RECV_TIMEOUT } else { now };
+        if self.reopen.note(failed, now) {
+            if let Some(s) = self.reopen.reopen(now) {
+                self.port = local_port(&s);
+                self.socket = s;
+                self.last_keepalive = now - KEEPALIVE_PERIOD; // announce the new address at once
             }
         }
-        match udp_timing::recv_stamped(fd, &mut buf) {
-            Ok(udp_timing::Received { n, kernel_utc_ns, .. }) => {
-                let recv_ts = Timestamp::now();
-                counters.received.fetch_add(1, Ordering::Relaxed);
-                counters
-                    .bytes_received
-                    .fetch_add(n as u64, Ordering::Relaxed);
-                let (sender, seq) = match RealtimePacket::decode(&buf[..n]) {
-                    Ok(p) => (
-                        Some(Timestamp {
-                            mono_ns: p.send_mono_ns,
-                            utc_ns: p.send_utc_ns,
-                        }),
-                        p.sequence_number,
-                    ),
-                    Err(_) => (None, 0),
-                };
-                let actual = last_recv_mono.map(|l| recv_ts.mono_ns.saturating_sub(l));
-                last_recv_mono = Some(recv_ts.mono_ns);
-                sink.push(PacketRow {
-                    flow_id: flow.flow_id,
-                    sequence_number: seq,
-                    direction: Direction::Received,
-                    timestamp: recv_ts,
-                    payload_size: n as u32,
-                    protocol: Protocol::Udp,
-                    local_port: port,
-                    remote_port: None,
-                    sender,
-                    expected_interval_ns: Some(period_ns),
-                    actual_interval_ns: actual,
-                    dscp_sent: None,
-                    dscp_recv: None,
-                    timing: PacketTiming {
-                        kernel_rx_utc_ns: kernel_utc_ns,
-                        ..PacketTiming::default()
-                    },
-                });
-            }
-            Err(ref e) if would_block(e) => {}
-            Err(_) => {}
-        }
     }
-}
-
-/// Bulk ToServer: UE uploads chunks. One row per chunk.
-fn bulk_send(
-    mut stream: TcpStream,
-    mut sink: LogSink,
-    flow: UeFlow,
-    counters: Arc<Counters>,
-    stop: Arc<AtomicBool>,
-) {
-    let _ = stream.set_write_timeout(Some(RECV_TIMEOUT));
-    let (chunk, mut pacer) = match flow.rate_kbps {
-        Some(kbps) => {
-            let (chunk, period) = udp_timing::bulk_pacing(kbps, BULK_CHUNK);
-            (chunk, Some(Pacer::new(period)))
-        }
-        None => (BULK_CHUNK, None),
-    };
-    let payload = vec![0u8; chunk];
-    let mut seq = 0u64;
-    let mut total = 0u64;
-    while !stop.load(Ordering::Acquire) {
-        if let Some(p) = pacer.as_mut() {
-            p.wait();
-        }
-        let ts = Timestamp::now();
-        match stream.write(&payload) {
-            Ok(0) => break,
-            Ok(n) => {
-                counters.sent.fetch_add(1, Ordering::Relaxed);
-                counters.bytes_sent.fetch_add(n as u64, Ordering::Relaxed);
-                total += n as u64;
-                sink.push(bulk_row(flow.flow_id, seq, Direction::Sent, ts, n as u32));
-                seq += 1;
-                if flow.target_bytes.is_some_and(|t| total >= t) {
-                    break;
-                }
-            }
-            Err(ref e) if would_block(e) => {}
-            Err(_) => break,
-        }
-    }
-}
-
-/// Bulk FromServer: UE downloads chunks. One row per chunk.
-fn bulk_recv(
-    mut stream: TcpStream,
-    mut sink: LogSink,
-    flow: UeFlow,
-    counters: Arc<Counters>,
-    stop: Arc<AtomicBool>,
-) {
-    let _ = stream.set_read_timeout(Some(RECV_TIMEOUT));
-    let mut buf = vec![0u8; BULK_CHUNK];
-    let mut seq = 0u64;
-    while !stop.load(Ordering::Acquire) {
-        match stream.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                let ts = Timestamp::now();
-                counters.received.fetch_add(1, Ordering::Relaxed);
-                counters
-                    .bytes_received
-                    .fetch_add(n as u64, Ordering::Relaxed);
-                sink.push(bulk_row(
-                    flow.flow_id,
-                    seq,
-                    Direction::Received,
-                    ts,
-                    n as u32,
-                ));
-                seq += 1;
-            }
-            Err(ref e) if would_block(e) => {}
-            Err(_) => break,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// DSCP probe (UE side)
-// ---------------------------------------------------------------------------
-
-fn enable_ip_recvtos(fd: std::os::fd::RawFd) {
-    let one: libc::c_int = 1;
-    unsafe {
-        libc::setsockopt(
-            fd,
-            libc::IPPROTO_IP,
-            libc::IP_RECVTOS,
-            &one as *const libc::c_int as *const libc::c_void,
-            mem::size_of::<libc::c_int>() as libc::socklen_t,
-        );
-    }
-}
-
-fn set_ip_tos(fd: std::os::fd::RawFd, tos: u8) {
-    let val: libc::c_int = tos as libc::c_int;
-    unsafe {
-        libc::setsockopt(
-            fd,
-            libc::IPPROTO_IP,
-            libc::IP_TOS,
-            &val as *const libc::c_int as *const libc::c_void,
-            mem::size_of::<libc::c_int>() as libc::socklen_t,
-        );
-    }
-}
-
-/// `recvmsg` on a connected socket: returns `(bytes_read, tos_byte)`.
-/// Respects the socket's `SO_RCVTIMEO` (set via `set_read_timeout`).
-fn recv_with_tos_connected(fd: std::os::fd::RawFd, buf: &mut [u8]) -> std::io::Result<(usize, Option<u8>)> {
-    let cmsg_capacity =
-        unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as u32) as usize };
-    let mut cmsg_buf = vec![0u8; cmsg_capacity];
-    let mut iov = libc::iovec {
-        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
-        iov_len: buf.len(),
-    };
-    let mut msg = libc::msghdr {
-        msg_name: std::ptr::null_mut(),
-        msg_namelen: 0,
-        msg_iov: &mut iov,
-        msg_iovlen: 1,
-        msg_control: cmsg_buf.as_mut_ptr() as *mut libc::c_void,
-        msg_controllen: cmsg_buf.len() as _,
-        msg_flags: 0,
-    };
-    let n = unsafe { libc::recvmsg(fd, &mut msg, 0) };
-    if n < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let mut tos_byte: Option<u8> = None;
-    let mut cmsg = unsafe { libc::CMSG_FIRSTHDR(&msg) };
-    while !cmsg.is_null() {
-        let (level, typ) = unsafe { ((*cmsg).cmsg_level, (*cmsg).cmsg_type) };
-        if level == libc::IPPROTO_IP && typ == libc::IP_TOS {
-            tos_byte = Some(unsafe { *libc::CMSG_DATA(cmsg) });
-        }
-        cmsg = unsafe { libc::CMSG_NXTHDR(&msg, cmsg) };
-    }
-    Ok((n as usize, tos_byte))
 }
 
 /// DSCP transparency probe: cycles through `dscp_values` on each sent packet,
@@ -808,7 +557,7 @@ fn dscp_probe_ue(
         .unwrap_or_else(|| vec![0]);
 
     let fd = socket.as_raw_fd();
-    enable_ip_recvtos(fd);
+    let _ = udp_timing::enable_recv_tos(fd);
 
     let mut recv_buf = [0u8; 2048];
     let mut seq = 1u64;
@@ -817,7 +566,7 @@ fn dscp_probe_ue(
     while !stop.load(Ordering::Acquire) {
         let dscp_intended_ul = dscp_values[((seq - 1) as usize) % dscp_values.len()];
 
-        set_ip_tos(fd, dscp_intended_ul << 2);
+        let _ = udp_timing::set_tos(fd, dscp_intended_ul << 2);
 
         let ts = Timestamp::now();
         let pkt = DscpProbePacket {
@@ -830,23 +579,10 @@ fn dscp_probe_ue(
         };
         let bytes = pkt.to_bytes();
         if socket.send(&bytes).is_ok() {
-            counters.sent.fetch_add(1, Ordering::Relaxed);
-            counters.bytes_sent.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            counters.sent(bytes.len() as u64);
             sink.push(PacketRow {
-                flow_id: flow.flow_id,
-                sequence_number: seq,
-                direction: Direction::Sent,
-                timestamp: ts,
-                payload_size: bytes.len() as u32,
-                protocol: Protocol::Udp,
-                local_port: None,
-                remote_port: None,
-                sender: None,
-                expected_interval_ns: None,
-                actual_interval_ns: None,
                 dscp_sent: Some(dscp_intended_ul),
-                dscp_recv: None,
-                timing: PacketTiming::default(),
+                ..PacketRow::probe(flow.flow_id, seq, Direction::Sent, ts, bytes.len() as u32)
             });
         }
 
@@ -856,52 +592,21 @@ fn dscp_probe_ue(
             &socket,
             next,
             &mut recv_buf,
-            |buf| recv_with_tos_connected(fd, buf),
+            |buf| udp_timing::recv_stamped(fd, buf).map(|r| (r.n, r.tos)),
             |pkt, tos_byte, recv_ts| {
                 let n = pkt.len();
                 if let Ok(echo) = DscpProbePacket::decode(pkt) {
-                    counters.received.fetch_add(1, Ordering::Relaxed);
-                    counters.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
+                    counters.received(n as u64);
                     let dscp_actual_dl = tos_byte.map(|t| t >> 2).unwrap_or(DSCP_UNKNOWN);
                     sink.push(PacketRow {
-                        flow_id: flow.flow_id,
-                        sequence_number: echo.sequence_number,
-                        direction: Direction::Received,
-                        timestamp: recv_ts,
-                        payload_size: n as u32,
-                        protocol: Protocol::Udp,
-                        local_port: None,
-                        remote_port: None,
-                        sender: None,
-                        expected_interval_ns: None,
-                        actual_interval_ns: None,
                         dscp_sent: Some(echo.dscp_intended_dl),
                         dscp_recv: Some(dscp_actual_dl),
-                        timing: PacketTiming::default(),
+                        ..PacketRow::probe(flow.flow_id, echo.sequence_number, Direction::Received, recv_ts, n as u32)
                     });
                 }
             },
         );
         sleep_until(next);
-    }
-}
-
-fn bulk_row(flow_id: u32, seq: u64, direction: Direction, ts: Timestamp, size: u32) -> PacketRow {
-    PacketRow {
-        flow_id,
-        sequence_number: seq,
-        direction,
-        timestamp: ts,
-        payload_size: size,
-        protocol: Protocol::Tcp,
-        local_port: None,
-        remote_port: None,
-        sender: None,
-        expected_interval_ns: None,
-        actual_interval_ns: None,
-        dscp_sent: None,
-        dscp_recv: None,
-        timing: PacketTiming::default(),
     }
 }
 

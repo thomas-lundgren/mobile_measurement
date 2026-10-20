@@ -28,7 +28,8 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use crate::log_writer::{Direction, LogSink, PacketRow, PacketTiming, Protocol};
+use crate::endpoint::Counters;
+use crate::log_writer::{Direction, LogSink, PacketRow, PacketTiming};
 use crate::packet::AppExchange;
 use crate::timestamp::Timestamp;
 
@@ -535,12 +536,6 @@ impl Agent {
     }
 }
 
-/// Where the runner reports transferred bytes (the engine's flow counters).
-pub trait Tally: Send + Sync {
-    fn sent(&self, bytes: u64);
-    fn received(&self, bytes: u64);
-}
-
 /// One app_traffic flow on the UE.
 #[derive(Debug, Clone)]
 pub struct AppTraffic {
@@ -558,15 +553,15 @@ pub struct AppTraffic {
 struct Ctx<'a> {
     cfg: &'a AppTraffic,
     sink: &'a Mutex<LogSink>,
-    tally: &'a dyn Tally,
+    counters: &'a Counters,
     stop: &'a AtomicBool,
 }
 
 /// Run the flow's agents until `stop`. Each agent is a thread with its own
 /// connection pool; a script runs on one agent only.
-pub fn run(cfg: &AppTraffic, sink: LogSink, tally: &dyn Tally, stop: &AtomicBool) {
+pub fn run(cfg: &AppTraffic, sink: LogSink, counters: &Counters, stop: &AtomicBool) {
     let sink = Mutex::new(sink);
-    let ctx = Ctx { cfg, sink: &sink, tally, stop };
+    let ctx = Ctx { cfg, sink: &sink, counters, stop };
     let workers = if cfg.profile == "script" { 1 } else { cfg.workers.clamp(1, 16) };
     let start = Instant::now();
     std::thread::scope(|s| {
@@ -659,25 +654,13 @@ fn connect(server: &str) -> io::Result<TcpStream> {
 
 fn row(flow_id: u32, object_id: u64, direction: Direction, size: u32, f: &Fetch) -> PacketRow {
     PacketRow {
-        flow_id,
-        sequence_number: object_id,
-        direction,
-        timestamp: Timestamp::now(),
-        payload_size: size,
-        protocol: Protocol::Tcp,
-        local_port: None,
-        remote_port: None,
-        sender: None,
-        expected_interval_ns: None,
-        actual_interval_ns: None,
-        dscp_sent: None,
-        dscp_recv: None,
         timing: PacketTiming {
             app_activity: Some(activity_name(f.activity)),
             app_object_bytes: Some(f.down),
             app_up_bytes: Some(f.up),
             ..PacketTiming::default()
         },
+        ..PacketRow::tcp(flow_id, object_id, direction, Timestamp::now(), size)
     }
 }
 
@@ -743,7 +726,7 @@ fn transfer(ctx: &Ctx, conn: &mut TcpStream, f: Fetch, object_id: u64) -> io::Re
     let head = req.to_bytes();
     push(Direction::Sent, head.len());
     write_all_until(conn, &head, ctx.stop, deadline)?;
-    ctx.tally.sent(head.len() as u64);
+    ctx.counters.sent(head.len() as u64);
 
     let mut buf = vec![0u8; CHUNK];
     let mut left = f.up;
@@ -754,14 +737,14 @@ fn transfer(ctx: &Ctx, conn: &mut TcpStream, f: Fetch, object_id: u64) -> io::Re
         let n = left.min(CHUNK as u64) as usize;
         write_all_until(conn, &buf[..n], ctx.stop, deadline)?;
         push(Direction::Sent, n);
-        ctx.tally.sent(n as u64);
+        ctx.counters.sent(n as u64);
         left -= n as u64;
     }
     if f.down == 0 {
         let mut ack = [0u8; AppExchange::WIRE_LEN];
         read_exact_until(conn, &mut ack, ctx.stop, deadline)?;
         push(Direction::Received, ack.len());
-        ctx.tally.received(ack.len() as u64);
+        ctx.counters.received(ack.len() as u64);
         return Ok(());
     }
     let mut left = f.down;
@@ -771,7 +754,7 @@ fn transfer(ctx: &Ctx, conn: &mut TcpStream, f: Fetch, object_id: u64) -> io::Re
             Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
             Ok(n) => {
                 push(Direction::Received, n);
-                ctx.tally.received(n as u64);
+                ctx.counters.received(n as u64);
                 left -= n as u64;
                 // a stream that keeps delivering never times out: check here
                 // too, or the test's end waits for the reply to finish
