@@ -329,6 +329,30 @@ pub fn authed_operator(st: &AppState, headers: &HeaderMap) -> Result<Claims, App
     Ok(data.claims)
 }
 
+fn hash_password(password: &str) -> Result<String, AppError> {
+    let salt = SaltString::generate(&mut OsRng);
+    Ok(Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map_err(|_| AppError::Internal)?
+        .to_string())
+}
+
+/// Replace an operator's password (argon2 hash). False if no such operator.
+/// JWTs already issued stay valid until they expire.
+pub async fn set_operator_password(
+    pool: &sqlx::SqlitePool,
+    username: &str,
+    password: &str,
+) -> Result<bool, AppError> {
+    let rows = sqlx::query("UPDATE operators SET password_hash = ? WHERE username = ?")
+        .bind(hash_password(password)?)
+        .bind(username)
+        .execute(pool)
+        .await?
+        .rows_affected();
+    Ok(rows > 0)
+}
+
 /// Create an operator (argon2 password hash). Used by admin tooling + tests.
 pub async fn create_operator(
     pool: &sqlx::SqlitePool,
@@ -336,11 +360,7 @@ pub async fn create_operator(
     password: &str,
     role: OperatorRole,
 ) -> Result<(), AppError> {
-    let salt = SaltString::generate(&mut OsRng);
-    let hash = Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
-        .map_err(|_| AppError::Internal)?
-        .to_string();
+    let hash = hash_password(password)?;
     sqlx::query("INSERT INTO operators(id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)")
         .bind(new_id("opr"))
         .bind(username)

@@ -237,3 +237,49 @@ async fn flows_table_takes_every_flow_type() {
         "flow types listed in contracts/enums"
     );
 }
+
+async fn login_status(st: &AppState, user: &str, pass: &str) -> StatusCode {
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({"username": user, "password": pass}).to_string(),
+        ))
+        .unwrap();
+    build_router(st.clone())
+        .oneshot(req)
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn set_password_replaces_the_old_one() {
+    let st = state().await;
+    auth::create_operator(&st.pool, "op", "old-password-1", OperatorRole::Operator)
+        .await
+        .unwrap();
+    assert_eq!(
+        login_status(&st, "op", "old-password-1").await,
+        StatusCode::OK
+    );
+    assert!(
+        auth::set_operator_password(&st.pool, "op", "new-password-2")
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        login_status(&st, "op", "old-password-1").await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        login_status(&st, "op", "new-password-2").await,
+        StatusCode::OK
+    );
+    assert!(
+        !auth::set_operator_password(&st.pool, "nobody", "x-password-3")
+            .await
+            .unwrap()
+    );
+}

@@ -4,6 +4,7 @@
 //!
 //!   mp-admin mint-token <RAW_TOKEN>
 //!   mp-admin add-operator <USERNAME> <PASSWORD>
+//!   mp-admin set-password <USERNAME>     (new password on stdin)
 //!   mp-admin list-devices
 
 use mp_contracts::OperatorRole;
@@ -30,6 +31,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             auth::create_operator(&pool, user, pass, OperatorRole::Operator).await?;
             println!("operator '{user}' added");
         }
+        Some("set-password") => {
+            // from stdin, so it never shows in the process list or history
+            let user = args.get(2).expect("usage: set-password <USER> < password");
+            let mut pass = String::new();
+            std::io::stdin().read_line(&mut pass)?;
+            let pass = pass.trim_end_matches(['\r', '\n']);
+            if pass.len() < 12 {
+                eprintln!("refusing a password shorter than 12 characters");
+                std::process::exit(2);
+            }
+            if !auth::set_operator_password(&pool, user, pass).await? {
+                eprintln!("no operator '{user}'");
+                std::process::exit(1);
+            }
+            println!("password of operator '{user}' changed");
+        }
         Some("list-devices") => {
             for d in registry::list_devices(&pool).await? {
                 println!(
@@ -42,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         _ => {
-            eprintln!("usage: mp-admin <mint-token RAW | add-operator USER PASS | list-devices>");
+            eprintln!("usage: mp-admin <mint-token RAW | add-operator USER PASS | set-password USER (stdin) | list-devices>");
             std::process::exit(2);
         }
     }
