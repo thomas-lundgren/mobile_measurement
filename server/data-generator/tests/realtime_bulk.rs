@@ -196,6 +196,43 @@ async fn bulk_from_server_streams_bytes() {
 }
 
 #[tokio::test]
+async fn bulk_from_server_keeps_to_rate_cap() {
+    let st = AppState::default();
+    let dir = tempfile::tempdir().unwrap();
+    let port = free_port();
+    let gid = prepare(
+        &st,
+        json!({"flow_id":6,"type":"bulk_tcp","direction":"FromServer","rate_kbps":2000}),
+        port,
+        dir.path(),
+    )
+    .await;
+
+    // 2 Mbit/s = 250 KB/s; read for 1 s
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .unwrap();
+    let mut total = 0usize;
+    let mut buf = vec![0u8; 64 * 1024];
+    let t0 = std::time::Instant::now();
+    while t0.elapsed() < Duration::from_secs(1) {
+        if let Ok(n) = stream.read(&mut buf) {
+            total += n;
+        }
+    }
+    assert!((200_000..=300_000).contains(&total), "bytes in 1 s at 2 Mbit/s: {total}");
+    drop(stream);
+    send(
+        &st,
+        "POST",
+        &format!("/internal/generators/{gid}/stop"),
+        None,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn bulk_to_server_drains_bytes() {
     let st = AppState::default();
     let dir = tempfile::tempdir().unwrap();

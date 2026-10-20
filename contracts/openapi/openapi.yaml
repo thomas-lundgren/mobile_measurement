@@ -835,6 +835,15 @@ components:
             type: integer
             format: int32
             minimum: 0
+          rate_kbps:
+            type:
+            - integer
+            - 'null'
+            format: int32
+            description: |-
+              Sender only: pace writes to this rate (kbit/s, application bytes)
+              instead of sending as fast as TCP allows. Omit for uncapped bulk.
+            minimum: 0
           target_bytes:
             type:
             - integer

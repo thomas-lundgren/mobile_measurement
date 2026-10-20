@@ -786,6 +786,7 @@ Initial implementation:
 - TCP upload (`ToServer`)
 - TCP download (`FromServer`)
 - simultaneous upload + download (`Bidirectional`)
+- optional `rate_kbps` caps the sending rate: the sender writes 5 ms worth of bytes (at most 64 KiB) per paced write, so a low or medium bulk load can run beside realtime flows (head-of-line blocking tests) without saturating the link
 
 Connection initiation and behavior by direction:
 

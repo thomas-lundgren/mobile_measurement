@@ -42,6 +42,10 @@ pub enum Flow {
         direction: Direction,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         target_bytes: Option<u32>,
+        /// Sender only: pace writes to this rate (kbit/s, application bytes)
+        /// instead of sending as fast as TCP allows. Omit for uncapped bulk.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        rate_kbps: Option<u32>,
     },
     /// Logger-only: ICMP/UDP/TCP-SYN probes to auto-discovered first-hop gateways.
     /// No server endpoint — FlowBinding.server_port is None for this type.

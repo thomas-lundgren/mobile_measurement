@@ -496,6 +496,9 @@ public final class LoggerService extends Service {
             if (f.has("sndbuf_bytes")) {
                 uf.put("sndbuf_bytes", f.getInt("sndbuf_bytes"));
             }
+            if (f.has("rate_kbps")) {
+                uf.put("rate_kbps", f.getInt("rate_kbps"));
+            }
             flows.put(uf);
         }
         return new JSONObject()

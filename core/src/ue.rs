@@ -75,6 +75,9 @@ pub struct UeFlow {
     /// non-blocking, so a full queue below the socket shows as EAGAIN.
     #[serde(default)]
     pub sndbuf_bytes: Option<u32>,
+    /// bulk_tcp sender only: pace writes to this many kbit/s.
+    #[serde(default)]
+    pub rate_kbps: Option<u32>,
 }
 
 #[derive(Default)]
@@ -517,10 +520,20 @@ fn bulk_send(
     stop: Arc<AtomicBool>,
 ) {
     let _ = stream.set_write_timeout(Some(RECV_TIMEOUT));
-    let payload = vec![0u8; BULK_CHUNK];
+    let (chunk, mut pacer) = match flow.rate_kbps {
+        Some(kbps) => {
+            let (chunk, period) = udp_timing::bulk_pacing(kbps, BULK_CHUNK);
+            (chunk, Some(Pacer::new(period)))
+        }
+        None => (BULK_CHUNK, None),
+    };
+    let payload = vec![0u8; chunk];
     let mut seq = 0u64;
     let mut total = 0u64;
     while !stop.load(Ordering::Acquire) {
+        if let Some(p) = pacer.as_mut() {
+            p.wait();
+        }
         let ts = Timestamp::now();
         match stream.write(&payload) {
             Ok(0) => break,

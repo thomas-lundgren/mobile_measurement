@@ -78,6 +78,7 @@ fn probe_against_echo_peer() {
             target_bytes: None,
             dscp_values: None,
             sndbuf_bytes: None,
+            rate_kbps: None,
         },
     ))
     .unwrap();
@@ -184,6 +185,7 @@ fn probe_rtt_not_inflated_after_late_echo() {
             target_bytes: None,
             dscp_values: None,
             sndbuf_bytes: None,
+            rate_kbps: None,
         },
     ))
     .unwrap();
@@ -240,6 +242,7 @@ fn realtime_to_server_send() {
             target_bytes: None,
             dscp_values: None,
             sndbuf_bytes: None,
+            rate_kbps: None,
         },
     ))
     .unwrap();
@@ -291,6 +294,7 @@ fn realtime_from_server_recv() {
             target_bytes: None,
             dscp_values: None,
             sndbuf_bytes: None,
+            rate_kbps: None,
         },
     ))
     .unwrap();
@@ -340,6 +344,7 @@ fn bulk_to_server_upload() {
             target_bytes: None,
             dscp_values: None,
             sndbuf_bytes: None,
+            rate_kbps: None,
         },
     ))
     .unwrap();
@@ -382,6 +387,7 @@ fn bulk_from_server_download() {
             target_bytes: None,
             dscp_values: None,
             sndbuf_bytes: None,
+            rate_kbps: None,
         },
     ))
     .unwrap();

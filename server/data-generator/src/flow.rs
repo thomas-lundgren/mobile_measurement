@@ -518,6 +518,7 @@ pub fn spawn_bulk_tcp(
     flow_id: u32,
     direction: FlowDir,
     target_bytes: Option<u64>,
+    rate_kbps: Option<u32>,
     state: Arc<Mutex<GeneratorState>>,
     counters: Arc<Counters>,
     stop: Arc<AtomicBool>,
@@ -559,9 +560,19 @@ pub fn spawn_bulk_tcp(
         let mut seq = 0u64;
         match direction {
             FlowDir::FromServer => {
-                let payload = vec![0u8; BULK_CHUNK];
+                let (chunk, mut pacer) = match rate_kbps {
+                    Some(kbps) => {
+                        let (chunk, period) = udp_timing::bulk_pacing(kbps, BULK_CHUNK);
+                        (chunk, Some(Pacer::new(period)))
+                    }
+                    None => (BULK_CHUNK, None),
+                };
+                let payload = vec![0u8; chunk];
                 let mut total = 0u64;
                 while !stop.load(Ordering::Acquire) {
+                    if let Some(p) = pacer.as_mut() {
+                        p.wait();
+                    }
                     let ts = Timestamp::now();
                     match stream.write(&payload) {
                         Ok(0) => break,

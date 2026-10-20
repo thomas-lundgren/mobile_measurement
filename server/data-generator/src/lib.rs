@@ -153,6 +153,7 @@ async fn prepare(
         Flow::BulkTcp {
             direction,
             target_bytes,
+            rate_kbps,
             ..
         } => {
             let listener =
@@ -170,6 +171,7 @@ async fn prepare(
                 flow_id,
                 *direction,
                 target_bytes.map(|t| t as u64),
+                *rate_kbps,
                 state.clone(),
                 counters.clone(),
                 stop.clone(),

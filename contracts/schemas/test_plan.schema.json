@@ -100,6 +100,10 @@
         "target_bytes": {
           "type": "integer", "minimum": 1,
           "description": "Optional byte cap. If omitted, the flow runs until the plan duration elapses."
+        },
+        "rate_kbps": {
+          "type": "integer", "minimum": 8,
+          "description": "Optional sending-rate cap in kbit/s of application bytes. The sender writes small chunks (5 ms worth, at most 64 KiB) paced to this rate, so the flow loads the link without filling it. If the path is slower than the cap, the flow runs at the path's rate as uncapped bulk does. Omit for uncapped bulk."
         }
       },
       "description": "Bulk-throughput TCP. Bidirectional is modeled as two flows on separate connections (remediation 2.2)."

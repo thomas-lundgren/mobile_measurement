@@ -222,9 +222,29 @@ impl Pacer {
     }
 }
 
+/// Write size and period for a rate-capped bulk TCP sender: 5 ms worth of
+/// bytes per write, at most `max_chunk` (the period stretches at high rates).
+pub fn bulk_pacing(rate_kbps: u32, max_chunk: usize) -> (usize, Duration) {
+    let bytes_per_s = rate_kbps.max(8) as u64 * 1000 / 8;
+    let chunk = ((bytes_per_s / 200) as usize).clamp(1, max_chunk);
+    (chunk, Duration::from_nanos(chunk as u64 * 1_000_000_000 / bytes_per_s))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bulk_pacing_keeps_the_rate() {
+        for (kbps, max) in [(2_000, 65_536), (10_000, 65_536), (500_000, 65_536), (8, 65_536)] {
+            let (chunk, period) = bulk_pacing(kbps, max);
+            assert!(chunk >= 1 && chunk <= max);
+            let rate = chunk as f64 * 8.0 / period.as_secs_f64() / 1000.0;
+            assert!((rate - kbps as f64).abs() / (kbps as f64) < 0.01, "{kbps}: {rate}");
+        }
+        assert_eq!(bulk_pacing(2_000, 65_536), (1250, Duration::from_millis(5)));
+        assert_eq!(bulk_pacing(500_000, 65_536).0, 65_536);
+    }
     use std::net::UdpSocket;
     use std::os::fd::AsRawFd;
 
