@@ -214,3 +214,54 @@ A UE connected over a real mobile network loads a versioned `agentic_websearch` 
 - Whether agent transactions are scripted workflows or sampled graphs in the first prototype; implement deterministic graphs first.
 
 **Recommendation:** Prioritize the event/provenance contracts, TCP vertical slice and F1 `agentic_websearch` workflow. These expose the hard integration and measurement issues early and preserve the original specification's broader agentic/tool-traffic perspective.
+
+## 11. Status against the current platform (2026-10-20)
+
+The measurement platform in this repository already carries an AI-agent
+traffic model: the `app_traffic` flow with profile `agent` (core
+`app_traffic/model.rs`, runner `app_traffic/runner.rs`, server object server
+in `data-generator`, analysis `app.py`). It covers much of F1; the other
+families, the evidence registry and the intended-vs-observed split are open.
+
+### Covered
+
+| Plan item | In the platform |
+| --- | --- |
+| F1 multi-step LLM exchanges, context growth, compaction | Task of 1–30 LLM calls (lognormal median 6); each call uploads the whole context (4–60 kB start), which grows by the reply and tool results; compaction 600 kB → 60 kB |
+| Streamed LLM response | Time to first token (lognormal 0.9 s), then a paced stream at 40–90 tokens/s in 140 B events |
+| Tool traffic, parallel calls | MCP calls and web fetches, 1–4 per turn, run in parallel |
+| Execution location UE / cloud / hybrid; cloud-only exchanges not UE traffic (invariant 7) | `placement`: cloud tools become a pause in the reply plus the result text, no UE connection |
+| Closed-loop progression (invariant 6) | Every step waits for the real transfers to complete |
+| Per-activity volume/time attribution | Rows tagged `app_activity` (`llm_call`, `mcp_call`, `web_fetch`, `cloud_tool`, `llm_resume`); per activity wait, think, completion, longest pause, MB up/down |
+| TCP over the real OS stack; seeded intent | Yes (invariant 5) |
+| Both endpoints log; clock uncertainty (invariant 9) | Dual-clock Parquet logs on mobile and server, offset with uncertainty bounds, kernel receive timestamps |
+| Radio information captured separately | `radio.parquet` (Logger), modem queues and radio-log events (`mp-probe`) |
+| DSCP observed, not assumed (invariant 10) | `dscp_probe` flow (marking transparency; not yet tied to app traffic) |
+| Execution against live mobile data, impaired conditions, movement | Commute runs triggered automatically; head-of-line cycles beside realtime streams |
+
+### Missing
+
+| Plan item | Gap |
+| --- | --- |
+| §A evidence registry (invariant 4) | All model numbers (TTFT 0.9 s, 250 tokens, 47 B/token, MCP/web-fetch sizes, think time) are engineering estimates without a source. The plan cites ~310 B DL text events plus 54 B TCP ACKs; the platform uses 140 B events. |
+| F1 subprofiles | `agentic_websearch` as its own graph (search → results → several page fetches → follow-up inference); `agentic_computer_control` (small frequent commands, screenshot uploads) |
+| F2 `chat_llm` | No standalone chat profile (prompt, micro-streamed reply, reading time) |
+| F3 `multimodal_visual` | No periodic sizeable UL upload comb (~3.9 s) followed by DL analysis |
+| F4 `image_gen`, `video_understanding` | Not modelled |
+| Identifiers (invariant 2) | One `object_id` packs agent \| episode \| object; no session / task / step / burst IDs, so analysis cannot aggregate per task or step |
+| Intended vs observed (invariant 3) | Socket reads/writes are logged, not the intended event schedule as a separate record |
+| Open-loop mode | Only closed loop (the `script` profile runs its actions in sequence) |
+| §B versioned scenario with step graphs | Profile + parameters or a linear script; no dependency graph, conditional steps or retries |
+| PCAP | No packet capture; TCP is logged per application chunk, so ACKs and on-wire sizes are not visible |
+| QUIC, generic paced UDP for app traffic | TCP only |
+| Metrics | No UL:DL ratio per family, burst P/M or CV (ratio is straightforward from per-activity MB; P/M and CV need the definitions of §10 first) |
+| Distributions and burst shapes | Lognormal only; no Weibull, no periodic comb |
+| Per-run report with provenance | Findings page covers app objects and their impact on realtime streams, without provenance |
+
+### Suggested order (consistent with §10)
+
+1. Session / task / step IDs on every app row (the request header already carries an object id) and an intended-event log beside the observed rows.
+2. Evidence registry for the profile parameters, starting with the current estimates marked unverified.
+3. `agentic_websearch` as a task graph, with an open-loop variant.
+4. F2 `chat_llm`, then F3 and F4.
+5. Server-side packet capture.
