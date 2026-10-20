@@ -19,6 +19,7 @@ import com.measurement.controller.client.model.DeviceSummary
 import com.measurement.controller.client.model.Direction
 import com.measurement.controller.client.model.Flow
 import com.measurement.controller.client.model.LoginRequest
+import com.measurement.controller.client.model.TestControlState
 import com.measurement.controller.client.model.TestPlan
 import com.measurement.controller.client.model.TestSummary
 import okhttp3.Interceptor
@@ -162,8 +163,8 @@ class MainActivity : AppCompatActivity() {
                 lastTests = tests
                 val canControl = deviceId != null
                 startButtons.forEach { it.isEnabled = canControl }
-                stopBtn.isEnabled = tests.any { it.endedUtcNs == null }
-                val active = tests.count { it.endedUtcNs == null }
+                stopBtn.isEnabled = tests.any(::isActive)
+                val active = tests.count(::isActive)
                 status.text = "${devices.size} device(s) · ${tests.size} tests · $active active"
                 output.text = render(devices, tests)
             }
@@ -189,9 +190,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Still running: not in a terminal state and not ended. A test can reach
+     *  FAILED without an end time (e.g. marked by hand on the server). */
+    private fun isActive(t: TestSummary) =
+        t.endedUtcNs == null && t.state != TestControlState.DONE && t.state != TestControlState.FAILED
+
     private fun stopActiveTest() {
         val token = jwt ?: return
-        val active = lastTests.firstOrNull { it.endedUtcNs == null } ?: run {
+        val active = lastTests.firstOrNull(::isActive) ?: run {
             status.text = "No active test"; return
         }
         status.text = "Stopping ${active.planName}…"
@@ -280,7 +286,7 @@ class MainActivity : AppCompatActivity() {
         }
         sb.append("\nRECENT TESTS (${tests.size})\n")
         for (t in tests.take(15)) {
-            val live = if (t.endedUtcNs == null) "● " else "  "
+            val live = if (isActive(t)) "● " else "  "
             sb.append("$live${t.planName}  ${t.state.value}${t.result?.let { " / ${it.value}" } ?: ""}\n")
         }
         return sb.toString()
