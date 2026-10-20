@@ -34,7 +34,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .loader import TestData, load_test
+from .loader import TestData, load_test, receive_times
 
 #: Arrival-spectrum grid (Hz) and the minimum peak height over the median.
 ARRIVAL_F_MAX = 2500.0
@@ -177,9 +177,8 @@ def analyze(td: TestData) -> list[dict]:
     rx_all = pk[(pk["direction"] == "RECEIVED") & pk["sender_utc_ns"].notna()]
     out = []
     for (node, flow_id), recv in rx_all.groupby(["node", "flow_id"]):
-        kernel = pd.to_numeric(recv["kernel_rx_utc_ns"], errors="coerce") if "kernel_rx_utc_ns" in recv else None
-        use_kernel = kernel is not None and kernel.notna().mean() > 0.9
-        t_rx = (kernel if use_kernel else pd.to_numeric(recv["utc_ns"], errors="coerce")).to_numpy(dtype=float)
+        t_rx, clock = receive_times(recv)
+        t_rx = t_rx.to_numpy(dtype=float)
         t_tx = pd.to_numeric(recv["sender_utc_ns"], errors="coerce").to_numpy(dtype=float)
         ok = ~(np.isnan(t_rx) | np.isnan(t_tx))
         t_rx, t_tx = t_rx[ok], t_tx[ok]
@@ -199,7 +198,7 @@ def analyze(td: TestData) -> list[dict]:
             {
                 "flow_id": int(flow_id),
                 "direction": "uplink" if node == "server" else "downlink",
-                "clock": "kernel" if use_kernel else "app",
+                "clock": clock,
                 "packets": int(len(t_rx)),
                 "arrival_peaks": arr["peaks"],
                 "delay_peaks": dl["peaks"] if dl else [],

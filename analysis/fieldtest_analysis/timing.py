@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from . import bench, delivery, spectral
-from .loader import TestData
+from .loader import TestData, receive_times
 
 #: Streams slower than this (packets/s) are not timing streams.
 MIN_PPS = 500
@@ -95,8 +95,7 @@ def buffer_timeline(sent: pd.DataFrame, recv: pd.DataFrame, qdisc: pd.DataFrame 
     else:
         ok = sent
     ts = ok.set_index(ok["sequence_number"].astype("int64"))["utc_ns"].astype("int64")
-    kernel = pd.to_numeric(recv["kernel_rx_utc_ns"], errors="coerce") if "kernel_rx_utc_ns" in recv else None
-    rxt = (kernel.fillna(pd.to_numeric(recv["utc_ns"])) if kernel is not None else pd.to_numeric(recv["utc_ns"])).astype("int64")
+    rxt = receive_times(recv)[0].astype("int64")
     tr = pd.Series(rxt.to_numpy(), index=recv["sequence_number"].astype("int64").to_numpy())
     tr = tr[~tr.index.duplicated()]
     owd = (tr - ts.reindex(tr.index)).dropna()
@@ -240,8 +239,7 @@ def summarize(td: TestData, plan_flows: dict[int, dict] | None = None, bench_dir
             if dl:
                 item["delay"] = {"f": _sig(dl["freqs"][1:], 4), "psd": _sig(dl["psd"][1:])}
             item["heat"] = _heat_row(a["freqs"], a["rx"], a["tx"])
-            k = pd.to_numeric(recv["kernel_rx_utc_ns"], errors="coerce")
-            rx_t = (k if k.notna().mean() > 0.9 else pd.to_numeric(recv["utc_ns"], errors="coerce")).dropna()
+            rx_t = receive_times(recv)[0].dropna()
             item["waterfall"] = waterfall(rx_t.to_numpy(dtype=float) / 1e9)
             if e["direction"] == "uplink":
                 item["buffer"] = buffer_timeline(sent, recv, qdisc)

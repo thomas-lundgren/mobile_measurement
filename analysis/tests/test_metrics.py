@@ -20,6 +20,18 @@ def test_probe_rtt_exact():
     assert sorted(rtt["rtt_ns"].tolist()) == [50, 60, 80, 90]
 
 
+def test_probe_rtt_ignores_tcp_request_response_pairs():
+    # an app object: request SENT and response RECEIVED share object_id as the
+    # sequence number on a TCP flow — not a probe echo
+    probe = [dict(node="mobile", flow_id=1, sequence_number=0, direction=d, mono_ns=m, utc_ns=m, protocol="UDP")
+             for d, m in (("SENT", 100), ("RECEIVED", 150))]  # fmt: skip
+    app = [dict(node="mobile", flow_id=4, sequence_number=7, direction=d, mono_ns=m, utc_ns=m, protocol="TCP")
+           for d, m in (("SENT", 100), ("RECEIVED", 9_000_100))]  # fmt: skip
+    rtt = metrics.probe_rtt(synthetic_test(packets=make_packets(probe + app)))
+    assert rtt["flow_id"].tolist() == [1] and rtt["rtt_ns"].tolist() == [50]
+    assert rtt["sent_utc_ns"].tolist() == [100] and rtt["recv_utc_ns"].tolist() == [150]
+
+
 def test_loss_echo_and_oneway():
     sent = [dict(node="mobile", flow_id=1, sequence_number=s, direction="SENT", mono_ns=s, utc_ns=0) for s in range(5)]
     recv = [dict(node="mobile", flow_id=1, sequence_number=s, direction="RECEIVED", mono_ns=s, utc_ns=0) for s in (0, 1, 3, 4)]

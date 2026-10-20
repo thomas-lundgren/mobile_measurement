@@ -173,6 +173,9 @@ pub fn realtime_recv(
     let mut buf = [0u8; 2048];
     let mut last_recv_mono: Option<u64> = None;
     let mut stamped_fd: Option<RawFd> = None;
+    // read promptly: actual_interval_ns and the host wake-up statistic use
+    // the read time (delays use the kernel's)
+    let _ = udp_timing::raise_thread_priority();
     while !stop.load(Ordering::Acquire) {
         inp.before_recv();
         let fd = inp.fd();

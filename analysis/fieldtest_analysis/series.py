@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -138,15 +139,17 @@ def test_series(
     pk = pk.dropna(subset=["t"])
     parts = []
 
-    # Probe RTT on the mobile's monotonic clock, placed at the probe's send.
+    # Probe RTT on the mobile's monotonic clock, placed at the probe's send
+    # (send / echo-receive times on the server clock).
     keys = ["flow_id", "sequence_number"]
-    udp = pk[pk["protocol"] == "UDP"]
-    mob, srv = udp[udp["node"] == "mobile"], udp[udp["node"] == "server"]
-    sent = mob[mob["direction"] == schema.DIR_SENT]
-    recv = mob[mob["direction"] == schema.DIR_RECEIVED]
-    echo = sent.merge(recv, on=keys, suffixes=("_s", "_r"))
-    echo = echo.assign(rtt=echo["mono_ns_r"].astype("float") - echo["mono_ns_s"].astype("float"))
-    echo = echo[echo["rtt"] >= 0]
+    srv = pk[(pk["protocol"] == "UDP") & (pk["node"] == "server")]
+    echo = metrics.probe_rtt(td)
+    echo = echo[echo["node"] == "mobile"]
+    echo = echo.assign(
+        rtt=echo["rtt_ns"].astype("float"),
+        t_s=echo["sent_utc_ns"].astype("float") - o,
+        t_r=echo["recv_utc_ns"].astype("float") - o,
+    )
     if not echo.empty:
         parts.append(_delay_stats(echo["t_s"], echo["rtt"], "rtt"))
 
@@ -307,6 +310,30 @@ def _reverse_dns(cache_path: Path, ips: set[str], timeout_s: float = 3.0) -> dic
     return cache
 
 
+#: A file arriving this soon after a test ended was mostly sent during it.
+UPLOAD_TAIL_S = 2.0
+
+
+def _upload_files(db: str | None) -> pd.DataFrame:
+    """Every mobile file the server received: test, arrival (s), size."""
+    if not db:
+        return pd.DataFrame(columns=["test_id", "t", "bytes"])
+    with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as c:
+        rows = c.execute("SELECT test_id, received_at, size_bytes FROM upload_files WHERE node = 'mobile'").fetchall()
+    df = pd.DataFrame(rows, columns=["test_id", "t", "bytes"])
+    df["t"] = df["t"] / 1e9
+    return df
+
+
+def uploads_during(files: pd.DataFrame, test_id: str, start: float, end: float) -> float:
+    """MB of *other* tests' files the phone uploaded while this test measured
+    (arrivals between its start and UPLOAD_TAIL_S after its end): load on
+    the same link that the test did not plan. Before 2026-10-20 the Logger
+    uploaded the previous test during the next one."""
+    m = (files["test_id"] != test_id) & (files["t"] >= start) & (files["t"] <= end + UPLOAD_TAIL_S)
+    return round(float(files.loc[m, "bytes"].sum()) / 1e6, 2)
+
+
 def _local_day(epoch_s: float) -> str:
     return time.strftime("%Y-%m-%d", time.localtime(epoch_s))
 
@@ -315,6 +342,7 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
     """Refresh the per-test cache and rewrite every day file. Returns the days."""
     out = Path(out_dir)
     db_plans = plan_source.from_db(db)
+    files = _upload_files(db)
     tests = []
     for test_dir in sorted(Path(root).glob("ses_*/tst_*")):
         cache = out / "tests" / f"{test_dir.name}.json"
@@ -355,6 +383,7 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
             dict(
                 {k: t.get(k) for k in ("test_id", "plan", "start", "end", "stats", "timing", "app")},
                 peers=[{"ip": ip, "host": hosts.get(ip)} for ip in t.get("peers", [])],
+                upload_mb=uploads_during(files, t["test_id"], t["start"], t["end"]),
             )
             for t in day_tests
         ]

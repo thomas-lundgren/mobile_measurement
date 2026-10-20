@@ -26,18 +26,25 @@ def _pct(series: pd.Series, ps=(50, 90, 95, 99)) -> dict:
 
 def probe_rtt(td: TestData) -> pd.DataFrame:
     """Per-echo RTT: match a node's SENT row to its RECEIVED echo on
-    (node, flow_id, sequence_number). Returns rows with `rtt_ns`."""
+    (node, flow_id, sequence_number), UDP rows only — TCP rows (bulk chunks,
+    app objects) reuse sequence numbers for a request and its response and
+    are not echoes. Returns `rtt_ns` (monotonic clock), the receive time
+    `mono_ns` (for plotting) and both rows' `sent_utc_ns` / `recv_utc_ns`."""
+    keys = ["node", "flow_id", "sequence_number"]
+    cols = keys + ["rtt_ns", "mono_ns", "sent_utc_ns", "recv_utc_ns"]
     pk = td.packets
     if pk.empty:
-        return pd.DataFrame(columns=["node", "flow_id", "sequence_number", "rtt_ns"])
+        return pd.DataFrame(columns=cols)
+    pk = pk[pk["protocol"].fillna(schema.PROTO_UDP) == schema.PROTO_UDP]
     sent = pk[pk["direction"] == schema.DIR_SENT]
     recv = pk[pk["direction"] == schema.DIR_RECEIVED]
-    keys = ["node", "flow_id", "sequence_number"]
     merged = sent.merge(recv, on=keys, suffixes=("_sent", "_recv"))
     merged["rtt_ns"] = merged["mono_ns_recv"].astype("Int64") - merged["mono_ns_sent"].astype("Int64")
     merged["mono_ns"] = merged["mono_ns_recv"]  # echo-receive time, for plotting
+    merged["sent_utc_ns"] = merged["utc_ns_sent"]
+    merged["recv_utc_ns"] = merged["utc_ns_recv"]
     merged = merged[merged["rtt_ns"] >= 0]
-    return merged[keys + ["rtt_ns", "mono_ns"]].reset_index(drop=True)
+    return merged[cols].reset_index(drop=True)
 
 
 def realtime_owd(td: TestData, offset=None) -> pd.DataFrame:

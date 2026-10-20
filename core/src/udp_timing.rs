@@ -129,6 +129,27 @@ pub struct Received {
 /// `recvmsg` returning the source and the enabled ancillary data alongside
 /// the data. Honours `SO_RCVTIMEO` / non-blocking like `recv`.
 pub fn recv_stamped(fd: RawFd, buf: &mut [u8]) -> io::Result<Received> {
+    recv_stamped_flags(fd, buf, 0)
+}
+
+/// `recv_stamped` that never blocks (`MSG_DONTWAIT`): WouldBlock when nothing
+/// is queued. Leaves the socket's own blocking mode alone.
+pub fn recv_stamped_nowait(fd: RawFd, buf: &mut [u8]) -> io::Result<Received> {
+    recv_stamped_flags(fd, buf, libc::MSG_DONTWAIT)
+}
+
+/// Wait until `fd` has something to read (or an error to report), at most
+/// `timeout`. False on timeout.
+pub fn wait_readable(fd: RawFd, timeout: Duration) -> bool {
+    let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    let ts = libc::timespec {
+        tv_sec: timeout.as_secs() as libc::time_t,
+        tv_nsec: timeout.subsec_nanos() as _,
+    };
+    unsafe { libc::ppoll(&mut p, 1, &ts, std::ptr::null()) > 0 }
+}
+
+fn recv_stamped_flags(fd: RawFd, buf: &mut [u8], flags: libc::c_int) -> io::Result<Received> {
     let mut addr: libc::sockaddr_storage = unsafe { mem::zeroed() };
     let mut cmsg_buf = [0u64; 16]; // 128 bytes, aligned for cmsghdr
     let mut iov = libc::iovec {
@@ -143,7 +164,7 @@ pub fn recv_stamped(fd: RawFd, buf: &mut [u8]) -> io::Result<Received> {
     msg.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
     msg.msg_controllen = mem::size_of_val(&cmsg_buf) as _;
 
-    let n = unsafe { libc::recvmsg(fd, &mut msg, 0) };
+    let n = unsafe { libc::recvmsg(fd, &mut msg, flags) };
     if n < 0 {
         return Err(io::Error::last_os_error());
     }
@@ -278,6 +299,21 @@ mod tests {
         let now = crate::timestamp::Timestamp::now().utc_ns;
         let k = r.kernel_utc_ns.expect("kernel timestamp");
         assert!(k <= now && now - k < 1_000_000_000, "kernel {k} vs now {now}");
+    }
+
+    #[test]
+    fn nowait_receive_and_wait_readable() {
+        let rx = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut buf = [0u8; 16];
+        let e = recv_stamped_nowait(rx.as_raw_fd(), &mut buf).err().unwrap();
+        assert_eq!(e.kind(), io::ErrorKind::WouldBlock);
+        let t0 = Instant::now();
+        assert!(!wait_readable(rx.as_raw_fd(), Duration::from_millis(20)));
+        assert!(t0.elapsed() >= Duration::from_millis(19));
+        let tx = UdpSocket::bind("127.0.0.1:0").unwrap();
+        tx.send_to(b"x", rx.local_addr().unwrap()).unwrap();
+        assert!(wait_readable(rx.as_raw_fd(), Duration::from_secs(1)));
+        assert_eq!(recv_stamped_nowait(rx.as_raw_fd(), &mut buf).unwrap().n, 1);
     }
 
     #[test]

@@ -129,3 +129,4 @@ EVENTS = [
 # Sent/received discriminator and protocol/connection wire values.
 DIR_SENT = "SENT"
 DIR_RECEIVED = "RECEIVED"
+PROTO_UDP = "UDP"

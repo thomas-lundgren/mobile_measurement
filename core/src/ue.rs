@@ -356,8 +356,10 @@ fn probe_ue(
     let mut seq = 1u64;
     let mut next = Instant::now();
     // kernel receive times: an echo's RTT must not include how late this
-    // thread got to read it (the app traffic beside it loads the CPU)
+    // thread got to read it (the app traffic beside it loads the CPU); the
+    // send side still wants the CPU on time
     let _ = udp_timing::enable_rx_timestamps(socket.as_raw_fd());
+    let _ = udp_timing::raise_thread_priority();
 
     let mut bytes = vec![0u8; size.max(ProbePacket::WIRE_LEN)];
 
@@ -387,16 +389,11 @@ fn probe_ue(
         }
         seq += 1;
         next = (next + period).max(Instant::now());
-        recv_until(
-            &socket,
-            next,
-            &mut recv_buf,
-            |buf| udp_timing::recv_stamped(socket.as_raw_fd(), buf).map(|r| (r.n, r.kernel_utc_ns)),
-            |pkt, kernel_rx_utc_ns, recv_ts| {
+        recv_until(socket.as_raw_fd(), next, &mut recv_buf, |pkt, r, recv_ts| {
                 if let Ok(echo) = ProbePacket::decode(pkt) {
                     counters.received(pkt.len() as u64);
                     sink.push(PacketRow {
-                        timing: PacketTiming { kernel_rx_utc_ns, ..PacketTiming::default() },
+                        timing: PacketTiming { kernel_rx_utc_ns: r.kernel_utc_ns, ..PacketTiming::default() },
                         ..PacketRow::probe(
                             flow.flow_id,
                             echo.sequence_number,
@@ -413,43 +410,36 @@ fn probe_ue(
 }
 
 /// Spend the gap until the next send receiving: read each echo the moment it
-/// arrives (so its timestamp is its arrival) until `deadline`, then sweep
-/// whatever is already queued without blocking.
+/// arrives (so its timestamp is its arrival) until `deadline`. Everything
+/// already queued is read first, without blocking; the wait is a `ppoll`, so
+/// the socket's options never change per packet.
 ///
 /// Reading one echo per send instead leaves a permanent backlog after a single
 /// late echo (a stall longer than the read timeout): every later echo is then
 /// read — and timestamped — one or more send periods after it arrived, so RTT
 /// comes out as true RTT + k × period.
-fn recv_until<X>(
-    socket: &UdpSocket,
+fn recv_until(
+    fd: std::os::fd::RawFd,
     deadline: Instant,
     buf: &mut [u8],
-    mut recv: impl FnMut(&mut [u8]) -> std::io::Result<(usize, X)>,
-    mut on_recv: impl FnMut(&[u8], X, Timestamp),
+    mut on_recv: impl FnMut(&[u8], &udp_timing::Received, Timestamp),
 ) {
     loop {
-        let wait = deadline.saturating_duration_since(Instant::now());
-        // A zero read timeout would block forever, so once due, only sweep.
-        if wait < Duration::from_micros(100) {
-            if socket.set_nonblocking(true).is_ok() {
-                while let Ok((n, x)) = recv(buf) {
-                    on_recv(&buf[..n], x, Timestamp::now());
+        loop {
+            match udp_timing::recv_stamped_nowait(fd, buf) {
+                Ok(r) => {
+                    let ts = Timestamp::now();
+                    on_recv(&buf[..r.n], &r, ts);
                 }
-                let _ = socket.set_nonblocking(false);
+                Err(ref e) if endpoint::would_block(e) => break,
+                // an immediate error (e.g. ICMP refused during an outage):
+                // the caller sleeps out the remainder
+                Err(_) => return,
             }
-            return;
         }
-        if socket.set_read_timeout(Some(wait)).is_err() {
+        let wait = deadline.saturating_duration_since(Instant::now());
+        if wait.is_zero() || !udp_timing::wait_readable(fd, wait) {
             return;
-        }
-        match recv(buf) {
-            Ok((n, x)) => {
-                let ts = Timestamp::now();
-                on_recv(&buf[..n], x, ts);
-            }
-            // timed out at the deadline, or an immediate error (e.g. ICMP
-            // refused during an outage) — the caller sleeps out the remainder
-            Err(_) => return,
         }
     }
 }
@@ -588,16 +578,11 @@ fn dscp_probe_ue(
 
         seq += 1;
         next = (next + period).max(Instant::now());
-        recv_until(
-            &socket,
-            next,
-            &mut recv_buf,
-            |buf| udp_timing::recv_stamped(fd, buf).map(|r| (r.n, r.tos)),
-            |pkt, tos_byte, recv_ts| {
+        recv_until(fd, next, &mut recv_buf, |pkt, r, recv_ts| {
                 let n = pkt.len();
                 if let Ok(echo) = DscpProbePacket::decode(pkt) {
                     counters.received(n as u64);
-                    let dscp_actual_dl = tos_byte.map(|t| t >> 2).unwrap_or(DSCP_UNKNOWN);
+                    let dscp_actual_dl = r.tos.map(|t| t >> 2).unwrap_or(DSCP_UNKNOWN);
                     sink.push(PacketRow {
                         dscp_sent: Some(echo.dscp_intended_dl),
                         dscp_recv: Some(dscp_actual_dl),

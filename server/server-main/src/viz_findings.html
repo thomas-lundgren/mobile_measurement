@@ -213,7 +213,9 @@
       <p class="intro">One row per test. "Phone's address" is the phone's public address as the server saw it on the
         test's flows, and shows which network the test really ran over. Delays are percentiles over all packets (RTT
         from the probe; one-way delays clock-corrected). Loss is the worst UDP flow per direction. Click a time to open
-        the charts zoomed to that test.</p>
+        the charts zoomed to that test. "Upload during test" means the phone was uploading earlier tests' files while this
+        one measured (MB that arrived in its window): extra load on the same link, so treat that test's delays and loss
+        with care. The Logger has paused uploads during tests since 2026-10-20.</p>
       <div class="scroll"><table id="tests"></table></div>
     </section>
   </div>
@@ -341,6 +343,7 @@ function renderTests() {
     if (t.congestion_stalls) flags.push(badge(`congestion stalls ×${t.congestion_stalls}`, "b-orange"));
     if (t.gap_episodes) flags.push(badge(`one-way gaps ×${t.gap_episodes}`, "b-purple"));
     if (t.server_side_share >= 0.2) flags.push(badge(`server-side DL ${Math.round(100 * t.server_side_share)} %`, "b-orange"));
+    if (t.upload_mb >= 0.1) flags.push(badge(`upload during test ${t.upload_mb} MB`, "b-orange"));
     return [
       chartsLink(hm(t.start), t.start - 1, t.end + 1),
       esc(t.plan || t.test_id),

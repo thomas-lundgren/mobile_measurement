@@ -39,7 +39,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-from .loader import TestData, load_test
+from .loader import TestData, load_test, receive_times
 
 #: Arrivals closer than this were delivered together (one batch).
 BATCH_GAP_US = 100.0
@@ -117,13 +117,11 @@ def _sender_stats(sent: pd.DataFrame) -> dict:
 
 def _delivery_stats(recv: pd.DataFrame) -> dict:
     """Batches, batch spacing, hold time, excess delay, wake-up latency."""
-    kernel = pd.to_numeric(recv.get("kernel_rx_utc_ns"), errors="coerce") if "kernel_rx_utc_ns" in recv else None
-    use_kernel = kernel is not None and kernel.notna().mean() > 0.9
-    t_rx = (kernel if use_kernel else pd.to_numeric(recv["utc_ns"], errors="coerce")).astype("float64")
+    t_rx, clock = receive_times(recv)
     df = pd.DataFrame(
         {"t": t_rx.to_numpy(), "sent": pd.to_numeric(recv["sender_utc_ns"], errors="coerce").astype("float64").to_numpy()}
     ).dropna().sort_values("t")
-    out: dict = {"clock": "kernel" if use_kernel else "app", "received": int(len(df))}
+    out: dict = {"clock": clock, "received": int(len(df))}
     if len(df) < 20:
         return out
 
@@ -158,9 +156,10 @@ def _delivery_stats(recv: pd.DataFrame) -> dict:
     out["excess_delay_ms"] = {"p50": _r(_pct(excess, 50), 2), "p90": _r(_pct(excess, 90), 2), "p99": _r(_pct(excess, 99), 2)}
     out["excess_delay_peaks_ms"] = histogram_peaks(excess, EXCESS_BIN_MS, EXCESS_MAX_MS)
 
-    if use_kernel:
+    if clock == "kernel":
         # the app's read time (the loader moves utc_ns to the kernel's)
         read = recv["read_utc_ns"] if "read_utc_ns" in recv else recv["utc_ns"]
+        kernel = pd.to_numeric(recv["kernel_rx_utc_ns"], errors="coerce")
         wake = (pd.to_numeric(read, errors="coerce") - kernel).dropna() / 1e3
         out["host_wakeup_us"] = {"p50": _r(_pct(wake, 50)), "p99": _r(_pct(wake, 99)), "max": _r(float(wake.max()))}
     return out
@@ -180,8 +179,7 @@ def queue_limit(sent: pd.DataFrame, recv: pd.DataFrame) -> dict | None:
     ``held_packets``, a packet-count limit. ``backpressure_share`` is the
     share of sends that found the OS queue full."""
     ts = sent.set_index("sequence_number")["utc_ns"].astype("int64")
-    kernel = pd.to_numeric(recv["kernel_rx_utc_ns"], errors="coerce") if "kernel_rx_utc_ns" in recv else None
-    rx = (kernel.fillna(pd.to_numeric(recv["utc_ns"])) if kernel is not None else pd.to_numeric(recv["utc_ns"])).astype("int64")
+    rx = receive_times(recv)[0].astype("int64")
     tr = pd.Series(rx.to_numpy(), index=recv["sequence_number"].astype("int64").to_numpy())
     owd = (tr - ts.reindex(tr.index)).dropna()
     if len(owd) < 50:

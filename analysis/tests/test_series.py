@@ -38,3 +38,18 @@ def test_one_way_delay_never_exceeds_rtt_in_a_bin(twonode_test_dir):
     pairs = [(r, u) for r, u in zip(s["rtt_med"], s["ul_med"]) if r is not None and u is not None]
     assert pairs
     assert all(u <= r + 2.0 for r, u in pairs)
+
+
+def test_uploads_during_counts_other_tests_files_in_the_window():
+    import pandas as pd
+
+    from fieldtest_analysis.series import uploads_during
+
+    files = pd.DataFrame(
+        {"test_id": ["tst_prev", "tst_prev", "tst_prev", "tst_this"], "t": [99.0, 105.0, 121.5, 110.0],
+         "bytes": [5e6, 1e6, 2e5, 9e6]}  # fmt: skip
+    )
+    # test measured 100..120 s: the 105 s file and the one landing 1.5 s after
+    # the end count; the file before the start and the test's own do not
+    assert uploads_during(files, "tst_this", 100.0, 120.0) == 1.2
+    assert uploads_during(files.iloc[:0], "tst_this", 100.0, 120.0) == 0.0

@@ -91,6 +91,20 @@ def _arrival_times(pk: pd.DataFrame) -> pd.DataFrame:
     return pk
 
 
+def receive_times(recv: pd.DataFrame) -> tuple[pd.Series, str]:
+    """Receive times (UTC ns, float) of a stream's RECEIVED rows and which
+    clock they are on: the kernel's when at least 90 % of the rows carry it
+    (``"kernel"``; a row without falls back to its read time), else the app's
+    read time throughout (``"app"``) — never a mix within one stream. Works on
+    loaded frames and on raw rows alike."""
+    read = pd.to_numeric(recv["read_utc_ns"] if "read_utc_ns" in recv else recv["utc_ns"], errors="coerce")
+    if "kernel_rx_utc_ns" in recv:
+        kernel = pd.to_numeric(recv["kernel_rx_utc_ns"], errors="coerce")
+        if len(kernel) and kernel.notna().mean() > 0.9:
+            return kernel.fillna(read).astype("float64"), "kernel"
+    return read.astype("float64"), "app"
+
+
 @dataclass
 class TestData:
     """All recordings for one test, normalized. Frames may be empty but the
