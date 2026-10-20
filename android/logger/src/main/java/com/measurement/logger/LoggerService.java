@@ -499,6 +499,12 @@ public final class LoggerService extends Service {
             if (f.has("rate_kbps")) {
                 uf.put("rate_kbps", f.getInt("rate_kbps"));
             }
+            // app_traffic: user model, passed through as the core reads it
+            for (String k : new String[] {"profile", "workers", "seed", "scale", "actions"}) {
+                if (f.has(k)) {
+                    uf.put(k, f.get(k));
+                }
+            }
             flows.put(uf);
         }
         return new JSONObject()

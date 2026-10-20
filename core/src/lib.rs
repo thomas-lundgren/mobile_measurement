@@ -5,6 +5,7 @@
 //! is pure Rust (unit-testable without a JVM); the `Java_com_measurement_logger_
 //! RustCore_*` functions are thin JNI shims over it.
 
+pub mod app_traffic;
 pub mod auth;
 pub mod aux_log;
 pub mod log_writer;

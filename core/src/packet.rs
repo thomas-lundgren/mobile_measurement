@@ -9,6 +9,7 @@
 pub const PKT_PROBE: u8 = 0x01;
 pub const PKT_REALTIME: u8 = 0x02;
 pub const PKT_DSCP_PROBE: u8 = 0x03;
+pub const PKT_APP_REQUEST: u8 = 0x04;
 /// Initial per-type format version.
 pub const VER_1: u8 = 0x01;
 
@@ -188,6 +189,58 @@ impl DscpProbePacket {
     }
 }
 
+/// App-traffic object request (`pkt_t = 0x04`, `ver = 0x01`), sent by the UE
+/// on an app_traffic TCP connection: 22-byte core, 24 on the wire. `kind` 0 =
+/// download (the server answers with `size` bytes), 1 = upload (`size` bytes
+/// follow; the server echoes this header back once it has them all).
+/// `activity` is a code from `app_traffic::ACTIVITIES`, logged by both nodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppRequest {
+    pub kind: u8,
+    pub activity: u8,
+    pub flow_id: u32,
+    pub object_id: u64,
+    pub size: u64,
+}
+
+impl AppRequest {
+    pub const CORE_LEN: usize = 22;
+    pub const WIRE_LEN: usize = 2 + Self::CORE_LEN; // 24
+    pub const DOWNLOAD: u8 = 0;
+    pub const UPLOAD: u8 = 1;
+
+    pub fn to_bytes(&self) -> [u8; Self::WIRE_LEN] {
+        let mut b = [0u8; Self::WIRE_LEN];
+        b[0] = PKT_APP_REQUEST;
+        b[1] = VER_1;
+        b[2] = self.kind;
+        b[3] = self.activity;
+        b[4..8].copy_from_slice(&self.flow_id.to_be_bytes());
+        b[8..16].copy_from_slice(&self.object_id.to_be_bytes());
+        b[16..24].copy_from_slice(&self.size.to_be_bytes());
+        b
+    }
+
+    pub fn decode(buf: &[u8]) -> Result<Self, PacketError> {
+        if buf.len() < 2 {
+            return Err(PacketError::ShortBuffer);
+        }
+        if buf[0] != PKT_APP_REQUEST || buf[1] != VER_1 {
+            return Err(PacketError::UnknownType(buf[0], buf[1]));
+        }
+        if buf.len() < Self::WIRE_LEN {
+            return Err(PacketError::ShortBuffer);
+        }
+        Ok(Self {
+            kind: buf[2],
+            activity: buf[3],
+            flow_id: u32::from_be_bytes(buf[4..8].try_into().unwrap()),
+            object_id: u64::from_be_bytes(buf[8..16].try_into().unwrap()),
+            size: u64::from_be_bytes(buf[16..24].try_into().unwrap()),
+        })
+    }
+}
+
 /// Either packet type, dispatched on the header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Packet {
@@ -213,6 +266,16 @@ impl Packet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_request_round_trips() {
+        let r = AppRequest { kind: AppRequest::UPLOAD, activity: 5, flow_id: 7, object_id: 1 << 48 | 3, size: 2_500_000 };
+        let b = r.to_bytes();
+        assert_eq!(&b[..4], &[0x04, 0x01, 0x01, 0x05]);
+        assert_eq!(AppRequest::decode(&b), Ok(r));
+        assert_eq!(AppRequest::decode(&b[..10]), Err(PacketError::ShortBuffer));
+        assert_eq!(AppRequest::decode(&[0x02, 0x01, 0, 0]), Err(PacketError::UnknownType(2, 1)));
+    }
     use std::path::PathBuf;
 
     #[test]
@@ -285,6 +348,28 @@ mod tests {
                 pkt,
                 "decode `{name}`"
             );
+        }
+    }
+
+    #[test]
+    fn golden_app_request_v1() {
+        let doc: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(vectors_dir().join("app_request_v1.json")).unwrap(),
+        )
+        .unwrap();
+        for case in doc["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let d = &case["decoded"];
+            let pkt = AppRequest {
+                kind: d["kind"].as_u64().unwrap() as u8,
+                activity: d["activity"].as_u64().unwrap() as u8,
+                flow_id: d["flow_id"].as_u64().unwrap() as u32,
+                object_id: d["object_id"].as_u64().unwrap(),
+                size: d["size"].as_u64().unwrap(),
+            };
+            let expected = hex_to_bytes(case["hex"].as_str().unwrap());
+            assert_eq!(pkt.to_bytes().to_vec(), expected, "encode `{name}`");
+            assert_eq!(AppRequest::decode(&expected).unwrap(), pkt, "decode `{name}`");
         }
     }
 

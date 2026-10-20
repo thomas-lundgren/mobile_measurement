@@ -47,6 +47,8 @@ PACKETS = [
     "send_status",
     "send_call_ns",
     "sock_outq_bytes",
+    "app_activity",
+    "app_object_bytes",
 ]
 
 CLOCK = [

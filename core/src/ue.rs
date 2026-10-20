@@ -82,6 +82,18 @@ pub struct UeFlow {
     /// bulk_tcp sender only: pace writes to this many kbit/s.
     #[serde(default)]
     pub rate_kbps: Option<u32>,
+    /// app_traffic: user model (`app_traffic::PROFILES`), concurrent agents,
+    /// seed, byte scale and — for profile "script" — the action timeline.
+    #[serde(default)]
+    pub profile: Option<String>,
+    #[serde(default)]
+    pub workers: Option<u32>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+    #[serde(default)]
+    pub scale: Option<f64>,
+    #[serde(default)]
+    pub actions: Option<Vec<crate::app_traffic::AppAction>>,
 }
 
 #[derive(Default)]
@@ -90,6 +102,17 @@ struct Counters {
     received: AtomicU64,
     bytes_sent: AtomicU64,
     bytes_received: AtomicU64,
+}
+
+impl crate::app_traffic::Tally for Counters {
+    fn sent(&self, bytes: u64) {
+        self.sent.fetch_add(1, Ordering::Relaxed);
+        self.bytes_sent.fetch_add(bytes, Ordering::Relaxed);
+    }
+    fn received(&self, bytes: u64) {
+        self.received.fetch_add(1, Ordering::Relaxed);
+        self.bytes_received.fetch_add(bytes, Ordering::Relaxed);
+    }
 }
 
 /// Per-flow result counters (for status / summary).
@@ -200,7 +223,7 @@ fn spawn_flow(
     let dir = flow.direction.as_deref();
 
     match (flow.flow_type.as_str(), dir) {
-        ("probe", _) | ("realtime_udp", _) | ("bulk_tcp", _) | ("dscp_probe", _) => {
+        ("probe", _) | ("realtime_udp", _) | ("bulk_tcp", _) | ("dscp_probe", _) | ("app_traffic", _) => {
             let port = flow.server_port.ok_or_else(|| {
                 std::io::Error::other(format!("flow {} missing server_port", flow.flow_id))
             })?;
@@ -224,6 +247,20 @@ fn spawn_flow(
                 ("bulk_tcp", Some("ToServer")) => {
                     let stream = TcpStream::connect(&server)?;
                     Ok(thread::spawn(move || bulk_send(stream, sink, flow, counters, stop)))
+                }
+                ("app_traffic", _) => {
+                    let app = crate::app_traffic::AppTraffic {
+                        server,
+                        flow_id: flow.flow_id,
+                        profile: flow.profile.clone().unwrap_or_else(|| "mixed".into()),
+                        workers: flow.workers.unwrap_or(1),
+                        seed: flow.seed.unwrap_or(1),
+                        scale: flow.scale.unwrap_or(1.0),
+                        actions: flow.actions.clone().unwrap_or_default(),
+                    };
+                    Ok(thread::spawn(move || {
+                        crate::app_traffic::run(&app, sink, counters.as_ref(), &stop)
+                    }))
                 }
                 ("dscp_probe", _) => {
                     let socket = connected_udp(&server)?;

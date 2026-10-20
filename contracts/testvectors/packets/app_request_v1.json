@@ -1,0 +1,19 @@
+{
+  "packet_type": "AppRequest",
+  "version": 1,
+  "description": "Golden vectors for AppRequest (pkt_t=0x04, ver=0x01), the object request on an app_traffic TCP connection. 24 bytes on wire. See contracts/packets/app_request.md. Layout: pkt_t(1) + ver(1) + kind(1) + activity(1) + flow_id(4) + object_id(8) + size(8).",
+  "cases": [
+    {
+      "name": "web_page_download",
+      "notes": "kind 0 = download: the server answers with size bytes. activity 1 = web_page. object_id = agent 1, episode 1, object 0.",
+      "decoded": { "kind": 0, "activity": 1, "flow_id": 3, "object_id": 281474977759232, "size": 51200 },
+      "hex": "04010001000000030001000000100000000000000000c800"
+    },
+    {
+      "name": "photo_upload",
+      "notes": "kind 1 = upload: size bytes follow; the server echoes these 24 bytes back once it has them all. activity 8 = photo_upload.",
+      "decoded": { "kind": 1, "activity": 8, "flow_id": 3, "object_id": 3145733, "size": 2500000 },
+      "hex": "0401010800000003000000000030000500000000002625a0"
+    }
+  ]
+}

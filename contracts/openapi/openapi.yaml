@@ -429,6 +429,60 @@ paths:
           description: ''
 components:
   schemas:
+    AppAction:
+      type: object
+      description: One step of a scripted app_traffic timeline.
+      required:
+      - at_ms
+      - kind
+      - bytes
+      properties:
+        activity:
+          type:
+          - string
+          - 'null'
+          description: Activity name for the logs (contracts/packets/app_request.md).
+        at_ms:
+          type: integer
+          format: int64
+          description: Start this long after the test starts; actions run in order.
+          minimum: 0
+        bytes:
+          type: integer
+          format: int64
+          description: Size of each object.
+          minimum: 0
+        count:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of objects (default 1).
+          minimum: 0
+        kind:
+          $ref: '#/components/schemas/AppActionKind'
+        parallel:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Objects in flight at once (default 1, at most 6).
+          minimum: 0
+    AppActionKind:
+      type: string
+      enum:
+      - down
+      - up
+    AppProfile:
+      type: string
+      description: Built-in user models of an app_traffic flow.
+      enum:
+      - web
+      - mail
+      - video
+      - social
+      - mixed
+      - script
     Battery:
       type: object
       required:
@@ -904,6 +958,53 @@ components:
             type: string
             enum:
             - dscp_probe
+      - type: object
+        description: |-
+          App-like background load: simulated users on the UE request objects
+          over TCP from the server (contracts/packets/app_request.md).
+        required:
+        - flow_id
+        - profile
+        - type
+        properties:
+          actions:
+            type:
+            - array
+            - 'null'
+            items:
+              $ref: '#/components/schemas/AppAction'
+            description: 'profile "script" only: the timeline to run.'
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          profile:
+            $ref: '#/components/schemas/AppProfile'
+            description: 'User model: web | mail | video | social | mixed | script.'
+          scale:
+            type:
+            - number
+            - 'null'
+            format: double
+            description: Multiplies every object size (default 1.0); < 1 saves data.
+          seed:
+            type:
+            - integer
+            - 'null'
+            format: int64
+            description: 'Seed of the users'' choices (default 1): same seed, same requests.'
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - app_traffic
+          workers:
+            type:
+            - integer
+            - 'null'
+            format: int32
+            description: Concurrent users (1–16, default 1). A script runs on one.
+            minimum: 0
       description: A flow, discriminated by `type`. Port-less — `Flow` carries no server_port.
     FlowBinding:
       type: object

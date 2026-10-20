@@ -98,6 +98,10 @@ pub struct PacketTiming {
     pub send_call_ns: Option<u32>,
     /// SENT: bytes queued below the socket right after the send (`SIOCOUTQ`).
     pub sock_outq_bytes: Option<u32>,
+    /// app_traffic rows: the user activity the object belongs to.
+    pub app_activity: Option<&'static str>,
+    /// app_traffic rows: total size of the object this row is part of.
+    pub app_object_bytes: Option<u64>,
 }
 
 impl PacketRow {
@@ -155,6 +159,8 @@ fn packets_schema() -> Schema {
         Field::new("send_status", DataType::Utf8, true),
         Field::new("send_call_ns", DataType::UInt32, true),
         Field::new("sock_outq_bytes", DataType::UInt32, true),
+        Field::new("app_activity", DataType::Utf8, true),
+        Field::new("app_object_bytes", DataType::UInt64, true),
     ])
 }
 
@@ -339,6 +345,18 @@ impl SegmentedPacketWriter {
                     self.rows
                         .iter()
                         .map(|r| r.timing.sock_outq_bytes)
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(StringArray::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.timing.app_activity)
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt64Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.timing.app_object_bytes)
                         .collect::<Vec<_>>(),
                 )) as _,
             ],
@@ -598,7 +616,7 @@ mod tests {
             .build()
             .unwrap();
         let batch = reader.next().unwrap().unwrap();
-        assert_eq!(batch.num_columns(), 23, "join + data columns");
+        assert_eq!(batch.num_columns(), 25, "join + data columns");
         let names: Vec<String> = batch
             .schema()
             .fields()

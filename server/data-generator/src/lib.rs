@@ -178,6 +178,26 @@ async fn prepare(
             );
             (h, port)
         }
+        Flow::AppTraffic { .. } => {
+            let listener =
+                std::net::TcpListener::bind(("0.0.0.0", req.server_port)).map_err(|e| {
+                    (
+                        StatusCode::CONFLICT,
+                        format!("bind tcp {}: {e}", req.server_port),
+                    )
+                })?;
+            let port = listener.local_addr().map_err(internal)?.port();
+            let h = flow::spawn_app_server(
+                listener,
+                sink,
+                writer,
+                flow_id,
+                state.clone(),
+                counters.clone(),
+                stop.clone(),
+            );
+            (h, port)
+        }
         // gateway_ping has no server endpoint — the generator should never receive this.
         Flow::GatewayPing { .. } => {
             return Err((
@@ -204,7 +224,7 @@ async fn prepare(
     };
 
     let protocol = match &req.flow {
-        Flow::BulkTcp { .. } => "TCP",
+        Flow::BulkTcp { .. } | Flow::AppTraffic { .. } => "TCP",
         _ => "UDP",
     };
     let generator_id = format!("gen_{}", ulid::Ulid::new());

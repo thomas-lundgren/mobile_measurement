@@ -99,6 +99,7 @@
   <button data-tab="freq">Interface frequencies</button>
   <button data-tab="sat">Uplink saturation</button>
   <button data-tab="streams">Streams</button>
+  <button data-tab="app">App traffic</button>
   <button data-tab="tests">Tests</button>
   <button data-tab="events">Events</button>
   <button data-tab="reach">Reachability</button>
@@ -183,6 +184,23 @@
         modem pushed back. Click a row for its detail.</p>
       <div id="detailSlotStreams"></div>
       <div class="scroll"><table id="timing"></table></div>
+    </section>
+  </div>
+
+  <div class="tab" data-tab="app">
+    <section>
+      <h2>App traffic — simulated users beside the realtime streams</h2>
+      <p class="intro">Tests with an <code>app_traffic</code> flow: simulated users on the phone browse, sync mail,
+        watch video or scroll a feed, requesting real-sized objects from the server. <b>Wait</b> is request → first
+        byte (an upload: → acknowledged); <b>done</b> is request → last byte. An <b>episode</b> is what a user asked
+        for at once, so a web_page episode's time is the page load time. <b>Impact</b> compares each realtime
+        stream's extra delay (above its own minimum) and loss while any app object was in flight with the idle
+        periods of the same test.</p>
+      <div class="scroll"><table id="appTests"></table></div>
+      <h2>Per activity</h2>
+      <div class="scroll"><table id="appActs"></table></div>
+      <h2>Impact on the realtime streams</h2>
+      <div class="scroll"><table id="appImpact"></table></div>
     </section>
   </div>
 
@@ -336,6 +354,26 @@ function renderTests() {
     ["Downlink p50 / p99 ms", "num"], ["Down Mbit/s", "num"], ["Up Mbit/s", "num"],
     ["Loss UL / DL / probe", "num"], ["Flags"],
   ], rows, "No tests this day.");
+}
+
+function renderApp() {
+  const ts = data.tests.filter((t) => t.app);
+  const ms = (p) => (p ? `${num(p.p50)} / ${num(p.p90)}` : '<span class="muted">–</span>');
+  const when = (t) => chartsLink(hm(t.start), t.start - 1, t.end + 1);
+  table($("appTests"), [["Time"], ["Test"], ["Objects", "num"], ["Down MB", "num"], ["Up MB", "num"],
+    ["Episodes: kind × n — time p50 / p90 ms"]],
+    ts.map((t) => [when(t), esc(t.plan || t.test_id), num(t.app.objects), num(t.app.mbytes_down, 1), num(t.app.mbytes_up, 1),
+      t.app.episodes.map((e) => `${esc(e.kind)} ×${e.n}: ${ms(e.ms)}${e.complete_share < 1 ? ` <span class="muted">(${pct(1 - e.complete_share)} unfinished)</span>` : ""}`).join("<br>")]),
+    "No app_traffic tests this day.");
+  table($("appActs"), [["Time"], ["Activity"], ["Objects", "num"], ["Complete", "num"], ["MB", "num"],
+    ["Wait p50 / p90 ms", "num"], ["Done p50 / p90 ms", "num"]],
+    ts.flatMap((t) => t.app.activities.map((a) => [when(t), esc(a.activity), num(a.objects), pct(a.complete_share),
+      num(a.mbytes, 1), ms(a.wait_ms), ms(a.done_ms)])), "–");
+  const ex = (x) => (x && x.excess_ms ? `${num(x.excess_ms.p50)} / ${num(x.excess_ms.p99)}` : '<span class="muted">–</span>');
+  table($("appImpact"), [["Time"], ["Stream"], ["Time apps busy", "num"], ["Extra delay busy p50 / p99 ms", "num"],
+    ["Extra delay idle p50 / p99 ms", "num"], ["Loss busy / idle", "num"]],
+    ts.flatMap((t) => t.app.impact.map((i) => [when(t), `${esc(i.direction)} flow ${i.flow_id}`, pct(i.active.share),
+      ex(i.active), ex(i.idle), `${pct(i.active.loss)} / ${pct(i.idle.loss)}`])), "No realtime streams beside the app traffic.");
 }
 
 const KIND_CLASS = {
@@ -889,7 +927,7 @@ async function loadDay() {
     for (const t of data.tests) for (const s of t.timing || []) streams.push({ t, s });
     detailOpen = false; placeDetail();
     renderTimingSummary(); renderTiming();
-    renderTests(); renderRegimes(); renderPauses(); renderGaps(); renderCongestion(); renderServerSide();
+    renderTests(); renderApp(); renderRegimes(); renderPauses(); renderGaps(); renderCongestion(); renderServerSide();
     drawTab(curTab);
     $("status").textContent = `${data.tests.length} tests · ${streams.length} fast streams`;
   } catch (e) {

@@ -44,6 +44,7 @@
         { "$ref": "#/$defs/RealtimeUdpFlow" },
         { "$ref": "#/$defs/BulkTcpFlow" },
         { "$ref": "#/$defs/DscpProbeFlow" },
+        { "$ref": "#/$defs/AppTrafficFlow" },
         { "$ref": "#/$defs/GatewayPingFlow" }
       ]
     },
@@ -107,6 +108,41 @@
         }
       },
       "description": "Bulk-throughput TCP. Bidirectional is modeled as two flows on separate connections (remediation 2.2)."
+    },
+
+    "AppTrafficFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow_id", "type", "profile"],
+      "properties": {
+        "flow_id": { "$ref": "#/$defs/FlowId" },
+        "type":    { "const": "app_traffic" },
+        "profile": {
+          "enum": ["web", "mail", "video", "social", "mixed", "script"],
+          "description": "User model. web: page views (HTML, then 5-120 objects over 6 connections, then 2-90 s reading). mail: a sync every 1-3 min, sometimes an attachment or a sent mail. video: 4 s segments at 1.5/3/5 Mbit/s, three to start, sessions of 1-5 min. social: feed images in bursts with short pauses, now and then a photo upload. mixed: switches between web, social and video every 2-5 min, with mail in the background. script: runs `actions`."
+        },
+        "workers": { "type": "integer", "minimum": 1, "maximum": 16, "description": "Concurrent simulated users, each with its own connections. Default 1; a script runs on one." },
+        "seed":    { "type": "integer", "minimum": 0, "description": "Seed of the users' choices (default 1): the same seed asks for the same objects in the same order." },
+        "scale":   { "type": "number", "exclusiveMinimum": 0, "description": "Multiplies every object size (default 1.0); below 1 saves data, timing behaviour stays." },
+        "actions": {
+          "type": "array",
+          "description": "profile script only: the timeline, e.g. written by an AI agent playing a user.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["at_ms", "kind", "bytes"],
+            "properties": {
+              "at_ms":    { "type": "integer", "minimum": 0, "description": "Start this long after the test starts. Actions run in order; one due while the previous is still running starts after it." },
+              "kind":     { "enum": ["down", "up"] },
+              "bytes":    { "type": "integer", "minimum": 1, "description": "Size of each object." },
+              "count":    { "type": "integer", "minimum": 1, "description": "Number of objects (default 1)." },
+              "parallel": { "type": "integer", "minimum": 1, "maximum": 6, "description": "Objects in flight at once (default 1)." },
+              "activity": { "type": "string", "description": "Activity name for the logs (contracts/packets/app_request.md)." }
+            }
+          }
+        }
+      },
+      "description": "App-like background load. The UE's simulated users open TCP connections to the flow's server port and request objects (contracts/packets/app_request.md); both nodes log every object."
     },
 
     "DscpProbeFlow": {

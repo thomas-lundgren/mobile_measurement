@@ -68,6 +68,65 @@ pub enum Flow {
         #[serde(default = "default_dscp_rate_pps", skip_serializing_if = "is_default_dscp_rate")]
         rate_pps: u32,
     },
+
+    /// App-like background load: simulated users on the UE request objects
+    /// over TCP from the server (contracts/packets/app_request.md).
+    #[serde(rename = "app_traffic")]
+    AppTraffic {
+        flow_id: u32,
+        /// User model: web | mail | video | social | mixed | script.
+        profile: AppProfile,
+        /// Concurrent users (1–16, default 1). A script runs on one.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        workers: Option<u32>,
+        /// Seed of the users' choices (default 1): same seed, same requests.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        seed: Option<u64>,
+        /// Multiplies every object size (default 1.0); < 1 saves data.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        scale: Option<f64>,
+        /// profile "script" only: the timeline to run.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        actions: Option<Vec<AppAction>>,
+    },
+}
+
+/// Built-in user models of an app_traffic flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AppProfile {
+    Web,
+    Mail,
+    Video,
+    Social,
+    Mixed,
+    Script,
+}
+
+/// One step of a scripted app_traffic timeline.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct AppAction {
+    /// Start this long after the test starts; actions run in order.
+    pub at_ms: u64,
+    pub kind: AppActionKind,
+    /// Size of each object.
+    pub bytes: u64,
+    /// Number of objects (default 1).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub count: Option<u32>,
+    /// Objects in flight at once (default 1, at most 6).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub parallel: Option<u32>,
+    /// Activity name for the logs (contracts/packets/app_request.md).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub activity: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AppActionKind {
+    Down,
+    Up,
 }
 
 impl Flow {
@@ -78,6 +137,7 @@ impl Flow {
             | Flow::RealtimeUdp { flow_id, .. }
             | Flow::BulkTcp { flow_id, .. }
             | Flow::GatewayPing { flow_id, .. }
+            | Flow::AppTraffic { flow_id, .. }
             | Flow::DscpProbe { flow_id, .. } => flow_id,
         }
     }

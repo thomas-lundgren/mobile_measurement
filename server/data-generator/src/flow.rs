@@ -7,7 +7,7 @@
 
 use std::io::{self, Read, Write};
 use std::mem;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener,
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener, TcpStream,
                UdpSocket};
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 
 use fieldtest_core::log_writer::{Direction, LogSink, PacketRow, PacketTiming, Protocol, WriterHandle};
 use fieldtest_core::udp_timing::{self, Pacer, SendStatus};
-use fieldtest_core::packet::{DscpProbePacket, ProbePacket, RealtimePacket, DSCP_UNKNOWN};
+use fieldtest_core::app_traffic::{self, activity_name};
+use fieldtest_core::packet::{AppRequest, DscpProbePacket, ProbePacket, RealtimePacket, DSCP_UNKNOWN};
 use fieldtest_core::timestamp::Timestamp;
 use mp_contracts::Direction as FlowDir;
 use mp_contracts::GeneratorState;
@@ -645,6 +646,113 @@ pub fn spawn_bulk_tcp(
         }
         finalize(&state, sink, writer);
     })
+}
+
+/// app_traffic object server: accepts any number of UE connections and serves
+/// object requests on each (`AppRequest`): a download is answered with `size`
+/// bytes, an upload is read and acknowledged by echoing the header. Rows carry
+/// the object id, activity and size, like the UE's (see core `app_traffic`).
+pub fn spawn_app_server(
+    listener: TcpListener,
+    sink: LogSink,
+    writer: WriterHandle,
+    flow_id: u32,
+    state: Arc<Mutex<GeneratorState>>,
+    counters: Arc<Counters>,
+    stop: Arc<AtomicBool>,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        *state.lock().unwrap() = GeneratorState::WaitingForClient;
+        listener.set_nonblocking(true).ok();
+        let sink = Mutex::new(sink);
+        thread::scope(|s| {
+            while !stop.load(Ordering::Acquire) {
+                match listener.accept() {
+                    Ok((conn, addr)) => {
+                        counters.note_peer(addr);
+                        *state.lock().unwrap() = GeneratorState::Running;
+                        let (sink, counters, stop) = (&sink, &*counters, &*stop);
+                        s.spawn(move || serve_app_connection(conn, flow_id, sink, counters, stop));
+                    }
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(ACCEPT_POLL),
+                    Err(_) => thread::sleep(ACCEPT_POLL),
+                }
+            }
+        });
+        finalize(&state, sink.into_inner().unwrap(), writer);
+    })
+}
+
+fn serve_app_connection(mut conn: TcpStream, flow_id: u32, sink: &Mutex<LogSink>, counters: &Counters, stop: &AtomicBool) {
+    let _ = conn.set_nonblocking(false);
+    let _ = conn.set_read_timeout(Some(Duration::from_millis(200)));
+    let _ = conn.set_write_timeout(Some(Duration::from_millis(200)));
+    let _ = conn.set_nodelay(true);
+    let push = |dir: Direction, size: usize, req: &AppRequest| {
+        let row = PacketRow {
+            timing: PacketTiming {
+                app_activity: Some(activity_name(req.activity)),
+                app_object_bytes: Some(req.size),
+                ..PacketTiming::default()
+            },
+            ..bulk_row(flow_id, req.object_id, dir, Timestamp::now(), size as u32)
+        };
+        sink.lock().unwrap().push(row);
+    };
+    let mut head = [0u8; AppRequest::WIRE_LEN];
+    let mut buf = vec![0u8; BULK_CHUNK];
+    // a connection may sit idle between bursts for as long as the UE keeps it
+    let forever = Instant::now() + Duration::from_secs(365 * 86_400);
+    while !stop.load(Ordering::Acquire) {
+        if app_traffic::read_exact_until(&mut conn, &mut head, stop, forever).is_err() {
+            return;
+        }
+        let Ok(req) = AppRequest::decode(&head) else {
+            return; // not our protocol
+        };
+        push(Direction::Received, head.len(), &req);
+        counters.received.fetch_add(1, Ordering::Relaxed);
+        counters.bytes_received.fetch_add(head.len() as u64, Ordering::Relaxed);
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let mut left = req.size;
+        if req.kind == AppRequest::UPLOAD {
+            while left > 0 {
+                let want = left.min(BULK_CHUNK as u64) as usize;
+                match conn.read(&mut buf[..want]) {
+                    Ok(0) => return,
+                    Ok(n) => {
+                        push(Direction::Received, n, &req);
+                        counters.received.fetch_add(1, Ordering::Relaxed);
+                        counters.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
+                        left -= n as u64;
+                    }
+                    Err(ref e) if would_block(e) => {
+                        if stop.load(Ordering::Acquire) || Instant::now() >= deadline {
+                            return;
+                        }
+                    }
+                    Err(_) => return,
+                }
+            }
+            if app_traffic::write_all_until(&mut conn, &head, stop, deadline).is_err() {
+                return;
+            }
+            push(Direction::Sent, head.len(), &req);
+            counters.sent.fetch_add(1, Ordering::Relaxed);
+            counters.bytes_sent.fetch_add(head.len() as u64, Ordering::Relaxed);
+        } else {
+            while left > 0 {
+                let n = left.min(BULK_CHUNK as u64) as usize;
+                if app_traffic::write_all_until(&mut conn, &buf[..n], stop, deadline).is_err() {
+                    return;
+                }
+                push(Direction::Sent, n, &req);
+                counters.sent.fetch_add(1, Ordering::Relaxed);
+                counters.bytes_sent.fetch_add(n as u64, Ordering::Relaxed);
+                left -= n as u64;
+            }
+        }
+    }
 }
 
 fn bulk_row(flow_id: u32, seq: u64, direction: Direction, ts: Timestamp, size: u32) -> PacketRow {

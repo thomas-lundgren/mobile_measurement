@@ -109,6 +109,7 @@ wire_enum!(
         BulkTcp     => "bulk_tcp",
         GatewayPing => "gateway_ping",
         DscpProbe   => "dscp_probe",
+        AppTraffic  => "app_traffic",
     }
 );
 

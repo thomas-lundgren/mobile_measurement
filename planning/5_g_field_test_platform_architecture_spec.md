@@ -807,6 +807,27 @@ Bidirectional:
     server → UE  (payload, download, same connection)
 ```
 
+### App Traffic Flow (`app_traffic`)
+
+Purpose: everyday background load — web browsing, mail sync, video, a social
+feed — beside the realtime flows, to see what ordinary app use does to them
+(head-of-line blocking under realistic, bursty load rather than steady bulk),
+and how the apps themselves fare (page load time, video segment time).
+
+- The UE runs simulated users ("agents"); each opens its own TCP connections
+  to the flow's server port (up to 6, reused, closed after 20 s idle like a
+  browser's), so bursts start with real handshakes and slow start.
+- The server is a plain object server: each `AppRequest` (contracts/packets/app_request.md)
+  asks for an object of `size` bytes down, or announces one going up.
+- Profiles: `web`, `mail`, `video`, `social`, `mixed` (switches among web,
+  social and video every 2–5 min with mail in the background) and `script`
+  (an explicit timeline of actions, so an AI agent playing a user can write
+  the plan). `workers` runs several users at once, `seed` makes their choices
+  reproducible, `scale` shrinks every object to save data.
+- Both nodes log each object as rows sharing its `object_id`
+  (`sequence_number`), tagged `app_activity` and `app_object_bytes`: request →
+  first byte → completion per object, and per episode (a page view, a sync).
+
 ---
 
 ## 7.3 Generator States
@@ -889,6 +910,7 @@ logger-app
   ├── test runner
   ├── traffic generator client
   ├── traffic generator / receiver  (Realtime UDP / Bulk TCP, active role depends on flow direction)
+  ├── app traffic agents  (simulated users requesting objects; app_traffic flows)
   ├── packet logger
   ├── radio logger
   ├── GPS logger

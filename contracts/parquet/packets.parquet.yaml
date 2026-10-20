@@ -44,3 +44,10 @@ columns:
   - { name: send_status,      type: utf8,   nullable: true, doc: "SENT: OK | EAGAIN (socket send buffer full: back pressure) | ENOBUFS (qdisc/driver drop) | ERROR. One row per attempt; non-OK attempts never left the host." }
   - { name: send_call_ns,     type: uint32, nullable: true, doc: "SENT: duration of the send syscall (long when a blocking send waited for buffer space)." }
   - { name: sock_outq_bytes,  type: uint32, nullable: true, doc: "SENT: bytes queued below the socket after the send (SIOCOUTQ), not yet released by the qdisc/driver. Null if the ioctl is refused." }
+
+  # App-like background load (app_traffic only — null otherwise). Every row of
+  # one object shares its object_id as sequence_number: the request (24 B), then
+  # the data, then for uploads the server's 24-B acknowledgement.
+  # See contracts/packets/app_request.md.
+  - { name: app_activity,     type: utf8,   nullable: true, doc: "What the object is for: web_page, web_object, mail_sync, mail_attachment, mail_send, video_chunk, feed_image, photo_upload or other." }
+  - { name: app_object_bytes, type: uint64, nullable: true, doc: "Total size of the object this row belongs to." }
