@@ -150,7 +150,7 @@ public final class RadioSampler {
      *  for a fresh one (API 29+), falling back to the cache if it doesn't
      *  answer within ~800 ms. */
     @SuppressWarnings("MissingPermission")
-    private List<CellInfo> freshCellInfo(TelephonyManager tm) {
+    private static List<CellInfo> freshCellInfo(TelephonyManager tm) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             final List<CellInfo>[] out = new List[1];
             final CountDownLatch done = new CountDownLatch(1);
@@ -176,6 +176,46 @@ public final class RadioSampler {
             }
         }
         return tm.getAllCellInfo();
+    }
+
+    /** The serving cell for the status report (RadioSnapshot: pci, nci and
+     *  signal): the NR cell (SA primary or NSA secondary), else the LTE cell.
+     *  Lets the server see the phone move between tests. Null if unknown. */
+    @SuppressWarnings("MissingPermission")
+    static JSONObject serving(Context ctx) {
+        try {
+            TelephonyManager tm = (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
+            List<CellInfo> cells = freshCellInfo(tm);
+            if (cells == null) {
+                return null;
+            }
+            JSONObject lte = null;
+            for (CellInfo ci : cells) {
+                boolean serving = ci.isRegistered()
+                        || ci.getCellConnectionStatus() == CellInfo.CONNECTION_SECONDARY_SERVING;
+                if (!serving) {
+                    continue;
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ci instanceof CellInfoNr) {
+                    CellIdentityNr id = (CellIdentityNr) ci.getCellIdentity();
+                    JSONObject row = new JSONObject();
+                    putIfValid(row, "pci", id.getPci());
+                    putIfValid(row, "nci", id.getNci());
+                    putNrSignal(row, (CellSignalStrengthNr) ci.getCellSignalStrength());
+                    return row;
+                } else if (ci instanceof CellInfoLte && lte == null) {
+                    CellIdentityLte id = ((CellInfoLte) ci).getCellIdentity();
+                    CellSignalStrengthLte ss = ((CellInfoLte) ci).getCellSignalStrength();
+                    lte = new JSONObject();
+                    putIfValid(lte, "pci", id.getPci());
+                    putIfValid(lte, "rsrp", ss.getRsrp());
+                    putIfValid(lte, "rsrq", ss.getRsrq());
+                }
+            }
+            return lte;
+        } catch (Exception e) {  // includes SecurityException
+            return null;
+        }
     }
 
     @SuppressWarnings("MissingPermission")

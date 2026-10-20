@@ -694,6 +694,10 @@ public final class LoggerService extends Service {
                 status.put("storage", stor);
             }
             status.put("pending_uploads", pendingUploads().size());
+            JSONObject cell = RadioSampler.serving(this);
+            if (cell != null && cell.length() > 0) {
+                status.put("radio", cell);
+            }
             if (currentTestId != null) {
                 status.put("current_test_id", currentTestId);
             }
