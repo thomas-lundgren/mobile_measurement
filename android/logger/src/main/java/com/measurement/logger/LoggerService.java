@@ -483,8 +483,9 @@ public final class LoggerService extends Service {
             s.setSoTimeout(500);
             s.getOutputStream().write(("FAST " + seconds + "\n").getBytes(StandardCharsets.US_ASCII));
             s.getInputStream().read(); // "OK": the window is set
-        } catch (java.io.IOException ignored) {
-            // not running (e.g. after a reboot): nothing to slow down
+        } catch (Exception ignored) {
+            // not running (e.g. after a reboot), or anything else: the test
+            // never depends on mp-probe
         }
     }
 
@@ -553,8 +554,9 @@ public final class LoggerService extends Service {
                     }
                 }
             }
-        } catch (java.io.IOException e) {
-            // not running, or cut off: keep what arrived (whole lines are valid)
+        } catch (Exception e) {
+            // not running, or cut off: keep what arrived (whole lines are
+            // valid); the test never depends on mp-probe
         }
         if (lines == 0) {
             out.delete();
