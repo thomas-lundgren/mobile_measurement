@@ -67,10 +67,7 @@ fn enums_match_yaml() {
         ("platforms", rust_set(Platform::ALL, Platform::wire)),
         ("event_types", rust_set(EventType::ALL, EventType::wire)),
         ("test_results", rust_set(TestResult::ALL, TestResult::wire)),
-        (
-            "device_roles",
-            rust_set(DeviceRole::ALL, DeviceRole::wire),
-        ),
+        ("device_roles", rust_set(DeviceRole::ALL, DeviceRole::wire)),
         ("vpn_scopes", rust_set(VpnScope::ALL, VpnScope::wire)),
         ("probe_kinds", rust_set(ProbeKind::ALL, ProbeKind::wire)),
     ];
@@ -136,8 +133,8 @@ fn versions_match_yaml() {
 
 #[test]
 fn monitor_logging_config_round_trip() {
-    use mp_contracts::{CaptureConfig, PingConfig, PingTarget};
     use mp_contracts::enums::VpnScope;
+    use mp_contracts::{CaptureConfig, PingConfig, PingTarget};
 
     let cfg = mp_contracts::LoggingConfig {
         version: 1,
@@ -145,12 +142,24 @@ fn monitor_logging_config_round_trip() {
             serving_cell: vec![],
             neighbor_cells: false,
             lte_fallback: false,
-            cqi: false, mcs: false, bler: false, harq: false,
-            drx: false, bwp: false, mimo_layers: false, tx_power: false,
+            cqi: false,
+            mcs: false,
+            bler: false,
+            harq: false,
+            drx: false,
+            bwp: false,
+            mimo_layers: false,
+            tx_power: false,
         },
-        qos: mp_contracts::QosLogging { qi_5: false, qfi: false, slice_info: false },
+        qos: mp_contracts::QosLogging {
+            qi_5: false,
+            qfi: false,
+            slice_info: false,
+        },
         mobility: mp_contracts::MobilityLogging {
-            explicit_ho_events: false, rrc_state: false, beam_switch: false,
+            explicit_ho_events: false,
+            rrc_state: false,
+            beam_switch: false,
         },
         events: vec![],
         gps: false,
@@ -180,14 +189,17 @@ fn monitor_logging_config_round_trip() {
 
 #[test]
 fn monitor_device_status_round_trip() {
-    use mp_contracts::{LinkState, InterfaceLinkState, MonitorState};
     use mp_contracts::enums::VpnScope;
+    use mp_contracts::{InterfaceLinkState, LinkState, MonitorState};
 
     let status = mp_contracts::DeviceStatus {
         logger_state: mp_contracts::enums::LoggerState::Idle,
         current_test_id: None,
         logging_config_version: 1,
-        sampled_at: mp_contracts::DualClock { mono_ns: 1_000_000, utc_ns: 1_700_000_000_000_000_000 },
+        sampled_at: mp_contracts::DualClock {
+            mono_ns: 1_000_000,
+            utc_ns: 1_700_000_000_000_000_000,
+        },
         battery: None,
         storage: None,
         pending_uploads: None,
@@ -223,15 +235,31 @@ fn capability_supports_ping_round_trip() {
     let logger_cap = mp_contracts::Capability {
         radio: mp_contracts::RadioCapability {
             serving_cell: vec![],
-            neighbor_cells: false, lte_fallback: false, cqi: false, mcs: false,
-            bler: false, harq: false, drx: false, bwp: false, mimo_layers: false,
+            neighbor_cells: false,
+            lte_fallback: false,
+            cqi: false,
+            mcs: false,
+            bler: false,
+            harq: false,
+            drx: false,
+            bwp: false,
+            mimo_layers: false,
             tx_power: false,
         },
-        qos: mp_contracts::QosCapability { qi_5: false, qfi: false, slice_info: false },
-        mobility: mp_contracts::MobilityCapability {
-            explicit_ho_events: false, rrc_state: false, beam_switch: false,
+        qos: mp_contracts::QosCapability {
+            qi_5: false,
+            qfi: false,
+            slice_info: false,
         },
-        timestamp_sources: vec![mp_contracts::TimestampSource::Mono, mp_contracts::TimestampSource::Utc],
+        mobility: mp_contracts::MobilityCapability {
+            explicit_ho_events: false,
+            rrc_state: false,
+            beam_switch: false,
+        },
+        timestamp_sources: vec![
+            mp_contracts::TimestampSource::Mono,
+            mp_contracts::TimestampSource::Utc,
+        ],
         supports_ping: true,
         monitor: None,
     };

@@ -307,8 +307,21 @@ impl AppExchange {
 
     /// The v2 equivalent of a v1 request.
     pub fn from_v1(r: &AppRequest) -> Self {
-        let (up_bytes, down_bytes) = if r.kind == AppRequest::UPLOAD { (r.size, 0) } else { (0, r.size) };
-        Self { activity: r.activity, flow_id: r.flow_id, object_id: r.object_id, up_bytes, down_bytes, delay_ms: 0, rate_bps: 0, chunk_bytes: 0 }
+        let (up_bytes, down_bytes) = if r.kind == AppRequest::UPLOAD {
+            (r.size, 0)
+        } else {
+            (0, r.size)
+        };
+        Self {
+            activity: r.activity,
+            flow_id: r.flow_id,
+            object_id: r.object_id,
+            up_bytes,
+            down_bytes,
+            delay_ms: 0,
+            rate_bps: 0,
+            chunk_bytes: 0,
+        }
     }
 }
 
@@ -340,24 +353,54 @@ mod tests {
 
     #[test]
     fn app_request_round_trips() {
-        let r = AppRequest { kind: AppRequest::UPLOAD, activity: 5, flow_id: 7, object_id: 1 << 48 | 3, size: 2_500_000 };
+        let r = AppRequest {
+            kind: AppRequest::UPLOAD,
+            activity: 5,
+            flow_id: 7,
+            object_id: 1 << 48 | 3,
+            size: 2_500_000,
+        };
         let b = r.to_bytes();
         assert_eq!(&b[..4], &[0x04, 0x01, 0x01, 0x05]);
         assert_eq!(AppRequest::decode(&b), Ok(r));
         assert_eq!(AppRequest::decode(&b[..10]), Err(PacketError::ShortBuffer));
-        assert_eq!(AppRequest::decode(&[0x02, 0x01, 0, 0]), Err(PacketError::UnknownType(2, 1)));
+        assert_eq!(
+            AppRequest::decode(&[0x02, 0x01, 0, 0]),
+            Err(PacketError::UnknownType(2, 1))
+        );
     }
     #[test]
     fn app_exchange_round_trips_and_reads_v1() {
-        let x = AppExchange { activity: 9, flow_id: 7, object_id: 5 << 20 | 2, up_bytes: 40_000, down_bytes: 12_000, delay_ms: 900, rate_bps: 30_000, chunk_bytes: 140 };
+        let x = AppExchange {
+            activity: 9,
+            flow_id: 7,
+            object_id: 5 << 20 | 2,
+            up_bytes: 40_000,
+            down_bytes: 12_000,
+            delay_ms: 900,
+            rate_bps: 30_000,
+            chunk_bytes: 140,
+        };
         let b = x.to_bytes();
         assert_eq!(&b[..4], &[0x04, 0x02, 0x09, 0x00]);
         assert_eq!(AppExchange::decode(&b), Ok(x));
         assert_eq!(AppExchange::decode(&b[..43]), Err(PacketError::ShortBuffer));
-        assert_eq!(AppExchange::decode(&[0x04, 0x01, 0, 0]), Err(PacketError::UnknownType(4, 1)));
-        let up = AppRequest { kind: AppRequest::UPLOAD, activity: 8, flow_id: 3, object_id: 1, size: 500 };
+        assert_eq!(
+            AppExchange::decode(&[0x04, 0x01, 0, 0]),
+            Err(PacketError::UnknownType(4, 1))
+        );
+        let up = AppRequest {
+            kind: AppRequest::UPLOAD,
+            activity: 8,
+            flow_id: 3,
+            object_id: 1,
+            size: 500,
+        };
         let v = AppExchange::from_v1(&up);
-        assert_eq!((v.up_bytes, v.down_bytes, v.delay_ms, v.rate_bps), (500, 0, 0, 0));
+        assert_eq!(
+            (v.up_bytes, v.down_bytes, v.delay_ms, v.rate_bps),
+            (500, 0, 0, 0)
+        );
     }
 
     use std::path::PathBuf;
@@ -453,7 +496,11 @@ mod tests {
             };
             let expected = hex_to_bytes(case["hex"].as_str().unwrap());
             assert_eq!(pkt.to_bytes().to_vec(), expected, "encode `{name}`");
-            assert_eq!(AppRequest::decode(&expected).unwrap(), pkt, "decode `{name}`");
+            assert_eq!(
+                AppRequest::decode(&expected).unwrap(),
+                pkt,
+                "decode `{name}`"
+            );
         }
     }
 
@@ -479,7 +526,11 @@ mod tests {
             };
             let expected = hex_to_bytes(case["hex"].as_str().unwrap());
             assert_eq!(pkt.to_bytes().to_vec(), expected, "encode `{name}`");
-            assert_eq!(AppExchange::decode(&expected).unwrap(), pkt, "decode `{name}`");
+            assert_eq!(
+                AppExchange::decode(&expected).unwrap(),
+                pkt,
+                "decode `{name}`"
+            );
         }
     }
 

@@ -175,7 +175,15 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 actions: None,
                 placement: None,
             },
-            Flow::AppTraffic { flow_id, profile, workers, seed, scale, actions, placement } => UeFlow {
+            Flow::AppTraffic {
+                flow_id,
+                profile,
+                workers,
+                seed,
+                scale,
+                actions,
+                placement,
+            } => UeFlow {
                 flow_id: *flow_id,
                 flow_type: "app_traffic".into(),
                 direction: None,
@@ -186,15 +194,31 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 dscp_values: None,
                 sndbuf_bytes: None,
                 rate_kbps: None,
-                profile: serde_json::to_value(profile).unwrap().as_str().map(String::from),
+                profile: serde_json::to_value(profile)
+                    .unwrap()
+                    .as_str()
+                    .map(String::from),
                 workers: *workers,
                 seed: *seed,
                 scale: *scale,
                 // same JSON on both sides: what the Logger forwards verbatim
-                actions: actions.as_ref().map(|a| serde_json::from_value(serde_json::to_value(a).unwrap()).unwrap()),
-                placement: placement.map(|p| serde_json::to_value(p).unwrap().as_str().unwrap().to_string()),
+                actions: actions
+                    .as_ref()
+                    .map(|a| serde_json::from_value(serde_json::to_value(a).unwrap()).unwrap()),
+                placement: placement.map(|p| {
+                    serde_json::to_value(p)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_string()
+                }),
             },
-            Flow::DscpProbe { flow_id, rate_pps, dscp_values, .. } => UeFlow {
+            Flow::DscpProbe {
+                flow_id,
+                rate_pps,
+                dscp_values,
+                ..
+            } => UeFlow {
                 flow_id: *flow_id,
                 flow_type: "dscp_probe".into(),
                 direction: None,
@@ -233,8 +257,11 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
 fn read_dscp_values(
     dir: &std::path::Path,
     flow_id: u32,
-) -> (std::collections::BTreeSet<u8>, std::collections::BTreeSet<u8>) {
-    use arrow::array::{Array, UInt8Array, UInt32Array};
+) -> (
+    std::collections::BTreeSet<u8>,
+    std::collections::BTreeSet<u8>,
+) {
+    use arrow::array::{Array, UInt32Array, UInt8Array};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     let mut sent = std::collections::BTreeSet::new();
     let mut recv = std::collections::BTreeSet::new();

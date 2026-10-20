@@ -43,7 +43,10 @@ const SNMP_EVERY: Duration = Duration::from_millis(100);
 const FAST_MAX_S: u64 = 3600;
 
 fn utc_ns() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
 }
 
 /// Hour key (UTC) of a timestamp: the file a line belongs to.
@@ -101,10 +104,15 @@ impl Store {
     }
 
     fn prune(&self, now_hour: u64) {
-        let Ok(entries) = fs::read_dir(&self.dir) else { return };
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return;
+        };
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
-            let Some(stamp) = name.strip_prefix("probe-").and_then(|s| s.strip_suffix(".jsonl")) else {
+            let Some(stamp) = name
+                .strip_prefix("probe-")
+                .and_then(|s| s.strip_suffix(".jsonl"))
+            else {
                 continue;
             };
             // keep anything we cannot date; delete hours older than keep_hours
@@ -159,19 +167,30 @@ fn poll_loop(store: Shared, hz: u32, idle_hz: u32, fast_until: Arc<AtomicU64>) {
         if let Some(d) = nl.as_mut() {
             if let Ok(qs) = d.dump_roots() {
                 for q in qs {
-                    if !(q.dev.starts_with("rmnet") || q.dev.starts_with("wlan")) || q.packets == 0 {
+                    if !(q.dev.starts_with("rmnet") || q.dev.starts_with("wlan")) || q.packets == 0
+                    {
                         continue;
                     }
-                    let key = [q.packets as u64, q.requeues as u64, q.drops as u64, q.backlog as u64, q.qlen as u64];
+                    let key = [
+                        q.packets as u64,
+                        q.requeues as u64,
+                        q.drops as u64,
+                        q.backlog as u64,
+                        q.qlen as u64,
+                    ];
                     let fresh = match last_q.get(&q.dev) {
                         Some((k, at)) => *k != key || at.elapsed() >= HEARTBEAT,
                         None => true,
                     };
                     if fresh {
-                        emit(&store, t, serde_json::json!({
-                            "t": t, "k": "q", "dev": q.dev, "qdisc": q.kind, "b": q.bytes, "p": q.packets,
-                            "d": q.drops, "o": q.overlimits, "r": q.requeues, "bb": q.backlog, "bp": q.qlen,
-                        }));
+                        emit(
+                            &store,
+                            t,
+                            serde_json::json!({
+                                "t": t, "k": "q", "dev": q.dev, "qdisc": q.kind, "b": q.bytes, "p": q.packets,
+                                "d": q.drops, "o": q.overlimits, "r": q.requeues, "bb": q.backlog, "bp": q.qlen,
+                            }),
+                        );
                         last_q.insert(q.dev.clone(), (key, Instant::now()));
                     }
                 }
@@ -195,7 +214,11 @@ fn poll_loop(store: Shared, hz: u32, idle_hz: u32, fast_until: Arc<AtomicU64>) {
                 }
             }
         }
-        next += if t < fast_until.load(Ordering::Relaxed) { period(hz) } else { period(idle_hz) };
+        next += if t < fast_until.load(Ordering::Relaxed) {
+            period(hz)
+        } else {
+            period(idle_hz)
+        };
         let now = Instant::now();
         if next > now {
             thread::sleep(next - now);
@@ -215,7 +238,12 @@ fn parse_udp_snmp(text: &str) -> Option<std::collections::BTreeMap<String, u64>>
     let mut lines = text.lines().filter(|l| l.starts_with("Udp:"));
     let head: Vec<&str> = lines.next()?.split_whitespace().skip(1).collect();
     let vals: Vec<&str> = lines.next()?.split_whitespace().skip(1).collect();
-    Some(head.iter().zip(vals).filter_map(|(k, v)| Some((k.to_string(), v.parse().ok()?))).collect())
+    Some(
+        head.iter()
+            .zip(vals)
+            .filter_map(|(k, v)| Some((k.to_string(), v.parse().ok()?)))
+            .collect(),
+    )
 }
 
 /// Radio-log events worth keeping (parsed on the server side).
@@ -227,7 +255,8 @@ fn keep_log_line(line: &str) -> bool {
         "UNSOL_DATA_CALL_LIST_CHANGED",
         "UNSOL_RESPONSE_NETWORK_STATE_CHANGED",
     ];
-    (line.contains("[UNSL]") || line.contains("UNSOLICITED")) && TAGS.iter().any(|t| line.contains(t))
+    (line.contains("[UNSL]") || line.contains("UNSOLICITED"))
+        && TAGS.iter().any(|t| line.contains(t))
 }
 
 /// `logcat -v epoch` line → its UTC ns timestamp.
@@ -250,7 +279,11 @@ fn logcat_loop(store: Shared) {
                 for line in BufReader::new(out).lines().map_while(Result::ok) {
                     if keep_log_line(&line) {
                         let t = log_time(&line).unwrap_or_else(utc_ns);
-                        emit(&store, t, serde_json::json!({"t": t, "k": "l", "line": line.trim()}));
+                        emit(
+                            &store,
+                            t,
+                            serde_json::json!({"t": t, "k": "l", "line": line.trim()}),
+                        );
                     }
                 }
             }
@@ -263,7 +296,9 @@ fn logcat_loop(store: Shared) {
 /// Lines with t0 <= t <= t1 from the hour files covering the window.
 fn range(dir: &Path, t0: u64, t1: u64, out: &mut impl Write) -> io::Result<()> {
     for h in hour_key(t0)..=hour_key(t1) {
-        let Ok(f) = File::open(file_for(dir, h)) else { continue };
+        let Ok(f) = File::open(file_for(dir, h)) else {
+            continue;
+        };
         for line in BufReader::new(f).lines().map_while(Result::ok) {
             let t = line
                 .strip_prefix("{\"t\":")
@@ -303,14 +338,22 @@ fn serve(store: Shared, port: u16, started: u64, fast_until: Arc<AtomicU64>) {
                     let _ = writeln!(w, "PONG {VERSION} {started}");
                 }
                 ["FAST", secs] => {
-                    let Ok(secs) = secs.parse::<u64>() else { return };
+                    let Ok(secs) = secs.parse::<u64>() else {
+                        return;
+                    };
                     let t = utc_ns();
                     fast_until.store(t + secs.min(FAST_MAX_S) * 1_000_000_000, Ordering::Relaxed);
-                    emit(&store, t, serde_json::json!({"t": t, "k": "fast", "s": secs.min(FAST_MAX_S)}));
+                    emit(
+                        &store,
+                        t,
+                        serde_json::json!({"t": t, "k": "fast", "s": secs.min(FAST_MAX_S)}),
+                    );
                     let _ = writeln!(w, "OK");
                 }
                 ["RANGE", a, b] => {
-                    let (Ok(t0), Ok(t1)) = (a.parse(), b.parse()) else { return };
+                    let (Ok(t0), Ok(t1)) = (a.parse(), b.parse()) else {
+                        return;
+                    };
                     let dir = {
                         let mut s = store.lock().unwrap();
                         s.flush();
@@ -326,7 +369,10 @@ fn serve(store: Shared, port: u16, started: u64, fast_until: Arc<AtomicU64>) {
 }
 
 fn arg(args: &[String], name: &str, default: &str) -> String {
-    args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone()).unwrap_or_else(|| default.to_string())
+    args.windows(2)
+        .find(|w| w[0] == name)
+        .map(|w| w[1].clone())
+        .unwrap_or_else(|| default.to_string())
 }
 
 fn main() {
@@ -336,8 +382,10 @@ fn main() {
         match netlink::QdiscDumper::new().and_then(|mut d| d.dump_roots()) {
             Ok(qs) => {
                 for q in qs {
-                    println!("{} {} sent {}B/{}p drops {} requeues {} backlog {}B/{}p", q.dev, q.kind, q.bytes,
-                        q.packets, q.drops, q.requeues, q.backlog, q.qlen);
+                    println!(
+                        "{} {} sent {}B/{}p drops {} requeues {} backlog {}B/{}p",
+                        q.dev, q.kind, q.bytes, q.packets, q.drops, q.requeues, q.backlog, q.qlen
+                    );
                 }
             }
             Err(e) => println!("netlink: {e}"),
@@ -352,8 +400,17 @@ fn main() {
     let keep_hours: u64 = arg(&args, "--keep-hours", "48").parse().unwrap_or(48);
     let _ = fs::create_dir_all(&dir);
     let started = utc_ns();
-    let store: Shared = Arc::new(Mutex::new(Store { dir, hour: 0, out: None, keep_hours }));
-    emit(&store, started, serde_json::json!({"t": started, "k": "start", "version": VERSION, "hz": hz, "idle_hz": idle_hz}));
+    let store: Shared = Arc::new(Mutex::new(Store {
+        dir,
+        hour: 0,
+        out: None,
+        keep_hours,
+    }));
+    emit(
+        &store,
+        started,
+        serde_json::json!({"t": started, "k": "start", "version": VERSION, "hz": hz, "idle_hz": idle_hz}),
+    );
 
     let fast_until = Arc::new(AtomicU64::new(0));
     let (s, f) = (store.clone(), fast_until.clone());
@@ -386,7 +443,9 @@ mod tests {
         let pcc = "  1792472351.068  2830  3415 D RILJ    : [UNSL]< UNSOL_PHYSICAL_CHANNEL_CONFIG [{mBand=3}] [PHONE0]";
         assert!(keep_log_line(pcc));
         assert_eq!(log_time(pcc), Some(1_792_472_351_068_000_000));
-        assert!(!keep_log_line("1792472351.068 1 2 D Foo: onCapabilitiesChanged"));
+        assert!(!keep_log_line(
+            "1792472351.068 1 2 D Foo: onCapabilitiesChanged"
+        ));
     }
 
     #[test]
@@ -394,7 +453,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mp-probe-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        let mut s = Store { dir: dir.clone(), hour: 0, out: None, keep_hours: 48 };
+        let mut s = Store {
+            dir: dir.clone(),
+            hour: 0,
+            out: None,
+            keep_hours: 48,
+        };
         let t = 1_792_472_351_000_000_000u64;
         for k in 0..5u64 {
             let tk = t + k * 1_000_000_000;

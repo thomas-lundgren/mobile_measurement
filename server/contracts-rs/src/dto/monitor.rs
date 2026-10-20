@@ -142,9 +142,15 @@ pub struct PingConfig {
     pub auto_target_count: u8,
 }
 
-fn default_ping_interval() -> u32 { 1000 }
-fn default_auto_target_count() -> u8 { 5 }
-fn default_vpn_scope() -> VpnScope { VpnScope::All }
+fn default_ping_interval() -> u32 {
+    1000
+}
+fn default_auto_target_count() -> u8 {
+    5
+}
+fn default_vpn_scope() -> VpnScope {
+    VpnScope::All
+}
 
 /// A single operator-pinned latency target.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -155,4 +161,3 @@ pub struct PingTarget {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_ms: Option<u32>,
 }
-

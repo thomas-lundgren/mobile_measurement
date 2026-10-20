@@ -53,7 +53,12 @@ impl SendStatus {
     }
 }
 
-fn setsockopt_int(fd: RawFd, level: libc::c_int, name: libc::c_int, val: libc::c_int) -> io::Result<()> {
+fn setsockopt_int(
+    fd: RawFd,
+    level: libc::c_int,
+    name: libc::c_int,
+    val: libc::c_int,
+) -> io::Result<()> {
     let rc = unsafe {
         libc::setsockopt(
             fd,
@@ -141,7 +146,11 @@ pub fn recv_stamped_nowait(fd: RawFd, buf: &mut [u8]) -> io::Result<Received> {
 /// Wait until `fd` has something to read (or an error to report), at most
 /// `timeout`. False on timeout.
 pub fn wait_readable(fd: RawFd, timeout: Duration) -> bool {
-    let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    let mut p = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
     let ts = libc::timespec {
         tv_sec: timeout.as_secs() as libc::time_t,
         tv_nsec: timeout.subsec_nanos() as _,
@@ -265,7 +274,10 @@ impl Pacer {
 pub fn bulk_pacing(rate_kbps: u32, max_chunk: usize) -> (usize, Duration) {
     let bytes_per_s = rate_kbps.max(8) as u64 * 1000 / 8;
     let chunk = ((bytes_per_s / 200) as usize).clamp(1, max_chunk);
-    (chunk, Duration::from_nanos(chunk as u64 * 1_000_000_000 / bytes_per_s))
+    (
+        chunk,
+        Duration::from_nanos(chunk as u64 * 1_000_000_000 / bytes_per_s),
+    )
 }
 
 #[cfg(test)]
@@ -274,11 +286,19 @@ mod tests {
 
     #[test]
     fn bulk_pacing_keeps_the_rate() {
-        for (kbps, max) in [(2_000, 65_536), (10_000, 65_536), (500_000, 65_536), (8, 65_536)] {
+        for (kbps, max) in [
+            (2_000, 65_536),
+            (10_000, 65_536),
+            (500_000, 65_536),
+            (8, 65_536),
+        ] {
             let (chunk, period) = bulk_pacing(kbps, max);
             assert!(chunk >= 1 && chunk <= max);
             let rate = chunk as f64 * 8.0 / period.as_secs_f64() / 1000.0;
-            assert!((rate - kbps as f64).abs() / (kbps as f64) < 0.01, "{kbps}: {rate}");
+            assert!(
+                (rate - kbps as f64).abs() / (kbps as f64) < 0.01,
+                "{kbps}: {rate}"
+            );
         }
         assert_eq!(bulk_pacing(2_000, 65_536), (1250, Duration::from_millis(5)));
         assert_eq!(bulk_pacing(500_000, 65_536).0, 65_536);
@@ -298,7 +318,10 @@ mod tests {
         assert_eq!(r.from, Some(tx.local_addr().unwrap()));
         let now = crate::timestamp::Timestamp::now().utc_ns;
         let k = r.kernel_utc_ns.expect("kernel timestamp");
-        assert!(k <= now && now - k < 1_000_000_000, "kernel {k} vs now {now}");
+        assert!(
+            k <= now && now - k < 1_000_000_000,
+            "kernel {k} vs now {now}"
+        );
     }
 
     #[test]

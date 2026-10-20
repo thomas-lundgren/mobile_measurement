@@ -138,7 +138,10 @@ async fn drive(st: AppState, req: InternalStartTest) {
 
         // gateway_ping is a device-local measurement — no server endpoint, no generator.
         if matches!(flow, Flow::GatewayPing { .. }) {
-            bindings.push(FlowBinding { flow_id, server_port: None });
+            bindings.push(FlowBinding {
+                flow_id,
+                server_port: None,
+            });
             continue;
         }
 

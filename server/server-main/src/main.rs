@@ -56,8 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("mobile uploads held off the local network (unless < {gb} GB free)");
     }
 
-    let app = build_router(state)
-        .into_make_service_with_connect_info::<std::net::SocketAddr>();
+    let app = build_router(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("server-main listening on http://{bind}");

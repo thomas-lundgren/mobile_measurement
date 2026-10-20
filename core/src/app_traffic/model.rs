@@ -142,17 +142,35 @@ pub struct Fetch {
 
 impl Fetch {
     pub fn download(activity: u8, bytes: u64) -> Self {
-        Self { activity, up: 0, down: bytes, delay_ms: 0, rate_bps: 0, chunk: 0 }
+        Self {
+            activity,
+            up: 0,
+            down: bytes,
+            delay_ms: 0,
+            rate_bps: 0,
+            chunk: 0,
+        }
     }
 
     pub fn upload(activity: u8, bytes: u64) -> Self {
-        Self { activity, up: bytes, down: 0, delay_ms: 0, rate_bps: 0, chunk: 0 }
+        Self {
+            activity,
+            up: bytes,
+            down: 0,
+            delay_ms: 0,
+            rate_bps: 0,
+            chunk: 0,
+        }
     }
 
     /// How long the server takes beyond moving the bytes: think time plus,
     /// for a paced stream, its length.
     pub(crate) fn server_time(&self) -> Duration {
-        let stream = if self.rate_bps > 0 { self.down as f64 * 8.0 / self.rate_bps as f64 } else { 0.0 };
+        let stream = if self.rate_bps > 0 {
+            self.down as f64 * 8.0 / self.rate_bps as f64
+        } else {
+            0.0
+        };
         Duration::from_millis(self.delay_ms as u64) + Duration::from_secs_f64(stream)
     }
 }
@@ -161,7 +179,10 @@ impl Fetch {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
     /// Transfer these objects, at most `parallel` at a time.
-    Burst { fetches: Vec<Fetch>, parallel: usize },
+    Burst {
+        fetches: Vec<Fetch>,
+        parallel: usize,
+    },
     /// Stay idle until this long after the agent started.
     Until(Duration),
     /// Nothing more to do (script finished).
@@ -285,16 +306,30 @@ impl Agent {
         (self.rng.lognormal(median, sigma).clamp(lo, hi) * self.scale).max(1.0) as u64
     }
 
-    fn fetch(&mut self, activity: u8, upload: bool, median: f64, sigma: f64, lo: f64, hi: f64) -> Fetch {
+    fn fetch(
+        &mut self,
+        activity: u8,
+        upload: bool,
+        median: f64,
+        sigma: f64,
+        lo: f64,
+        hi: f64,
+    ) -> Fetch {
         let bytes = self.bytes(median, sigma, lo, hi);
-        if upload { Fetch::upload(activity, bytes) } else { Fetch::download(activity, bytes) }
+        if upload {
+            Fetch::upload(activity, bytes)
+        } else {
+            Fetch::download(activity, bytes)
+        }
     }
 
     pub fn next_step(&mut self, now: Duration) -> Step {
         if let Some(script) = self.script.as_mut() {
             return match script.front() {
                 None => Step::Done,
-                Some(a) if now < Duration::from_millis(a.at_ms) => Step::Until(Duration::from_millis(a.at_ms)),
+                Some(a) if now < Duration::from_millis(a.at_ms) => {
+                    Step::Until(Duration::from_millis(a.at_ms))
+                }
                 Some(_) => {
                     let a = script.pop_front().unwrap();
                     let activity = activity_code(a.activity.as_deref().unwrap_or("other"));
@@ -311,7 +346,10 @@ impl Agent {
                     };
                     let n = a.count.unwrap_or(1).max(1) as usize;
                     let parallel = (a.parallel.unwrap_or(1).max(1) as usize).min(MAX_PARALLEL);
-                    Step::Burst { fetches: vec![f; n], parallel }
+                    Step::Burst {
+                        fetches: vec![f; n],
+                        parallel,
+                    }
                 }
             };
         }
@@ -327,7 +365,13 @@ impl Agent {
         }
         if self.mixed && now >= self.mode_until {
             let r = self.rng.unit();
-            self.mode = if r < 0.45 { Mode::Web } else if r < 0.80 { Mode::Social } else { Mode::Video };
+            self.mode = if r < 0.45 {
+                Mode::Web
+            } else if r < 0.80 {
+                Mode::Social
+            } else {
+                Mode::Video
+            };
             self.mode_until = now + Duration::from_secs_f64(self.rng.uniform(120.0, 300.0));
             self.video_end = Duration::ZERO;
         }
@@ -395,7 +439,13 @@ impl Agent {
         self.in_call = false;
         if self.turns_left > 0 {
             let r = self.rng.unit();
-            let n = if r < 0.6 { 1 } else if r < 0.85 { 2 } else { 3 + (self.rng.next() % 2) as usize };
+            let n = if r < 0.6 {
+                1
+            } else if r < 0.85 {
+                2
+            } else {
+                3 + (self.rng.next() % 2) as usize
+            };
             let tools: Vec<Fetch> = (0..n).map(|_| self.tool()).collect();
             for t in &tools {
                 self.context += t.down.min(TOOL_RESULT_MAX) + 300;
@@ -403,11 +453,18 @@ impl Agent {
             if self.context > COMPACT_AT {
                 self.context = COMPACT_TO;
             }
-            let (here, cloud): (Vec<Fetch>, Vec<Fetch>) = tools.into_iter().partition(|t| self.placement.on_device(t));
+            let (here, cloud): (Vec<Fetch>, Vec<Fetch>) =
+                tools.into_iter().partition(|t| self.placement.on_device(t));
             if !cloud.is_empty() {
                 let result = Fetch {
                     delay_ms: cloud.iter().map(|t| t.delay_ms).max().unwrap_or(0),
-                    ..Fetch::download(CLOUD_TOOL, cloud.iter().map(|t| t.down.min(TOOL_RESULT_MAX) + 300).sum())
+                    ..Fetch::download(
+                        CLOUD_TOOL,
+                        cloud
+                            .iter()
+                            .map(|t| t.down.min(TOOL_RESULT_MAX) + 300)
+                            .sum(),
+                    )
                 };
                 self.queue.push_back(Plan::Burst(vec![result], 1));
             }
@@ -418,7 +475,10 @@ impl Agent {
                 self.queue.push_back(Plan::Burst(here, n));
             }
         }
-        Step::Burst { fetches: vec![llm], parallel: 1 }
+        Step::Burst {
+            fetches: vec![llm],
+            parallel: 1,
+        }
     }
 
     /// One tool call: an MCP request (small JSON up, the tool's latency, a JSON
@@ -444,11 +504,16 @@ impl Agent {
     fn web_page(&mut self) -> Step {
         let html = self.fetch(WEB_PAGE, false, 50e3, 0.6, 5e3, 500e3);
         let n = self.rng.lognormal(30.0, 0.5).clamp(5.0, 120.0) as usize;
-        let objects = (0..n).map(|_| self.fetch(WEB_OBJECT, false, 20e3, 1.2, 200.0, 3e6)).collect();
+        let objects = (0..n)
+            .map(|_| self.fetch(WEB_OBJECT, false, 20e3, 1.2, 200.0, 3e6))
+            .collect();
         self.queue.push_back(Plan::Burst(objects, MAX_PARALLEL));
         let read = self.rng.secs(12.0, 0.7, 2.0, 90.0);
         self.queue.push_back(Plan::Think(read));
-        Step::Burst { fetches: vec![html], parallel: 1 }
+        Step::Burst {
+            fetches: vec![html],
+            parallel: 1,
+        }
     }
 
     /// Mail sync: headers, sometimes an attachment, rarely a sent mail.
@@ -461,7 +526,10 @@ impl Agent {
             fetches.push(self.fetch(MAIL_SEND, true, 150e3, 1.2, 2e3, 10e6));
         }
         self.mail_at = now + Duration::from_secs_f64(self.rng.uniform(60.0, 180.0));
-        Step::Burst { fetches, parallel: 1 }
+        Step::Burst {
+            fetches,
+            parallel: 1,
+        }
     }
 
     /// Segmented video: a few segments back to back to fill the buffer, then
@@ -474,11 +542,15 @@ impl Agent {
                 return Step::Until(now + pause);
             }
             let mbps = [1.5, 3.0, 5.0][(self.rng.next() % 3) as usize];
-            self.video_bytes = ((mbps * 1e6 / 8.0 * SEGMENT.as_secs_f64()) * self.scale).max(1.0) as u64;
+            self.video_bytes =
+                ((mbps * 1e6 / 8.0 * SEGMENT.as_secs_f64()) * self.scale).max(1.0) as u64;
             self.video_end = now + Duration::from_secs_f64(self.rng.uniform(60.0, 300.0));
             self.video_due = now + SEGMENT * 3;
             let f = Fetch::download(VIDEO_CHUNK, self.video_bytes);
-            return Step::Burst { fetches: vec![f; 3], parallel: 1 };
+            return Step::Burst {
+                fetches: vec![f; 3],
+                parallel: 1,
+            };
         }
         if now < self.video_due {
             return Step::Until(self.video_due.min(self.video_end));
@@ -486,19 +558,27 @@ impl Agent {
         // a late segment (the buffer ran dry) is fetched at once, not caught up
         self.video_due = (self.video_due + SEGMENT).max(now);
         let f = Fetch::download(VIDEO_CHUNK, self.video_bytes);
-        Step::Burst { fetches: vec![f], parallel: 1 }
+        Step::Burst {
+            fetches: vec![f],
+            parallel: 1,
+        }
     }
 
     /// Feed scrolling: a few images, a pause, now and then a photo upload.
     fn feed(&mut self) -> Step {
         let n = self.rng.uniform(3.0, 9.0) as usize;
-        let mut fetches: Vec<Fetch> = (0..n).map(|_| self.fetch(FEED_IMAGE, false, 120e3, 0.8, 5e3, 2e6)).collect();
+        let mut fetches: Vec<Fetch> = (0..n)
+            .map(|_| self.fetch(FEED_IMAGE, false, 120e3, 0.8, 5e3, 2e6))
+            .collect();
         if self.rng.chance(0.03) {
             fetches.push(self.fetch(PHOTO_UPLOAD, true, 2.5e6, 0.4, 300e3, 12e6));
         }
         let pause = self.rng.secs(4.0, 0.6, 1.0, 20.0);
         self.queue.push_back(Plan::Think(pause));
-        Step::Burst { fetches, parallel: 4 }
+        Step::Burst {
+            fetches,
+            parallel: 4,
+        }
     }
 }
 
@@ -547,35 +627,92 @@ mod tests {
     #[test]
     fn web_page_is_html_then_parallel_objects_then_reading() {
         let mut a = Agent::new("web", 3, 1.0, &[]);
-        let Step::Burst { fetches, parallel: 1 } = a.next_step(Duration::ZERO) else { panic!() };
+        let Step::Burst {
+            fetches,
+            parallel: 1,
+        } = a.next_step(Duration::ZERO)
+        else {
+            panic!()
+        };
         assert_eq!(fetches.len(), 1);
         assert_eq!(fetches[0].activity, WEB_PAGE);
-        let Step::Burst { fetches, parallel } = a.next_step(Duration::ZERO) else { panic!() };
-        assert!(fetches.len() >= 5 && fetches.iter().all(|f| f.activity == WEB_OBJECT && f.up == 0));
+        let Step::Burst { fetches, parallel } = a.next_step(Duration::ZERO) else {
+            panic!()
+        };
+        assert!(
+            fetches.len() >= 5
+                && fetches
+                    .iter()
+                    .all(|f| f.activity == WEB_OBJECT && f.up == 0)
+        );
         assert_eq!(parallel, MAX_PARALLEL);
-        let Step::Until(t) = a.next_step(Duration::from_secs(1)) else { panic!() };
+        let Step::Until(t) = a.next_step(Duration::from_secs(1)) else {
+            panic!()
+        };
         assert!(t >= Duration::from_secs(3));
     }
 
     #[test]
     fn script_runs_actions_in_order_then_stops() {
         let actions = vec![
-            AppAction { at_ms: 0, kind: "down".into(), bytes: 1000, count: Some(3), parallel: Some(9), activity: Some("web_object".into()), ..AppAction::default() },
-            AppAction { at_ms: 5000, kind: "up".into(), bytes: 2000, ..AppAction::default() },
-            AppAction { at_ms: 6000, kind: "down".into(), bytes: 3000, up_bytes: Some(500), delay_ms: Some(800), rate_kbps: Some(24), activity: Some("llm_call".into()), ..AppAction::default() },
+            AppAction {
+                at_ms: 0,
+                kind: "down".into(),
+                bytes: 1000,
+                count: Some(3),
+                parallel: Some(9),
+                activity: Some("web_object".into()),
+                ..AppAction::default()
+            },
+            AppAction {
+                at_ms: 5000,
+                kind: "up".into(),
+                bytes: 2000,
+                ..AppAction::default()
+            },
+            AppAction {
+                at_ms: 6000,
+                kind: "down".into(),
+                bytes: 3000,
+                up_bytes: Some(500),
+                delay_ms: Some(800),
+                rate_kbps: Some(24),
+                activity: Some("llm_call".into()),
+                ..AppAction::default()
+            },
         ];
         let mut a = Agent::new("script", 0, 1.0, &actions);
         assert_eq!(
             a.next_step(Duration::ZERO),
-            Step::Burst { fetches: vec![Fetch::download(WEB_OBJECT, 1000); 3], parallel: MAX_PARALLEL }
+            Step::Burst {
+                fetches: vec![Fetch::download(WEB_OBJECT, 1000); 3],
+                parallel: MAX_PARALLEL
+            }
         );
-        assert_eq!(a.next_step(Duration::from_secs(1)), Step::Until(Duration::from_secs(5)));
+        assert_eq!(
+            a.next_step(Duration::from_secs(1)),
+            Step::Until(Duration::from_secs(5))
+        );
         assert_eq!(
             a.next_step(Duration::from_secs(5)),
-            Step::Burst { fetches: vec![Fetch::upload(0, 2000)], parallel: 1 }
+            Step::Burst {
+                fetches: vec![Fetch::upload(0, 2000)],
+                parallel: 1
+            }
         );
-        let llm = Fetch { up: 500, delay_ms: 800, rate_bps: 24_000, ..Fetch::download(LLM_CALL, 3000) };
-        assert_eq!(a.next_step(Duration::from_secs(6)), Step::Burst { fetches: vec![llm], parallel: 1 });
+        let llm = Fetch {
+            up: 500,
+            delay_ms: 800,
+            rate_bps: 24_000,
+            ..Fetch::download(LLM_CALL, 3000)
+        };
+        assert_eq!(
+            a.next_step(Duration::from_secs(6)),
+            Step::Burst {
+                fetches: vec![llm],
+                parallel: 1
+            }
+        );
         assert_eq!(a.next_step(Duration::from_secs(7)), Step::Done);
     }
 
@@ -588,7 +725,10 @@ mod tests {
             match a.next_step(now) {
                 Step::Burst { fetches, .. } => {
                     for f in &fetches {
-                        let i = [LLM_CALL, LLM_RESUME, MCP_CALL, WEB_FETCH, CLOUD_TOOL].iter().position(|c| *c == f.activity).unwrap();
+                        let i = [LLM_CALL, LLM_RESUME, MCP_CALL, WEB_FETCH, CLOUD_TOOL]
+                            .iter()
+                            .position(|c| *c == f.activity)
+                            .unwrap();
                         n[i] += 1;
                         up += f.up;
                         down += f.down;
@@ -605,13 +745,25 @@ mod tests {
     #[test]
     fn tool_placement_moves_tool_traffic_off_the_phone() {
         let (dev, dev_up, dev_down) = agent_mix(Placement::Device);
-        assert!(dev[2] > 0 && dev[3] > 0 && dev[1] == 0 && dev[4] == 0, "device {dev:?}");
+        assert!(
+            dev[2] > 0 && dev[3] > 0 && dev[1] == 0 && dev[4] == 0,
+            "device {dev:?}"
+        );
         let (cloud, cloud_up, cloud_down) = agent_mix(Placement::Cloud);
-        assert!(cloud[2] == 0 && cloud[3] == 0 && cloud[1] > 0 && cloud[4] > 0, "cloud {cloud:?}");
+        assert!(
+            cloud[2] == 0 && cloud[3] == 0 && cloud[1] > 0 && cloud[4] > 0,
+            "cloud {cloud:?}"
+        );
         // one request per task: no context resent within it
         assert!(cloud[0] < cloud[1], "cloud {cloud:?}");
-        assert!(cloud_up < dev_up / 3, "cloud up {cloud_up} vs device {dev_up}");
-        assert!(cloud_down < dev_down / 2, "cloud down {cloud_down} vs device {dev_down}");
+        assert!(
+            cloud_up < dev_up / 3,
+            "cloud up {cloud_up} vs device {dev_up}"
+        );
+        assert!(
+            cloud_down < dev_down / 2,
+            "cloud down {cloud_down} vs device {dev_down}"
+        );
         let (hyb, _, _) = agent_mix(Placement::Hybrid);
         assert!(hyb[2] > 0 && hyb[3] == 0 && hyb[4] > 0, "hybrid {hyb:?}");
     }
@@ -628,7 +780,11 @@ mod tests {
                     assert_eq!((fetches.len(), parallel), (1, 1));
                     assert!(f.delay_ms >= 250 && f.rate_bps > 0 && f.chunk == SSE_EVENT);
                     // the context only grows within a task (until compaction)
-                    assert!(f.up > last_up || f.up == COMPACT_TO, "call {calls}: {} after {last_up}", f.up);
+                    assert!(
+                        f.up > last_up || f.up == COMPACT_TO,
+                        "call {calls}: {} after {last_up}",
+                        f.up
+                    );
                     last_up = f.up;
                     calls += 1;
                     prev_llm = true;
@@ -637,7 +793,11 @@ mod tests {
                 Step::Burst { fetches, parallel } => {
                     assert!(prev_llm, "tools follow an LLM call");
                     assert_eq!(parallel, fetches.len());
-                    assert!(fetches.iter().all(|f| matches!(f.activity, MCP_CALL | WEB_FETCH) && f.up > 0 && f.down > 0));
+                    assert!(fetches
+                        .iter()
+                        .all(|f| matches!(f.activity, MCP_CALL | WEB_FETCH)
+                            && f.up > 0
+                            && f.down > 0));
                     prev_llm = false;
                 }
                 Step::Until(t) => {
@@ -653,7 +813,10 @@ mod tests {
         assert!(tasks > 10, "tasks {tasks}");
         // average: a few hundred kbit/s down, mostly LLM context up
         let (down, up, _) = steps("agent", 1, 1800);
-        let (d, u) = (down as f64 * 8.0 / 1800.0 / 1e6, up as f64 * 8.0 / 1800.0 / 1e6);
+        let (d, u) = (
+            down as f64 * 8.0 / 1800.0 / 1e6,
+            up as f64 * 8.0 / 1800.0 / 1e6,
+        );
         assert!((0.02..1.0).contains(&d), "agent down {d} Mbit/s");
         assert!((0.02..1.0).contains(&u), "agent up {u} Mbit/s");
     }

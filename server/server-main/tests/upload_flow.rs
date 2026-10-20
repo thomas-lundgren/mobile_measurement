@@ -391,11 +391,17 @@ async fn upload_held_off_the_local_network_unless_storage_is_low() {
 
     // mobile network (public or carrier-grade NAT address): held, retryable
     for peer in ["90.129.122.158:40000", "100.70.1.2:40000"] {
-        assert_eq!(summary_from(&st, test_id, &session, peer).await, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            summary_from(&st, test_id, &session, peer).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
     }
     // home Wi-Fi: a LAN address, or the router's hairpin NAT showing our own public address
     for peer in ["192.168.1.57:40000", "2.248.90.179:40000"] {
-        assert_eq!(summary_from(&st, test_id, &session, peer).await, StatusCode::OK);
+        assert_eq!(
+            summary_from(&st, test_id, &session, peer).await,
+            StatusCode::OK
+        );
     }
     // storage running low: accepted over the mobile network too
     let status = |free| mp_server_main::registry::StatusUpdate {
@@ -412,8 +418,18 @@ async fn upload_held_off_the_local_network_unless_storage_is_low() {
         sampled_utc_ns: 2,
         received_at: 3,
     };
-    mp_server_main::registry::upsert_device_status(&st.pool, &status(50_000_000_000)).await.unwrap();
-    assert_eq!(summary_from(&st, test_id, &session, "90.129.122.158:40000").await, StatusCode::SERVICE_UNAVAILABLE);
-    mp_server_main::registry::upsert_device_status(&st.pool, &status(1_000_000_000)).await.unwrap();
-    assert_eq!(summary_from(&st, test_id, &session, "90.129.122.158:40000").await, StatusCode::OK);
+    mp_server_main::registry::upsert_device_status(&st.pool, &status(50_000_000_000))
+        .await
+        .unwrap();
+    assert_eq!(
+        summary_from(&st, test_id, &session, "90.129.122.158:40000").await,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    mp_server_main::registry::upsert_device_status(&st.pool, &status(1_000_000_000))
+        .await
+        .unwrap();
+    assert_eq!(
+        summary_from(&st, test_id, &session, "90.129.122.158:40000").await,
+        StatusCode::OK
+    );
 }

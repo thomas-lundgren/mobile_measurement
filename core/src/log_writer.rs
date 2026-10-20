@@ -139,13 +139,39 @@ impl PacketRow {
     }
 
     /// Minimal probe-style row (UDP, no ports/sender/intervals).
-    pub fn probe(flow_id: u32, sequence_number: u64, direction: Direction, timestamp: Timestamp, payload_size: u32) -> Self {
-        Self::new(flow_id, sequence_number, direction, timestamp, payload_size, Protocol::Udp)
+    pub fn probe(
+        flow_id: u32,
+        sequence_number: u64,
+        direction: Direction,
+        timestamp: Timestamp,
+        payload_size: u32,
+    ) -> Self {
+        Self::new(
+            flow_id,
+            sequence_number,
+            direction,
+            timestamp,
+            payload_size,
+            Protocol::Udp,
+        )
     }
 
     /// One TCP read or write (TCP hides segmentation: a row per app chunk).
-    pub fn tcp(flow_id: u32, sequence_number: u64, direction: Direction, timestamp: Timestamp, payload_size: u32) -> Self {
-        Self::new(flow_id, sequence_number, direction, timestamp, payload_size, Protocol::Tcp)
+    pub fn tcp(
+        flow_id: u32,
+        sequence_number: u64,
+        direction: Direction,
+        timestamp: Timestamp,
+        payload_size: u32,
+    ) -> Self {
+        Self::new(
+            flow_id,
+            sequence_number,
+            direction,
+            timestamp,
+            payload_size,
+            Protocol::Tcp,
+        )
     }
 }
 
@@ -386,7 +412,10 @@ impl SegmentedPacketWriter {
                         .collect::<Vec<_>>(),
                 )) as _,
                 Arc::new(UInt32Array::from(
-                    self.rows.iter().map(|r| r.timing.send_call_ns).collect::<Vec<_>>(),
+                    self.rows
+                        .iter()
+                        .map(|r| r.timing.send_call_ns)
+                        .collect::<Vec<_>>(),
                 )) as _,
                 Arc::new(UInt32Array::from(
                     self.rows
@@ -695,12 +724,19 @@ mod tests {
     fn old_segment_rotates_without_more_rows() {
         let tmp = tempfile::tempdir().unwrap();
         let mut w = SegmentedPacketWriter::new(tmp.path(), 1000, ctx()).unwrap();
-        w.append(&PacketRow::probe(1, 0, Direction::Sent, ts(0), 64)).unwrap();
+        w.append(&PacketRow::probe(1, 0, Direction::Sent, ts(0), 64))
+            .unwrap();
         w.rotate_if_older(Duration::from_secs(60)).unwrap();
-        assert_eq!(count_rows_if_closed(&tmp.path().join("packets_0000.parquet")), None);
+        assert_eq!(
+            count_rows_if_closed(&tmp.path().join("packets_0000.parquet")),
+            None
+        );
         std::thread::sleep(Duration::from_millis(20));
         w.rotate_if_older(Duration::from_millis(10)).unwrap();
-        assert_eq!(count_rows_if_closed(&tmp.path().join("packets_0000.parquet")), Some(1));
+        assert_eq!(
+            count_rows_if_closed(&tmp.path().join("packets_0000.parquet")),
+            Some(1)
+        );
         // an empty segment never rotates
         std::thread::sleep(Duration::from_millis(20));
         w.rotate_if_older(Duration::from_millis(10)).unwrap();
@@ -709,7 +745,10 @@ mod tests {
 
     fn count_rows_if_closed(path: &Path) -> Option<usize> {
         let file = File::open(path).ok()?;
-        let reader = ParquetRecordBatchReaderBuilder::try_new(file).ok()?.build().ok()?;
+        let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+            .ok()?
+            .build()
+            .ok()?;
         Some(reader.map(|b| b.unwrap().num_rows()).sum())
     }
 

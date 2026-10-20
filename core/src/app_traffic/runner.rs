@@ -48,8 +48,17 @@ struct Ctx<'a> {
 /// connection pool; a script runs on one agent only.
 pub fn run(cfg: &AppTraffic, sink: LogSink, counters: &Counters, stop: &AtomicBool) {
     let sink = Mutex::new(sink);
-    let ctx = Ctx { cfg, sink: &sink, counters, stop };
-    let workers = if cfg.profile == "script" { 1 } else { cfg.workers.clamp(1, 16) };
+    let ctx = Ctx {
+        cfg,
+        sink: &sink,
+        counters,
+        stop,
+    };
+    let workers = if cfg.profile == "script" {
+        1
+    } else {
+        cfg.workers.clamp(1, 16)
+    };
     let start = Instant::now();
     std::thread::scope(|s| {
         for w in 0..workers {
@@ -60,8 +69,12 @@ pub fn run(cfg: &AppTraffic, sink: LogSink, counters: &Counters, stop: &AtomicBo
 }
 
 fn worker(ctx: &Ctx, w: u32, start: Instant) {
-    let seed = ctx.cfg.seed.wrapping_add((w as u64).wrapping_mul(0x9E37_79B9));
-    let mut agent = Agent::new(&ctx.cfg.profile, seed, ctx.cfg.scale, &ctx.cfg.actions).with_placement(ctx.cfg.placement);
+    let seed = ctx
+        .cfg
+        .seed
+        .wrapping_add((w as u64).wrapping_mul(0x9E37_79B9));
+    let mut agent = Agent::new(&ctx.cfg.profile, seed, ctx.cfg.scale, &ctx.cfg.actions)
+        .with_placement(ctx.cfg.placement);
     let mut pool: Vec<TcpStream> = Vec::new();
     let mut episode = 0u64;
     while !ctx.stop.load(Ordering::Acquire) {
@@ -69,7 +82,9 @@ fn worker(ctx: &Ctx, w: u32, start: Instant) {
             Step::Until(t) => {
                 let idle_from = Instant::now();
                 while !ctx.stop.load(Ordering::Acquire) && start.elapsed() < t {
-                    std::thread::sleep((t.saturating_sub(start.elapsed())).min(Duration::from_millis(100)));
+                    std::thread::sleep(
+                        (t.saturating_sub(start.elapsed())).min(Duration::from_millis(100)),
+                    );
                     if !pool.is_empty() && idle_from.elapsed() >= IDLE_CLOSE {
                         pool.clear();
                     }
@@ -92,7 +107,13 @@ fn worker(ctx: &Ctx, w: u32, start: Instant) {
 
 /// Transfer `fetches` over up to `parallel` pooled connections; returns the
 /// connections still usable.
-fn burst(ctx: &Ctx, mut pool: Vec<TcpStream>, fetches: &[Fetch], parallel: usize, base: u64) -> Vec<TcpStream> {
+fn burst(
+    ctx: &Ctx,
+    mut pool: Vec<TcpStream>,
+    fetches: &[Fetch],
+    parallel: usize,
+    base: u64,
+) -> Vec<TcpStream> {
     let want = parallel.clamp(1, MAX_PARALLEL).min(fetches.len().max(1));
     while pool.len() < want {
         match connect(&ctx.cfg.server) {
@@ -117,7 +138,9 @@ fn burst(ctx: &Ctx, mut pool: Vec<TcpStream>, fetches: &[Fetch], parallel: usize
                         kept.lock().unwrap().push(conn);
                         return;
                     };
-                    if ctx.stop.load(Ordering::Acquire) || transfer(ctx, &mut conn, f, base | i as u64).is_err() {
+                    if ctx.stop.load(Ordering::Acquire)
+                        || transfer(ctx, &mut conn, f, base | i as u64).is_err()
+                    {
                         return; // connection dropped; others finish the queue
                     }
                 }
@@ -157,11 +180,19 @@ fn give_up(stop: &AtomicBool, deadline: Instant) -> bool {
 }
 
 fn is_timeout(e: &io::Error) -> bool {
-    matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
+    matches!(
+        e.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    )
 }
 
 /// `write_all` that survives the socket's short write timeout.
-pub fn write_all_until(conn: &mut TcpStream, mut buf: &[u8], stop: &AtomicBool, deadline: Instant) -> io::Result<()> {
+pub fn write_all_until(
+    conn: &mut TcpStream,
+    mut buf: &[u8],
+    stop: &AtomicBool,
+    deadline: Instant,
+) -> io::Result<()> {
     while !buf.is_empty() {
         match conn.write(buf) {
             Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
@@ -178,7 +209,12 @@ pub fn write_all_until(conn: &mut TcpStream, mut buf: &[u8], stop: &AtomicBool, 
 }
 
 /// `read_exact` that survives the socket's short read timeout.
-pub fn read_exact_until(conn: &mut TcpStream, mut buf: &mut [u8], stop: &AtomicBool, deadline: Instant) -> io::Result<()> {
+pub fn read_exact_until(
+    conn: &mut TcpStream,
+    mut buf: &mut [u8],
+    stop: &AtomicBool,
+    deadline: Instant,
+) -> io::Result<()> {
     while !buf.is_empty() {
         match conn.read(buf) {
             Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
@@ -208,7 +244,10 @@ fn transfer(ctx: &Ctx, conn: &mut TcpStream, f: Fetch, object_id: u64) -> io::Re
         chunk_bytes: f.chunk,
     };
     let push = |dir: Direction, n: usize| {
-        ctx.sink.lock().unwrap().push(row(flow_id, object_id, dir, n as u32, &f));
+        ctx.sink
+            .lock()
+            .unwrap()
+            .push(row(flow_id, object_id, dir, n as u32, &f));
     };
     let head = req.to_bytes();
     push(Direction::Sent, head.len());

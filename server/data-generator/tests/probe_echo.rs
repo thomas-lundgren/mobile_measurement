@@ -126,7 +126,12 @@ async fn probe_echo_end_to_end() {
     );
     // the server's RECEIVED rows carry the kernel receive time
     let mut stamped = 0;
-    for f in files.iter().filter(|f| f.file_name().unwrap().to_string_lossy().starts_with("packets")) {
+    for f in files.iter().filter(|f| {
+        f.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("packets")
+    }) {
         let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
             std::fs::File::open(f).unwrap(),
         )
@@ -135,13 +140,26 @@ async fn probe_echo_end_to_end() {
         .unwrap();
         for b in reader {
             let b = b.unwrap();
-            let dir = b.column_by_name("direction").unwrap().as_any()
-                .downcast_ref::<arrow::array::StringArray>().unwrap().clone();
-            let k = b.column_by_name("kernel_rx_utc_ns").unwrap().as_any()
-                .downcast_ref::<arrow::array::UInt64Array>().unwrap().clone();
+            let dir = b
+                .column_by_name("direction")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap()
+                .clone();
+            let k = b
+                .column_by_name("kernel_rx_utc_ns")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::UInt64Array>()
+                .unwrap()
+                .clone();
             for i in 0..b.num_rows() {
                 if dir.value(i) == "RECEIVED" {
-                    assert!(arrow::array::Array::is_valid(&k, i), "RECEIVED row without kernel time");
+                    assert!(
+                        arrow::array::Array::is_valid(&k, i),
+                        "RECEIVED row without kernel time"
+                    );
                     stamped += 1;
                 }
             }

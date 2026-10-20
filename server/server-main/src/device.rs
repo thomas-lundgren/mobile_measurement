@@ -205,9 +205,18 @@ pub async fn post_status(
     if let Some(ip) = peer.0 {
         // One log line per network change; operator scripts read it to
         // tell home Wi-Fi from the mobile network.
-        let changed = st.status_peers.lock().unwrap().insert(device_id.clone(), ip) != Some(ip);
+        let changed = st
+            .status_peers
+            .lock()
+            .unwrap()
+            .insert(device_id.clone(), ip)
+            != Some(ip);
         if changed {
-            let net = if crate::uploads::is_local(ip, &st.server_host) { "local" } else { "remote" };
+            let net = if crate::uploads::is_local(ip, &st.server_host) {
+                "local"
+            } else {
+                "remote"
+            };
             println!("status: {device_id} reports from {ip} ({net})");
         }
     }

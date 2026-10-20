@@ -58,7 +58,10 @@ impl Counters {
 
 /// A read or write that timed out (socket timeout or non-blocking).
 pub fn would_block(e: &io::Error) -> bool {
-    matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
+    matches!(
+        e.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    )
 }
 
 /// Back-pressure mode for a realtime sender (`sndbuf_bytes`): a small send
@@ -67,7 +70,8 @@ pub fn would_block(e: &io::Error) -> bool {
 pub fn back_pressure_mode(socket: &UdpSocket, sndbuf_bytes: Option<u32>) -> bool {
     match sndbuf_bytes {
         Some(bytes) => {
-            udp_timing::limit_send_buffer(socket.as_raw_fd(), bytes).is_ok() && socket.set_nonblocking(true).is_ok()
+            udp_timing::limit_send_buffer(socket.as_raw_fd(), bytes).is_ok()
+                && socket.set_nonblocking(true).is_ok()
         }
         None => false,
     }
@@ -139,7 +143,14 @@ pub fn realtime_send(
                 sock_outq_bytes: udp_timing::outq_bytes(out.socket().as_raw_fd()),
                 ..PacketTiming::default()
             },
-            ..PacketRow::new(stream.flow_id, seq, Direction::Sent, ts, buf.len() as u32, Protocol::Udp)
+            ..PacketRow::new(
+                stream.flow_id,
+                seq,
+                Direction::Sent,
+                ts,
+                buf.len() as u32,
+                Protocol::Udp,
+            )
         });
         seq += 1;
         out.after_send(status);
@@ -190,7 +201,13 @@ pub fn realtime_recv(
         inp.on_datagram(r.from);
         counters.received(r.n as u64);
         let (sender, seq) = match RealtimePacket::decode(&buf[..r.n]) {
-            Ok(p) => (Some(Timestamp { mono_ns: p.send_mono_ns, utc_ns: p.send_utc_ns }), p.sequence_number),
+            Ok(p) => (
+                Some(Timestamp {
+                    mono_ns: p.send_mono_ns,
+                    utc_ns: p.send_utc_ns,
+                }),
+                p.sequence_number,
+            ),
             Err(_) => (None, 0),
         };
         let actual = last_recv_mono.map(|l| recv_ts.mono_ns.saturating_sub(l));
@@ -200,8 +217,18 @@ pub fn realtime_recv(
             sender,
             expected_interval_ns: Some(period_ns),
             actual_interval_ns: actual,
-            timing: PacketTiming { kernel_rx_utc_ns: r.kernel_utc_ns, ..PacketTiming::default() },
-            ..PacketRow::new(flow_id, seq, Direction::Received, recv_ts, r.n as u32, Protocol::Udp)
+            timing: PacketTiming {
+                kernel_rx_utc_ns: r.kernel_utc_ns,
+                ..PacketTiming::default()
+            },
+            ..PacketRow::new(
+                flow_id,
+                seq,
+                Direction::Received,
+                recv_ts,
+                r.n as u32,
+                Protocol::Udp,
+            )
         });
     }
 }
@@ -252,7 +279,13 @@ pub fn bulk_send(
 }
 
 /// Bulk receiver: one RECEIVED row per read. The stream needs a read timeout.
-pub fn bulk_recv(stream: &mut TcpStream, flow_id: u32, sink: &mut LogSink, counters: &Counters, stop: &AtomicBool) {
+pub fn bulk_recv(
+    stream: &mut TcpStream,
+    flow_id: u32,
+    sink: &mut LogSink,
+    counters: &Counters,
+    stop: &AtomicBool,
+) {
     let mut buf = vec![0u8; BULK_CHUNK];
     let mut seq = 0u64;
     while !stop.load(Ordering::Acquire) {
@@ -261,7 +294,13 @@ pub fn bulk_recv(stream: &mut TcpStream, flow_id: u32, sink: &mut LogSink, count
             Ok(n) => {
                 let ts = Timestamp::now();
                 counters.received(n as u64);
-                sink.push(PacketRow::tcp(flow_id, seq, Direction::Received, ts, n as u32));
+                sink.push(PacketRow::tcp(
+                    flow_id,
+                    seq,
+                    Direction::Received,
+                    ts,
+                    n as u32,
+                ));
                 seq += 1;
             }
             Err(ref e) if would_block(e) => {}

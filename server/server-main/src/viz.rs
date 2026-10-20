@@ -114,7 +114,12 @@ async fn timing_test(
     if !valid {
         return Err(AppError::BadRequest("bad test id".into()));
     }
-    serve_json(&st, &headers, PathBuf::from(format!("timing/{test_id}.json"))).await
+    serve_json(
+        &st,
+        &headers,
+        PathBuf::from(format!("timing/{test_id}.json")),
+    )
+    .await
 }
 
 /// Most recent device reachability reports (newest first, all devices), from

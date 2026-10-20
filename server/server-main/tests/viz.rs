@@ -155,7 +155,11 @@ async fn timing_detail_per_test() {
     assert_eq!(s, StatusCode::NOT_FOUND);
 
     std::fs::create_dir_all(root.join("viz/spectrogram")).unwrap();
-    std::fs::write(root.join("viz/spectrogram/2026-10-19.json"), r#"{"rows":[]}"#).unwrap();
+    std::fs::write(
+        root.join("viz/spectrogram/2026-10-19.json"),
+        r#"{"rows":[]}"#,
+    )
+    .unwrap();
     let (s, body) = get(&st, "/api/v1/viz/spectrogram/2026-10-19", Some(&jwt)).await;
     assert_eq!(s, StatusCode::OK);
     assert!(serde_json::from_slice::<Value>(&body).unwrap()["rows"].is_array());

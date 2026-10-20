@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::endpoint::{self, Counters, RealtimeStream};
 use crate::log_writer::{
-    packet_channel, spawn_packet_writer_multi, Direction, LogContext, LogSink, PacketRow, PacketTiming,
-    WriterHandle,
+    packet_channel, spawn_packet_writer_multi, Direction, LogContext, LogSink, PacketRow,
+    PacketTiming, WriterHandle,
 };
 use crate::packet::{DscpProbePacket, ProbePacket, DSCP_UNKNOWN};
 use crate::timestamp::Timestamp;
@@ -204,7 +204,11 @@ fn spawn_flow(
     let dir = flow.direction.as_deref();
 
     match (flow.flow_type.as_str(), dir) {
-        ("probe", _) | ("realtime_udp", _) | ("bulk_tcp", _) | ("dscp_probe", _) | ("app_traffic", _) => {
+        ("probe", _)
+        | ("realtime_udp", _)
+        | ("bulk_tcp", _)
+        | ("dscp_probe", _)
+        | ("app_traffic", _) => {
             let port = flow.server_port.ok_or_else(|| {
                 std::io::Error::other(format!("flow {} missing server_port", flow.flow_id))
             })?;
@@ -213,18 +217,27 @@ fn spawn_flow(
                 ("probe", _) => {
                     let socket = connected_udp(&server)?;
                     let reopen = Reopener::new(&server);
-                    Ok(thread::spawn(move || probe_ue(socket, reopen, sink, flow, counters, stop)))
+                    Ok(thread::spawn(move || {
+                        probe_ue(socket, reopen, sink, flow, counters, stop)
+                    }))
                 }
                 ("realtime_udp", Some("ToServer")) => {
                     let socket = connected_udp(&server)?;
                     endpoint::back_pressure_mode(&socket, flow.sndbuf_bytes);
-                    let mut out = UeOut { port: local_port(&socket), socket, reopen: Reopener::new(&server), sndbuf_bytes: flow.sndbuf_bytes };
+                    let mut out = UeOut {
+                        port: local_port(&socket),
+                        socket,
+                        reopen: Reopener::new(&server),
+                        sndbuf_bytes: flow.sndbuf_bytes,
+                    };
                     let stream = RealtimeStream {
                         flow_id: flow.flow_id,
                         period: rate_period(flow.rate_pps),
                         size: flow.packet_size_bytes.unwrap_or(0) as usize,
                     };
-                    Ok(thread::spawn(move || endpoint::realtime_send(&mut out, stream, &mut sink, &counters, &stop)))
+                    Ok(thread::spawn(move || {
+                        endpoint::realtime_send(&mut out, stream, &mut sink, &counters, &stop)
+                    }))
                 }
                 ("realtime_udp", _) => {
                     let socket = connected_udp(&server)?;
@@ -236,14 +249,29 @@ fn spawn_flow(
                     };
                     let period_ns = rate_period(flow.rate_pps).as_nanos() as u64;
                     Ok(thread::spawn(move || {
-                        endpoint::realtime_recv(&mut inp, flow.flow_id, period_ns, &mut sink, &counters, &stop)
+                        endpoint::realtime_recv(
+                            &mut inp,
+                            flow.flow_id,
+                            period_ns,
+                            &mut sink,
+                            &counters,
+                            &stop,
+                        )
                     }))
                 }
                 ("bulk_tcp", Some("ToServer")) => {
                     let mut stream = TcpStream::connect(&server)?;
                     stream.set_write_timeout(Some(RECV_TIMEOUT))?;
                     Ok(thread::spawn(move || {
-                        endpoint::bulk_send(&mut stream, flow.flow_id, flow.rate_kbps, flow.target_bytes, &mut sink, &counters, &stop)
+                        endpoint::bulk_send(
+                            &mut stream,
+                            flow.flow_id,
+                            flow.rate_kbps,
+                            flow.target_bytes,
+                            &mut sink,
+                            &counters,
+                            &stop,
+                        )
                     }))
                 }
                 ("app_traffic", _) => {
@@ -255,7 +283,9 @@ fn spawn_flow(
                         seed: flow.seed.unwrap_or(1),
                         scale: flow.scale.unwrap_or(1.0),
                         actions: flow.actions.clone().unwrap_or_default(),
-                        placement: crate::app_traffic::Placement::parse(flow.placement.as_deref().unwrap_or("device")),
+                        placement: crate::app_traffic::Placement::parse(
+                            flow.placement.as_deref().unwrap_or("device"),
+                        ),
                     };
                     Ok(thread::spawn(move || {
                         crate::app_traffic::run(&app, sink, &counters, &stop)
@@ -263,12 +293,16 @@ fn spawn_flow(
                 }
                 ("dscp_probe", _) => {
                     let socket = connected_udp(&server)?;
-                    Ok(thread::spawn(move || dscp_probe_ue(socket, sink, flow, counters, stop)))
+                    Ok(thread::spawn(move || {
+                        dscp_probe_ue(socket, sink, flow, counters, stop)
+                    }))
                 }
                 _ => {
                     let mut stream = TcpStream::connect(&server)?;
                     stream.set_read_timeout(Some(RECV_TIMEOUT))?;
-                    Ok(thread::spawn(move || endpoint::bulk_recv(&mut stream, flow.flow_id, &mut sink, &counters, &stop)))
+                    Ok(thread::spawn(move || {
+                        endpoint::bulk_recv(&mut stream, flow.flow_id, &mut sink, &counters, &stop)
+                    }))
                 }
             }
         }
@@ -319,7 +353,9 @@ impl Reopener {
         }
         let since = *self.failing_since.get_or_insert(now);
         now.duration_since(since) >= REOPEN_AFTER
-            && self.last_try.is_none_or(|t| now.duration_since(t) >= REOPEN_RETRY)
+            && self
+                .last_try
+                .is_none_or(|t| now.duration_since(t) >= REOPEN_RETRY)
     }
 
     /// A fresh socket to the server (None while no network can route there).
@@ -389,11 +425,18 @@ fn probe_ue(
         }
         seq += 1;
         next = (next + period).max(Instant::now());
-        recv_until(socket.as_raw_fd(), next, &mut recv_buf, |pkt, r, recv_ts| {
+        recv_until(
+            socket.as_raw_fd(),
+            next,
+            &mut recv_buf,
+            |pkt, r, recv_ts| {
                 if let Ok(echo) = ProbePacket::decode(pkt) {
                     counters.received(pkt.len() as u64);
                     sink.push(PacketRow {
-                        timing: PacketTiming { kernel_rx_utc_ns: r.kernel_utc_ns, ..PacketTiming::default() },
+                        timing: PacketTiming {
+                            kernel_rx_utc_ns: r.kernel_utc_ns,
+                            ..PacketTiming::default()
+                        },
                         ..PacketRow::probe(
                             flow.flow_id,
                             echo.sequence_number,
@@ -513,7 +556,11 @@ impl endpoint::DatagramIn for UeIn {
         let now = Instant::now();
         // retry a failed keepalive every RECV_TIMEOUT, not once a second,
         // so a dead network is noticed within REOPEN_AFTER
-        self.last_keepalive = if failed { now - KEEPALIVE_PERIOD + RECV_TIMEOUT } else { now };
+        self.last_keepalive = if failed {
+            now - KEEPALIVE_PERIOD + RECV_TIMEOUT
+        } else {
+            now
+        };
         if self.reopen.note(failed, now) {
             if let Some(s) = self.reopen.reopen(now) {
                 self.port = local_port(&s);
@@ -579,18 +626,23 @@ fn dscp_probe_ue(
         seq += 1;
         next = (next + period).max(Instant::now());
         recv_until(fd, next, &mut recv_buf, |pkt, r, recv_ts| {
-                let n = pkt.len();
-                if let Ok(echo) = DscpProbePacket::decode(pkt) {
-                    counters.received(n as u64);
-                    let dscp_actual_dl = r.tos.map(|t| t >> 2).unwrap_or(DSCP_UNKNOWN);
-                    sink.push(PacketRow {
-                        dscp_sent: Some(echo.dscp_intended_dl),
-                        dscp_recv: Some(dscp_actual_dl),
-                        ..PacketRow::probe(flow.flow_id, echo.sequence_number, Direction::Received, recv_ts, n as u32)
-                    });
-                }
-            },
-        );
+            let n = pkt.len();
+            if let Ok(echo) = DscpProbePacket::decode(pkt) {
+                counters.received(n as u64);
+                let dscp_actual_dl = r.tos.map(|t| t >> 2).unwrap_or(DSCP_UNKNOWN);
+                sink.push(PacketRow {
+                    dscp_sent: Some(echo.dscp_intended_dl),
+                    dscp_recv: Some(dscp_actual_dl),
+                    ..PacketRow::probe(
+                        flow.flow_id,
+                        echo.sequence_number,
+                        Direction::Received,
+                        recv_ts,
+                        n as u32,
+                    )
+                });
+            }
+        });
         sleep_until(next);
     }
 }

@@ -104,7 +104,10 @@ fn probe_against_echo_peer() {
     );
     // echoes carry the kernel receive time, at or before the app's read
     let (with, without) = kernel_rx_on_received(dir.path());
-    assert!(with >= 8 && without == 0, "kernel rx stamps: {with} with, {without} without");
+    assert!(
+        with >= 8 && without == 0,
+        "kernel rx stamps: {with} with, {without} without"
+    );
 }
 
 /// RECEIVED rows with / without a kernel receive time no later than utc_ns.
@@ -204,7 +207,8 @@ fn probe_rtt_not_inflated_after_late_echo() {
         let deadline = std::time::Instant::now() + Duration::from_millis(1800);
         while std::time::Instant::now() < deadline {
             if let Ok((n, from)) = sock.recv_from(&mut buf) {
-                if matches!(ProbePacket::decode(&buf[..n]), Ok(p) if p.sequence_number == LATE_SEQ) {
+                if matches!(ProbePacket::decode(&buf[..n]), Ok(p) if p.sequence_number == LATE_SEQ)
+                {
                     // hold this one echo back for longer than the UE's read timeout
                     let s = sock.try_clone().unwrap();
                     let pkt = buf[..n].to_vec();
@@ -253,13 +257,23 @@ fn probe_rtt_not_inflated_after_late_echo() {
         .filter_map(|(seq, r)| sent.get(seq).map(|s| r - s))
         .collect();
     after.sort_unstable();
-    assert!(after.len() >= 20, "too few echoes after the late one: {}", after.len());
+    assert!(
+        after.len() >= 20,
+        "too few echoes after the late one: {}",
+        after.len()
+    );
     let median_ms = after[after.len() / 2] as f64 / 1e6;
     // localhost echo is sub-millisecond; the backlog bug adds a whole 20 ms period
-    assert!(median_ms < 10.0, "RTT inflated after late echo: median {median_ms:.1} ms");
+    assert!(
+        median_ms < 10.0,
+        "RTT inflated after late echo: median {median_ms:.1} ms"
+    );
     // the late echo itself is still matched to its own send
     let late_rtt = (recv[&LATE_SEQ] - sent[&LATE_SEQ]) as f64 / 1e6;
-    assert!((140.0..400.0).contains(&late_rtt), "late echo RTT {late_rtt:.1} ms");
+    assert!(
+        (140.0..400.0).contains(&late_rtt),
+        "late echo RTT {late_rtt:.1} ms"
+    );
 }
 
 #[test]

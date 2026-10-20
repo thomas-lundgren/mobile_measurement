@@ -76,7 +76,9 @@ fn ifname(index: i32) -> String {
     if p.is_null() {
         return format!("if{index}");
     }
-    unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned()
+    unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Parse one RTM_NEWQDISC message body (after the nlmsghdr).
@@ -89,7 +91,11 @@ pub fn parse_qdisc(body: &[u8]) -> Option<(i32, u32, Qdisc)> {
     let mut q = Qdisc::default();
     for (ty, val) in attrs(&body[TCMSG..]) {
         match ty {
-            TCA_KIND => q.kind = String::from_utf8_lossy(val).trim_end_matches('\0').to_string(),
+            TCA_KIND => {
+                q.kind = String::from_utf8_lossy(val)
+                    .trim_end_matches('\0')
+                    .to_string()
+            }
             TCA_STATS2 => {
                 for (sty, sval) in attrs(val) {
                     if sty == TCA_STATS_BASIC && sval.len() >= 12 {
@@ -112,21 +118,35 @@ pub fn parse_qdisc(body: &[u8]) -> Option<(i32, u32, Qdisc)> {
 
 impl QdiscDumper {
     pub fn new() -> io::Result<Self> {
-        let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW | libc::SOCK_CLOEXEC, libc::NETLINK_ROUTE) };
+        let fd = unsafe {
+            libc::socket(
+                libc::AF_NETLINK,
+                libc::SOCK_RAW | libc::SOCK_CLOEXEC,
+                libc::NETLINK_ROUTE,
+            )
+        };
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
         let mut addr: libc::sockaddr_nl = unsafe { mem::zeroed() };
         addr.nl_family = libc::AF_NETLINK as u16;
         let rc = unsafe {
-            libc::bind(fd, &addr as *const _ as *const libc::sockaddr, mem::size_of::<libc::sockaddr_nl>() as u32)
+            libc::bind(
+                fd,
+                &addr as *const _ as *const libc::sockaddr,
+                mem::size_of::<libc::sockaddr_nl>() as u32,
+            )
         };
         if rc != 0 {
             let e = io::Error::last_os_error();
             unsafe { libc::close(fd) };
             return Err(e);
         }
-        Ok(Self { fd, seq: 1, buf: vec![0u8; 64 * 1024] })
+        Ok(Self {
+            fd,
+            seq: 1,
+            buf: vec![0u8; 64 * 1024],
+        })
     }
 
     /// Root qdisc of every device.
@@ -143,7 +163,14 @@ impl QdiscDumper {
         }
         let mut out = Vec::new();
         loop {
-            let n = unsafe { libc::recv(self.fd, self.buf.as_mut_ptr() as *mut libc::c_void, self.buf.len(), 0) };
+            let n = unsafe {
+                libc::recv(
+                    self.fd,
+                    self.buf.as_mut_ptr() as *mut libc::c_void,
+                    self.buf.len(),
+                    0,
+                )
+            };
             if n < 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -158,14 +185,18 @@ impl QdiscDumper {
                 match ty {
                     NLMSG_DONE => return Ok(out),
                     NLMSG_ERROR => {
-                        let errno = i32::from_ne_bytes(b[i + NLMSG_HDR..i + NLMSG_HDR + 4].try_into().unwrap());
+                        let errno = i32::from_ne_bytes(
+                            b[i + NLMSG_HDR..i + NLMSG_HDR + 4].try_into().unwrap(),
+                        );
                         if errno != 0 {
                             return Err(io::Error::from_raw_os_error(-errno));
                         }
                         return Ok(out);
                     }
                     RTM_NEWQDISC => {
-                        if let Some((ifindex, parent, mut q)) = parse_qdisc(&b[i + NLMSG_HDR..i + len]) {
+                        if let Some((ifindex, parent, mut q)) =
+                            parse_qdisc(&b[i + NLMSG_HDR..i + len])
+                        {
                             if parent == TC_H_ROOT {
                                 q.dev = ifname(ifindex);
                                 out.push(q);

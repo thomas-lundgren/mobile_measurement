@@ -91,7 +91,9 @@ pub(crate) fn is_local(ip: IpAddr, server_host: &str) -> bool {
             if let Some(v4) = v6.to_ipv4_mapped() {
                 return is_local(IpAddr::V4(v4), server_host);
             }
-            v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00 || (v6.segments()[0] & 0xffc0) == 0xfe80
+            v6.is_loopback()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
         }
     }
 }
@@ -100,7 +102,11 @@ pub(crate) fn is_local(ip: IpAddr, server_host: &str) -> bool {
 /// configured, uploads wait for the local network unless the device's last
 /// heartbeat reported storage running low. A held upload gets 503: the
 /// Logger keeps the files and retries with backoff.
-async fn upload_held(st: &AppState, device_id: &str, peer: Option<IpAddr>) -> Result<Option<String>, AppError> {
+async fn upload_held(
+    st: &AppState,
+    device_id: &str,
+    peer: Option<IpAddr>,
+) -> Result<Option<String>, AppError> {
     let Some(hold) = st.upload_hold else {
         return Ok(None);
     };
@@ -118,7 +124,9 @@ async fn upload_held(st: &AppState, device_id: &str, peer: Option<IpAddr>) -> Re
         }
     }
     let from = peer.map_or("an unknown address".to_string(), |ip| ip.to_string());
-    Ok(Some(format!("upload held until the device is on the local network (from {from})")))
+    Ok(Some(format!(
+        "upload held until the device is on the local network (from {from})"
+    )))
 }
 
 #[utoipa::path(

@@ -15,8 +15,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-pub use fieldtest_core::endpoint::Counters;
 use fieldtest_core::app_traffic::{self, activity_name};
+pub use fieldtest_core::endpoint::Counters;
 use fieldtest_core::endpoint::{self, would_block, RealtimeStream, BULK_CHUNK};
 use fieldtest_core::log_writer::{Direction, LogSink, PacketRow, PacketTiming, WriterHandle};
 use fieldtest_core::packet::{AppExchange, AppRequest, DscpProbePacket, ProbePacket, DSCP_UNKNOWN};
@@ -50,7 +50,12 @@ pub fn spawn_probe_echo(
 
         while !stop.load(Ordering::Acquire) {
             // timeout (re-check stop), a transient error, or no source to echo to
-            let Ok(udp_timing::Received { n, from: Some(peer), kernel_utc_ns, .. }) = udp_timing::recv_stamped(fd, &mut buf)
+            let Ok(udp_timing::Received {
+                n,
+                from: Some(peer),
+                kernel_utc_ns,
+                ..
+            }) = udp_timing::recv_stamped(fd, &mut buf)
             else {
                 continue;
             };
@@ -61,9 +66,14 @@ pub fn spawn_probe_echo(
                 *state.lock().unwrap() = GeneratorState::Running;
             }
             counters.received(n as u64);
-            let seq = ProbePacket::decode(&buf[..n]).map(|p| p.sequence_number).unwrap_or(0);
+            let seq = ProbePacket::decode(&buf[..n])
+                .map(|p| p.sequence_number)
+                .unwrap_or(0);
             sink.push(PacketRow {
-                timing: PacketTiming { kernel_rx_utc_ns: kernel_utc_ns, ..PacketTiming::default() },
+                timing: PacketTiming {
+                    kernel_rx_utc_ns: kernel_utc_ns,
+                    ..PacketTiming::default()
+                },
                 ..PacketRow::probe(flow_id, seq, Direction::Received, recv_ts, n as u32)
             });
 
@@ -71,7 +81,13 @@ pub fn spawn_probe_echo(
             let send_ts = Timestamp::now();
             if socket.send_to(&buf[..n], peer).is_ok() {
                 counters.sent(n as u64);
-                sink.push(PacketRow::probe(flow_id, seq, Direction::Sent, send_ts, n as u32));
+                sink.push(PacketRow::probe(
+                    flow_id,
+                    seq,
+                    Direction::Sent,
+                    send_ts,
+                    n as u32,
+                ));
             }
         }
         finalize(&state, sink, writer);
@@ -104,7 +120,13 @@ pub fn spawn_dscp_probe_echo(
         let mut seen_client = false;
 
         while !stop.load(Ordering::Acquire) {
-            let Ok(udp_timing::Received { n, from: Some(peer), tos, .. }) = udp_timing::recv_stamped(fd, &mut buf) else {
+            let Ok(udp_timing::Received {
+                n,
+                from: Some(peer),
+                tos,
+                ..
+            }) = udp_timing::recv_stamped(fd, &mut buf)
+            else {
                 continue;
             };
             let recv_ts = Timestamp::now();
@@ -124,12 +146,23 @@ pub fn spawn_dscp_probe_echo(
             sink.push(PacketRow {
                 dscp_sent: Some(pkt.dscp_intended_ul),
                 dscp_recv: Some(dscp_actual_ul),
-                ..PacketRow::probe(flow_id, pkt.sequence_number, Direction::Received, recv_ts, n as u32)
+                ..PacketRow::probe(
+                    flow_id,
+                    pkt.sequence_number,
+                    Direction::Received,
+                    recv_ts,
+                    n as u32,
+                )
             });
 
             // Echo strategy: mirror the UE's intended DSCP for the downlink direction.
             let dscp_intended_dl = pkt.dscp_intended_ul;
-            let echo = DscpProbePacket { dscp_actual_ul, dscp_intended_dl, ..pkt }.to_bytes();
+            let echo = DscpProbePacket {
+                dscp_actual_ul,
+                dscp_intended_dl,
+                ..pkt
+            }
+            .to_bytes();
             let _ = udp_timing::set_tos(fd, dscp_intended_dl << 2);
 
             let send_ts = Timestamp::now();
@@ -137,7 +170,13 @@ pub fn spawn_dscp_probe_echo(
                 counters.sent(echo.len() as u64);
                 sink.push(PacketRow {
                     dscp_sent: Some(dscp_intended_dl),
-                    ..PacketRow::probe(flow_id, pkt.sequence_number, Direction::Sent, send_ts, echo.len() as u32)
+                    ..PacketRow::probe(
+                        flow_id,
+                        pkt.sequence_number,
+                        Direction::Sent,
+                        send_ts,
+                        echo.len() as u32,
+                    )
                 });
             }
         }
@@ -267,12 +306,27 @@ pub fn spawn_realtime_udp(
                 };
                 *state.lock().unwrap() = GeneratorState::Running;
                 let nonblocking = endpoint::back_pressure_mode(&socket, sndbuf_bytes);
-                let mut out = ServerOut { socket, peer, nonblocking, last_check: Instant::now(), buf };
-                let stream = RealtimeStream { flow_id, period: Duration::from_nanos(period_ns), size: packet_size };
+                let mut out = ServerOut {
+                    socket,
+                    peer,
+                    nonblocking,
+                    last_check: Instant::now(),
+                    buf,
+                };
+                let stream = RealtimeStream {
+                    flow_id,
+                    period: Duration::from_nanos(period_ns),
+                    size: packet_size,
+                };
                 endpoint::realtime_send(&mut out, stream, &mut sink, &counters, &stop);
             }
             FlowDir::ToServer => {
-                let mut inp = ServerIn { fd: socket.as_raw_fd(), started: false, state: &state, counters: &counters };
+                let mut inp = ServerIn {
+                    fd: socket.as_raw_fd(),
+                    started: false,
+                    state: &state,
+                    counters: &counters,
+                };
                 endpoint::realtime_recv(&mut inp, flow_id, period_ns, &mut sink, &counters, &stop);
             }
         }
@@ -327,10 +381,18 @@ pub fn spawn_bulk_tcp(
         *state.lock().unwrap() = GeneratorState::Running;
 
         match direction {
-            FlowDir::FromServer => {
-                endpoint::bulk_send(&mut stream, flow_id, rate_kbps, target_bytes, &mut sink, &counters, &stop)
+            FlowDir::FromServer => endpoint::bulk_send(
+                &mut stream,
+                flow_id,
+                rate_kbps,
+                target_bytes,
+                &mut sink,
+                &counters,
+                &stop,
+            ),
+            FlowDir::ToServer => {
+                endpoint::bulk_recv(&mut stream, flow_id, &mut sink, &counters, &stop)
             }
-            FlowDir::ToServer => endpoint::bulk_recv(&mut stream, flow_id, &mut sink, &counters, &stop),
         }
         finalize(&state, sink, writer);
     })
@@ -363,7 +425,9 @@ pub fn spawn_app_server(
                         let (sink, counters, stop) = (&sink, &*counters, &*stop);
                         s.spawn(move || serve_app_connection(conn, flow_id, sink, counters, stop));
                     }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(ACCEPT_POLL),
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(ACCEPT_POLL)
+                    }
                     Err(_) => thread::sleep(ACCEPT_POLL),
                 }
             }
@@ -372,7 +436,13 @@ pub fn spawn_app_server(
     })
 }
 
-fn serve_app_connection(mut conn: TcpStream, flow_id: u32, sink: &Mutex<LogSink>, counters: &Counters, stop: &AtomicBool) {
+fn serve_app_connection(
+    mut conn: TcpStream,
+    flow_id: u32,
+    sink: &Mutex<LogSink>,
+    counters: &Counters,
+    stop: &AtomicBool,
+) {
     let _ = conn.set_nonblocking(false);
     let _ = conn.set_read_timeout(Some(Duration::from_millis(200)));
     let _ = conn.set_write_timeout(Some(Duration::from_millis(200)));
@@ -381,7 +451,11 @@ fn serve_app_connection(mut conn: TcpStream, flow_id: u32, sink: &Mutex<LogSink>
         let row = PacketRow {
             timing: PacketTiming {
                 app_activity: Some(activity_name(x.activity)),
-                app_object_bytes: Some(if v1 { x.down_bytes.max(x.up_bytes) } else { x.down_bytes }),
+                app_object_bytes: Some(if v1 {
+                    x.down_bytes.max(x.up_bytes)
+                } else {
+                    x.down_bytes
+                }),
                 app_up_bytes: (!v1).then_some(x.up_bytes),
                 ..PacketTiming::default()
             },
@@ -400,11 +474,18 @@ fn serve_app_connection(mut conn: TcpStream, flow_id: u32, sink: &Mutex<LogSink>
         if app_traffic::read_exact_until(&mut conn, &mut head[..2], stop, forever).is_err() {
             return;
         }
-        let len = if head[1] == fieldtest_core::packet::VER_1 { AppRequest::WIRE_LEN } else { AppExchange::WIRE_LEN };
+        let len = if head[1] == fieldtest_core::packet::VER_1 {
+            AppRequest::WIRE_LEN
+        } else {
+            AppExchange::WIRE_LEN
+        };
         if app_traffic::read_exact_until(&mut conn, &mut head[2..len], stop, forever).is_err() {
             return;
         }
-        let (x, v1) = match (AppRequest::decode(&head[..len]), AppExchange::decode(&head[..len])) {
+        let (x, v1) = match (
+            AppRequest::decode(&head[..len]),
+            AppExchange::decode(&head[..len]),
+        ) {
             (Ok(r), _) => (AppExchange::from_v1(&r), true),
             (_, Ok(x)) => (x, false),
             _ => return, // not our protocol
@@ -412,8 +493,14 @@ fn serve_app_connection(mut conn: TcpStream, flow_id: u32, sink: &Mutex<LogSink>
         let head = &head[..len];
         push(Direction::Received, len, &x, v1);
         received(len);
-        let server_time = x.delay_ms as f64 / 1e3 + if x.rate_bps > 0 { x.down_bytes as f64 * 8.0 / x.rate_bps as f64 } else { 0.0 };
-        let deadline = Instant::now() + Duration::from_secs(120) + Duration::from_secs_f64(server_time);
+        let server_time = x.delay_ms as f64 / 1e3
+            + if x.rate_bps > 0 {
+                x.down_bytes as f64 * 8.0 / x.rate_bps as f64
+            } else {
+                0.0
+            };
+        let deadline =
+            Instant::now() + Duration::from_secs(120) + Duration::from_secs_f64(server_time);
         let mut left = x.up_bytes;
         while left > 0 {
             let want = left.min(BULK_CHUNK as u64) as usize;
@@ -468,8 +555,14 @@ fn serve_app_connection(mut conn: TcpStream, flow_id: u32, sink: &Mutex<LogSink>
             };
             if due <= done {
                 // chunk k is due k chunks' worth of time after the start
-                let next = start + Duration::from_secs_f64((done / chunk * chunk) as f64 * 8.0 / x.rate_bps as f64);
-                thread::sleep(next.saturating_duration_since(Instant::now()).min(Duration::from_millis(50)));
+                let next = start
+                    + Duration::from_secs_f64(
+                        (done / chunk * chunk) as f64 * 8.0 / x.rate_bps as f64,
+                    );
+                thread::sleep(
+                    next.saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(50)),
+                );
                 if stop.load(Ordering::Acquire) {
                     return;
                 }

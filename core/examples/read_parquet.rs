@@ -1,5 +1,5 @@
-use std::fs::File;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use std::fs::File;
 
 fn main() {
     let path = std::env::args().nth(1).expect("need path");
