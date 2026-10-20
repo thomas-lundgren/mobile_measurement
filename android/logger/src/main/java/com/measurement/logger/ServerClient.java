@@ -24,13 +24,16 @@ public final class ServerClient {
     private static final MediaType OCTET = MediaType.parse("application/octet-stream");
 
     private final String base;
-    private final OkHttpClient http = new OkHttpClient.Builder()
+    /** One client (one connection pool) for the whole app: kept-alive
+     *  connections stay on the network they were opened on, so the pool is
+     *  emptied when the default network changes ({@link #dropConnections}). */
+    private static final OkHttpClient http = new OkHttpClient.Builder()
             .callTimeout(30, TimeUnit.SECONDS)
             .build();
     /** File PUTs: no cap on the whole call (a large file on a weak link may
      *  legitimately take minutes), only on stalls — a link that moves no bytes
      *  for 60 s fails and the upload queue retries later. */
-    private final OkHttpClient uploadHttp = http.newBuilder()
+    private static final OkHttpClient uploadHttp = http.newBuilder()
             .callTimeout(0, TimeUnit.SECONDS)
             .connectTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
@@ -39,6 +42,14 @@ public final class ServerClient {
 
     public ServerClient(String base) {
         this.base = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+    }
+
+    /** The default network changed (e.g. back on Wi-Fi): close the pooled
+     *  connections so the next request goes out over the new network. The
+     *  2 s command poll would otherwise keep the old (mobile) connection alive
+     *  for good, and the server would keep holding uploads as "not home". */
+    static void dropConnections() {
+        http.connectionPool().evictAll();
     }
 
     // --- device onboarding ---

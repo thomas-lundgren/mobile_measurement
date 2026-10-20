@@ -62,6 +62,7 @@ public final class LoggerService extends Service {
     private int loggingConfigVersion = 1;
     private JSONObject loggingConfig; // latest server-pushed config (SET_LOGGING_CONFIG)
     private ReachabilityChecker reach;
+    private android.net.ConnectivityManager.NetworkCallback networkWatch;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -126,7 +127,38 @@ public final class LoggerService extends Service {
             uploads = new Uploader(getFilesDir(), s, this::setState);
         }
         uploads.start();
+        watchDefaultNetwork();
         return START_STICKY;
+    }
+
+    /** When the default network changes (Wi-Fi back at home, or lost), move
+     *  the server connections to the new one and retry held uploads at once.
+     *  Measurement flows follow on their own (core reopens its sockets). */
+    private void watchDefaultNetwork() {
+        if (networkWatch != null) {
+            return;
+        }
+        android.net.ConnectivityManager cm =
+                (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        networkWatch = new android.net.ConnectivityManager.NetworkCallback() {
+            private android.net.Network current;
+
+            @Override
+            public void onAvailable(android.net.Network network) {
+                if (current != null && !current.equals(network)) {
+                    ServerClient.dropConnections();
+                    if (uploads != null) {
+                        uploads.networkChanged();
+                    }
+                }
+                current = network;
+            }
+        };
+        try {
+            cm.registerDefaultNetworkCallback(networkWatch);
+        } catch (RuntimeException e) {
+            networkWatch = null; // no ACCESS_NETWORK_STATE: restart the app after a switch
+        }
     }
 
     /** Keep the screen on (dimmed) during a test unless turned off: with the
@@ -174,6 +206,14 @@ public final class LoggerService extends Service {
         }
         if (uploads != null) {
             uploads.stop();
+        }
+        if (networkWatch != null) {
+            try {
+                ((android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE))
+                        .unregisterNetworkCallback(networkWatch);
+            } catch (RuntimeException ignored) {
+            }
+            networkWatch = null;
         }
         releaseWakeLock();
     }
@@ -398,6 +438,7 @@ public final class LoggerService extends Service {
         setState("RUNNING_TEST " + testId);
         int durationSec = payload.getJSONObject("test_plan").optInt("duration_sec", 30);
         probeFast(durationSec + 30);
+        long startUtcNs = Clock.now()[1];
         PowerManager.WakeLock screen = screenOnDuringTest();
         try {
             for (int i = 0; i < durationSec && running; i++) {
@@ -417,6 +458,10 @@ public final class LoggerService extends Service {
             JSONArray sealed = new JSONArray(RustCore.sealedFiles(h));
             if (header != null) {
                 sealed.put(header.getAbsolutePath());
+            }
+            File probeLog = fetchProbeWindow(mobileDir, startUtcNs - 5_000_000_000L, Clock.now()[1] + 1_000_000_000L);
+            if (probeLog != null) {
+                sealed.put(probeLog.getAbsolutePath());
             }
             RustCore.destroy(h);
             uploads.queue(testRoot, testId, sealed);
@@ -483,6 +528,39 @@ public final class LoggerService extends Service {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** mp-probe's records (modem queue stats, UDP counters, radio-log events)
+     *  for the test window, gzipped to mobile/probe.jsonl.gz so they upload
+     *  with the test. Null if mp-probe isn't running or had nothing. */
+    @Nullable
+    private static File fetchProbeWindow(File mobileDir, long t0Ns, long t1Ns) {
+        File out = new File(mobileDir, "probe.jsonl.gz");
+        long lines = 0;
+        try (java.net.Socket s = new java.net.Socket()) {
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", MP_PROBE_PORT), 200);
+            s.setSoTimeout(10_000);
+            s.getOutputStream().write(("RANGE " + t0Ns + " " + t1Ns + "\n").getBytes(StandardCharsets.US_ASCII));
+            try (java.io.InputStream in = s.getInputStream();
+                 java.io.OutputStream gz = new java.util.zip.GZIPOutputStream(new java.io.FileOutputStream(out))) {
+                byte[] buf = new byte[64 * 1024];
+                for (int n; (n = in.read(buf)) > 0; ) {
+                    gz.write(buf, 0, n);
+                    for (int i = 0; i < n; i++) {
+                        if (buf[i] == '\n') {
+                            lines++;
+                        }
+                    }
+                }
+            }
+        } catch (java.io.IOException e) {
+            // not running, or cut off: keep what arrived (whole lines are valid)
+        }
+        if (lines == 0) {
+            out.delete();
+            return null;
+        }
+        return out;
     }
 
     /** Ack a command; a 404 means it was already acked (our earlier ack landed

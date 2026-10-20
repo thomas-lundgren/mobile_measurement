@@ -1,21 +1,11 @@
-"""Bench collector parsers (tc qdisc dump, radio log lines)."""
+"""mp-probe records and radio-log lines (bench.py)."""
 
 from __future__ import annotations
 
+import gzip
 import json
 
 from fieldtest_analysis import bench
-
-TC = """qdisc mq 0: dev rmnet1 root
- Sent 10756435752 bytes 10021970 pkt (dropped 3, overlimits 0 requeues 90122)
- backlog 64216b 44p requeues 90122
-qdisc pfifo_fast 0: dev rmnet1 parent :2 bands 3 priomap  1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1
- Sent 54812032 bytes 1022554 pkt (dropped 0, overlimits 0 requeues 0)
- backlog 0b 0p requeues 0
-qdisc noqueue 0: dev lo root refcnt 2
- Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0)
- backlog 0b 0p requeues 0
-"""
 
 PCC = ("         1792472351.068  2830  3415 D RILJ    : [UNSL]< UNSOL_PHYSICAL_CHANNEL_CONFIG [{mConnectionStatus=PrimaryServing,"
        "mCellBandwidthDownlinkKhz=10000,mCellBandwidthUplinkKhz=10000,mNetworkType=LTE,mFrequencyRange=MID,"
@@ -26,14 +16,6 @@ PCC = ("         1792472351.068  2830  3415 D RILJ    : [UNSL]< UNSOL_PHYSICAL_C
        "mDownlinkFrequency=3669600,mUplinkFrequency=3669600}] [PHONE0]")  # fmt: skip
 LCE = ("1792471707.480  2830  3411 D RILJ    : [UNSL]< UNSOL_LCE_INFO_RECV [{mType=0, mDownlinkCapacityKbps=7507, "
        "mUplinkCapacityKbps=2400}, {mType=1, mDownlinkCapacityKbps=0, mUplinkCapacityKbps=0}] [PHONE0]")  # fmt: skip
-
-
-def test_tc_dump_gives_root_qdisc_per_device():
-    rows = bench.parse_tc(TC, 123)
-    assert [r["dev"] for r in rows] == ["rmnet1", "lo"]
-    r = rows[0]
-    assert r["requeues"] == 90122 and r["dropped"] == 3
-    assert r["backlog_bytes"] == 64216 and r["backlog_pkts"] == 44 and r["utc_ns"] == 123
 
 
 def test_channel_config_lists_every_carrier():
@@ -47,3 +29,28 @@ def test_lce_and_ignored_lines():
     r = bench.parse_logcat_line(LCE)
     assert r["kind"] == "lce" and r["summary"] == "DL 7507 / UL 2400 kbit/s"
     assert bench.parse_logcat_line("1792471707.480  1 2 D Foo: bar") is None
+
+
+def test_probe_log_gives_qdisc_and_radio_rows_and_test_file_wins(tmp_path):
+    mobile = tmp_path / "mobile"
+    mobile.mkdir()
+    lines = [
+        {"t": 100, "k": "start", "version": "0.2.0"},
+        {"t": 200, "k": "q", "dev": "rmnet1", "qdisc": "mq", "b": 10, "p": 2, "d": 0, "o": 0, "r": 5, "bb": 300, "bp": 2},
+        {"t": 300, "k": "u", "SndbufErrors": 1},
+        {"t": 1792471707480000000, "k": "l", "line": LCE},
+    ]
+    with gzip.open(mobile / bench.PROBE_LOG, "wt") as f:
+        f.writelines(json.dumps(x) + "\n" for x in lines)
+        f.write('{"t": 400, "k": "q", "dev": "rmn')  # cut off mid-line by an interrupted fetch
+    q, r = bench.read_probe_log(mobile / bench.PROBE_LOG)
+    assert q.to_dict("records") == [{"utc_ns": 200, "dev": "rmnet1", "qdisc": "mq", "sent_bytes": 10, "sent_pkts": 2,
+                                     "dropped": 0, "overlimits": 0, "requeues": 5, "backlog_bytes": 300,
+                                     "backlog_pkts": 2}]  # fmt: skip
+    assert r["kind"].tolist() == ["lce"]
+    # the test's own file is used (no bench dir needed); the window filters
+    q, r = bench.load_for_test(tmp_path, None, 150, 250)
+    assert len(q) == 1 and r.empty
+    # no file: falls back to the (absent) bench dir -> empty frames
+    q, r = bench.load_for_test(tmp_path / "other", None, 0, 1)
+    assert q.empty and r.empty

@@ -1,73 +1,41 @@
-"""USB bench collector: modem-side detail the Logger app cannot get, read
-over adb while the phone is plugged into this machine.
+"""Modem-side detail the Logger app cannot read itself, recorded on the phone
+by ``mp-probe`` (probe/): per network device the root-qdisc counters —
+bytes and packets sent, drops, *requeues* (the modem driver refusing a
+packet because the modem stopped its queue: its flow control, the back
+pressure seen in the timing tests) and the backlog waiting in the phone's
+qdisc — plus radio-log events: physical channel configs (every aggregated
+carrier: role, RAT, band, PCI, bandwidth), the modem's link-capacity
+estimates (LCE), data-call and signal-strength indications.
 
-- **qdisc** (``tc -s qdisc show``, ~25 Hz): per network device the bytes and
-  packets sent, drops, *requeues* and the queue backlog. A requeue is the
-  modem driver refusing a packet because the modem stopped its queue — the
-  modem's flow control, i.e. the back pressure seen in the timing tests —
-  and the backlog is what then waits in the phone's qdisc.
-- **radiolog** (``logcat -b radio``): physical channel configs (every
-  aggregated carrier: role, RAT, band, PCI, DL/UL channel, frequency and
-  bandwidth), the modem's link-capacity estimates (LCE), data-call and
-  signal-strength indications.
-
-Both carry the phone's UTC clock (``date +%s%N`` / ``logcat -v epoch``), the
-same clock as the Logger's mobile rows, so they join to tests without an
-offset. Rows go to ``<out>/<YYYY-MM-DD>/{qdisc,radiolog}_<start>.parquet``,
-one segment per ``SEGMENT_S``.
-
-    python -m fieldtest_analysis.bench collect --out ~/mp-data/bench
+The Logger fetches each test's window from mp-probe and uploads it as
+``mobile/probe.jsonl.gz`` (JSON lines; ``k`` = ``q`` qdisc, ``u`` UDP
+counters, ``l`` radio-log line). Tests recorded before that came from the
+retired USB bench collector, ``<bench_dir>/<YYYY-MM-DD>/{qdisc,radiolog}_*.parquet``,
+still read by ``load_window``. Both are on the phone's UTC clock, the same
+clock as the Logger's mobile rows, so they join without an offset.
 """
 
 from __future__ import annotations
 
-import argparse
+import gzip
 import json
 import re
-import subprocess
-import sys
-import threading
 import time
 from pathlib import Path
 
 import pandas as pd
 
+#: Segment length of the retired USB collector's files (for load_window).
 SEGMENT_S = 10.0
-#: Write an unchanged device's counters at least this often (s).
-HEARTBEAT_S = 1.0
+PROBE_LOG = "probe.jsonl.gz"
 
 QDISC_COLUMNS = ["utc_ns", "dev", "qdisc", "sent_bytes", "sent_pkts", "dropped", "overlimits", "requeues",
                  "backlog_bytes", "backlog_pkts"]  # fmt: skip
 RADIOLOG_COLUMNS = ["utc_ns", "kind", "summary", "payload"]
 
-_QHEAD = re.compile(r"^qdisc (\S+) (\S+) dev (\S+) (root|parent \S+)")
-_SENT = re.compile(r"Sent (\d+) bytes (\d+) pkt \(dropped (\d+), overlimits (\d+) requeues (\d+)\)")
-_BACKLOG = re.compile(r"backlog (\d+)([KMG]?)b (\d+)p")
-_UNIT = {"": 1, "K": 1000, "M": 1000**2, "G": 1000**3}
-
-
-def parse_tc(text: str, utc_ns: int) -> list[dict]:
-    """Root qdisc of every device in one ``tc -s qdisc show`` dump."""
-    rows, cur = [], None
-    for line in text.splitlines():
-        m = _QHEAD.match(line.strip())
-        if m:
-            cur = {"utc_ns": utc_ns, "dev": m.group(3), "qdisc": m.group(1)} if m.group(4) == "root" else None
-            continue
-        if cur is None:
-            continue
-        m = _SENT.search(line)
-        if m:
-            cur.update(sent_bytes=int(m.group(1)), sent_pkts=int(m.group(2)), dropped=int(m.group(3)),
-                       overlimits=int(m.group(4)), requeues=int(m.group(5)))  # fmt: skip
-            continue
-        m = _BACKLOG.search(line)
-        if m and "sent_pkts" in cur:
-            cur.update(backlog_bytes=int(m.group(1)) * _UNIT[m.group(2)], backlog_pkts=int(m.group(3)))
-            rows.append(cur)
-            cur = None
-    return rows
-
+#: mp-probe qdisc record keys -> QDISC_COLUMNS
+_Q_KEYS = {"t": "utc_ns", "dev": "dev", "qdisc": "qdisc", "b": "sent_bytes", "p": "sent_pkts", "d": "dropped",
+           "o": "overlimits", "r": "requeues", "bb": "backlog_bytes", "bp": "backlog_pkts"}  # fmt: skip
 
 _LOG_TS = re.compile(r"^\s*(\d+)\.(\d+)\s")
 _PCC = re.compile(r"\{([^{}]*)\}")
@@ -112,101 +80,36 @@ def parse_logcat_line(line: str) -> dict | None:
     return None
 
 
-class _Segments:
-    """Buffers rows and writes a parquet segment every SEGMENT_S."""
-
-    def __init__(self, out: Path, name: str, columns: list[str]):
-        self.out, self.name, self.columns = out, name, columns
-        self.rows: list[dict] = []
-        self.started = time.time()
-        self.lock = threading.Lock()
-
-    def add(self, rows: list[dict]) -> None:
-        with self.lock:
-            self.rows.extend(rows)
-            if time.time() - self.started >= SEGMENT_S:
-                self._flush()
-
-    def _flush(self) -> None:
-        if self.rows:
-            day = time.strftime("%Y-%m-%d", time.localtime(self.rows[0]["utc_ns"] / 1e9))
-            d = self.out / day
-            d.mkdir(parents=True, exist_ok=True)
-            df = pd.DataFrame(self.rows).reindex(columns=self.columns)
-            tmp = d / f".{self.name}_{int(self.started)}.parquet.tmp"
-            df.to_parquet(tmp, index=False)
-            tmp.rename(d / f"{self.name}_{int(self.started)}.parquet")
-        self.rows, self.started = [], time.time()
-
-    def close(self) -> None:
-        with self.lock:
-            self._flush()
-
-
-def _qdisc_loop(seg: _Segments, adb: list[str], stop: threading.Event) -> None:
-    script = 'while :; do echo "@T $(date +%s%N)"; tc -s qdisc show; done'
-    p = subprocess.Popen([*adb, "exec-out", "sh", "-c", script], stdout=subprocess.PIPE, text=True)
-    last: dict[str, tuple] = {}
-    buf, ts = [], None
+def read_probe_log(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """mp-probe records (``probe.jsonl.gz``) as (qdisc, radiolog) frames. A
+    line cut off by an interrupted fetch is skipped."""
+    q, r = [], []
     try:
-        for line in p.stdout:
-            if stop.is_set():
-                break
-            if line.startswith("@T "):
-                if ts is not None:
-                    keep = []
-                    for r in parse_tc("".join(buf), ts):
-                        # modem and Wi-Fi links that carry traffic only
-                        if not r["dev"].startswith(("rmnet", "wlan")) or r["sent_pkts"] == 0:
-                            continue
-                        key = (r["sent_pkts"], r["requeues"], r["dropped"], r["backlog_pkts"])
-                        prev = last.get(r["dev"])
-                        if prev is None or prev[0] != key or (ts - prev[1]) / 1e9 >= HEARTBEAT_S:
-                            keep.append(r)
-                            last[r["dev"]] = (key, ts)
-                    seg.add(keep)
-                ts, buf = int(line[3:].strip()), []
-            else:
-                buf.append(line)
-    finally:
-        p.terminate()
+        with gzip.open(path, "rt", errors="replace") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("k") == "q":
+                    q.append({col: rec.get(key) for key, col in _Q_KEYS.items()})
+                elif rec.get("k") == "l":
+                    row = parse_logcat_line(rec.get("line", ""))
+                    if row:
+                        r.append(row)
+    except (OSError, EOFError):
+        pass  # truncated gzip: keep what was read
+    return pd.DataFrame(q, columns=QDISC_COLUMNS), pd.DataFrame(r, columns=RADIOLOG_COLUMNS)
 
 
-def _logcat_loop(seg: _Segments, adb: list[str], stop: threading.Event) -> None:
-    p = subprocess.Popen([*adb, "logcat", "-b", "radio", "-v", "epoch", "-T", "1"], stdout=subprocess.PIPE,
-                         text=True, errors="replace")  # fmt: skip
-    try:
-        for line in p.stdout:
-            if stop.is_set():
-                break
-            r = parse_logcat_line(line)
-            if r:
-                seg.add([r])
-    finally:
-        p.terminate()
-
-
-def collect(out: Path, serial: str | None = None, duration_s: float | None = None) -> None:
-    """Run both collectors until the phone disconnects (adb exits), a
-    duration elapses or the process is stopped; flushes on exit."""
-    adb = ["adb", *(["-s", serial] if serial else [])]
-    q = _Segments(out, "qdisc", QDISC_COLUMNS)
-    r = _Segments(out, "radiolog", RADIOLOG_COLUMNS)
-    stop = threading.Event()
-    threads = [threading.Thread(target=_qdisc_loop, args=(q, adb, stop), daemon=True),
-               threading.Thread(target=_logcat_loop, args=(r, adb, stop), daemon=True)]  # fmt: skip
-    for t in threads:
-        t.start()
-    t_end = time.time() + duration_s if duration_s else None
-    try:
-        while all(t.is_alive() for t in threads) and (t_end is None or time.time() < t_end):
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        stop.set()
-        q.close()
-        r.close()
+def load_for_test(test_dir: Path, bench_dir: Path | None, t0_ns: int, t1_ns: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The test's mp-probe records between t0 and t1, or — for tests recorded
+    before they were uploaded with the test — the USB bench files."""
+    path = Path(test_dir) / "mobile" / PROBE_LOG
+    if not path.exists():
+        return load_window(bench_dir, t0_ns, t1_ns)
+    q, r = read_probe_log(path)
+    return q[(q["utc_ns"] >= t0_ns) & (q["utc_ns"] <= t1_ns)], r[(r["utc_ns"] >= t0_ns) & (r["utc_ns"] <= t1_ns)]
 
 
 def load_window(bench_dir: Path | None, t0_ns: int, t1_ns: int) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -227,20 +130,3 @@ def load_window(bench_dir: Path | None, t0_ns: int, t1_ns: int) -> tuple[pd.Data
                 parts.append(df[(df["utc_ns"] >= t0_ns) & (df["utc_ns"] <= t1_ns)])
         out.append(pd.concat(parts, ignore_index=True) if parts else empty[len(out)])
     return out[0], out[1]
-
-
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="fieldtest-bench", description=__doc__.split("\n\n")[0])
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    c = sub.add_parser("collect")
-    c.add_argument("--out", required=True)
-    c.add_argument("--serial")
-    c.add_argument("--duration", type=float)
-    args = ap.parse_args(argv)
-    if args.cmd == "collect":
-        collect(Path(args.out).expanduser(), args.serial, args.duration)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

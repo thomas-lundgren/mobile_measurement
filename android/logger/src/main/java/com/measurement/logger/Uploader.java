@@ -41,6 +41,8 @@ final class Uploader {
     /** Session of the connected worker; null while reconnecting (we wait). */
     private volatile String session;
     private volatile boolean measuring;
+    /** Retry at once, with the backoff reset (the network changed). */
+    private volatile boolean retryNow;
     private Thread thread;
 
     Uploader(File filesDir, String server, Consumer<String> report) {
@@ -76,6 +78,13 @@ final class Uploader {
         if (!measuring) {
             wake();
         }
+    }
+
+    /** The default network changed: whatever held or failed the last upload
+     *  may be gone, so retry now instead of after the backoff. */
+    void networkChanged() {
+        retryNow = true;
+        wake();
     }
 
     /** Durably queue a sealed test for upload. */
@@ -139,6 +148,10 @@ final class Uploader {
         long backoff = UPLOAD_BACKOFF_MIN_MS;
         while (running) {
             try {
+                if (retryNow) {
+                    retryNow = false;
+                    backoff = UPLOAD_BACKOFF_MIN_MS;
+                }
                 List<File> pending = pendingMarkers();
                 String s = session;
                 if (pending.isEmpty() || s == null || measuring) {
@@ -163,9 +176,14 @@ final class Uploader {
                 // a test started: wait for it (its seal wakes us), no backoff
             } catch (Throwable e) {
                 // Any failure (no coverage, timeout, expired session, server
-                // down): keep the marker and retry later.
+                // down, upload held until home): keep the marker and retry
+                // later — sooner if the network changes.
                 try {
-                    Thread.sleep(backoff);
+                    synchronized (signal) {
+                        if (!retryNow) {
+                            signal.wait(backoff);
+                        }
+                    }
                 } catch (InterruptedException ie) {
                     return;
                 }

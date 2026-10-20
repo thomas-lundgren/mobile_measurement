@@ -21,7 +21,7 @@ has the history; the design documents are still authoritative:
 | `probe/` | `mp-probe`, adb-started on-phone collector (modem qdisc, UDP counters, radio log) on 127.0.0.1:47600 |
 | `analysis/` | Python package `fieldtest_analysis` (loader, metrics, series/findings for the pages, app/timing/spectral) |
 | `contracts/` | Single source of truth: JSON schemas, OpenAPI, Parquet YAML, packet docs, golden vectors, versions |
-| `scripts/` | `viz_rebuild.sh` (cron page data), `fieldtest/` (cycle scripts on `lib.sh`, commute watcher, bench collector) |
+| `scripts/` | `viz_rebuild.sh` (cron page data), `fieldtest/` (cycle scripts on `lib.sh`, commute watcher) |
 
 ### Commands
 

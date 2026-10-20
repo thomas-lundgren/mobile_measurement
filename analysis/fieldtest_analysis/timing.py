@@ -197,7 +197,7 @@ def summarize(td: TestData, plan_flows: dict[int, dict] | None = None, bench_dir
     mob = pd.to_numeric(pk.loc[pk["node"] == "mobile", "utc_ns"], errors="coerce").dropna()
     qdisc = radiolog = None
     if bench_dir is not None and len(mob):
-        qdisc, radiolog = bench.load_window(bench_dir, int(mob.min()) - 5_000_000_000, int(mob.max()) + 5_000_000_000)
+        qdisc, radiolog = bench.load_for_test(td.path, bench_dir, int(mob.min()) - 5_000_000_000, int(mob.max()) + 5_000_000_000)
     for e in delivery.analyze(td):
         sender_node = "mobile" if e["direction"] == "uplink" else "server"
         sent = pk[(pk["node"] == sender_node) & (pk["flow_id"] == e["flow_id"]) & (pk["direction"] == "SENT")]
