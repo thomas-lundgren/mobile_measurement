@@ -577,7 +577,7 @@ impl endpoint::DatagramIn for UeIn {
 /// Log rows:
 /// - SENT: `dscp_sent = dscp_intended_ul`, `dscp_recv = None`
 /// - RECEIVED: `dscp_sent = dscp_intended_dl` (server's intended DL DSCP),
-///             `dscp_recv = dscp_actual_dl` (TOS observed on arriving echo)
+///   `dscp_recv = dscp_actual_dl` (TOS observed on arriving echo)
 fn dscp_probe_ue(
     socket: UdpSocket,
     mut sink: LogSink,

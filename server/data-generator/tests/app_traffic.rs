@@ -157,9 +157,9 @@ async fn scripted_user_downloads_and_uploads_objects() {
             let last_sent = of
                 .iter()
                 .filter(|r| r.direction == Direction::Sent)
-                .map(|r| t(&r))
+                .map(t)
                 .fold(0.0, f64::max);
-            let (first, last) = (t(&got[0]), t(got.last().unwrap()));
+            let (first, last) = (t(got[0]), t(got.last().unwrap()));
             assert!(
                 first - last_sent >= 290.0,
                 "time to first token {}",

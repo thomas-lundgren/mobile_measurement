@@ -357,7 +357,10 @@ mod tests {
     fn small_send_buffer_is_applied_and_outq_readable() {
         let tx = UdpSocket::bind("127.0.0.1:0").unwrap();
         let eff = limit_send_buffer(tx.as_raw_fd(), 4096).unwrap();
-        assert!(eff >= 4096 && eff <= 3 * 4096, "effective SO_SNDBUF {eff}");
+        assert!(
+            (4096..=3 * 4096).contains(&eff),
+            "effective SO_SNDBUF {eff}"
+        );
         assert_eq!(outq_bytes(tx.as_raw_fd()), Some(0));
     }
 
