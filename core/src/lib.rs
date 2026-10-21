@@ -67,7 +67,7 @@ impl RustCore {
             device_id: cfg.device_id.clone(),
             session_id: cfg.session_id.clone(),
             test_id: cfg.test_id.clone(),
-            node: "mobile".to_string(),
+            node: crate::log_writer::NODE_MOBILE.to_string(),
         };
         let engine = UeEngine::start(cfg).map_err(|e| format!("start failed: {e}"))?;
         *self.engine.lock().unwrap() = Some(engine);
@@ -128,13 +128,21 @@ impl RustCore {
     /// Stop the test, seal Parquet (packets via the engine; gps/clock here),
     /// return per-flow summaries as JSON. Safe to call when idle (`[]`).
     pub fn stop_test(&self) -> String {
-        let summary = match self.engine.lock().unwrap().take() {
-            Some(e) => serde_json::to_string(&e.stop()).unwrap_or_else(|_| "[]".into()),
-            None => "[]".into(),
+        let flows = match self.engine.lock().unwrap().take() {
+            Some(e) => e.stop(),
+            None => Vec::new(),
         };
+        let summary = serde_json::to_string(&flows).unwrap_or_else(|_| "[]".into());
         let sess = self.session.lock().unwrap().take();
         let dirs = self.dirs.lock().unwrap().clone();
         if let (Some(s), Some((mobile, root))) = (sess, dirs) {
+            let drops: Vec<_> = flows
+                .iter()
+                .filter_map(|f| aux_log::dropped_rows_event(f.flow_id, f.dropped_rows))
+                .collect();
+            if !drops.is_empty() {
+                let _ = aux_log::write_events(&mobile.join("events.parquet"), &s.ctx, &drops);
+            }
             if !s.gps.is_empty() {
                 let _ = aux_log::write_gps(&root.join("gps.parquet"), &s.ctx, &s.gps);
             }
@@ -157,7 +165,9 @@ impl RustCore {
             if let Ok(rd) = std::fs::read_dir(&mobile) {
                 for e in rd.flatten() {
                     let name = e.file_name().to_string_lossy().to_string();
-                    if (name.starts_with("packets") || name == "clock.parquet")
+                    if (name.starts_with("packets")
+                        || name == "clock.parquet"
+                        || name == "events.parquet")
                         && name.ends_with(".parquet")
                     {
                         files.push(e.path().to_string_lossy().to_string());

@@ -1,4 +1,5 @@
-"""Per-test summary (spec §12.8) assembled from the metrics + derived events."""
+"""Per-test summary (spec §12.8: an analysis product; the nodes write none)
+assembled from the metrics + derived events."""
 
 from __future__ import annotations
 

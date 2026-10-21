@@ -279,7 +279,7 @@ Run it against an uploaded test directory (see §7.7 for where those are):
 .venv/bin/python -m fieldtest_analysis <test_dir> -o summary.json --plots out/
 ```
 
-- `summary.json` (spec §12.8): RTT / OWD (offset-corrected, up+down) / jitter /
+- `summary.json` (the analysis summary, spec §12.8): RTT / OWD (offset-corrected, up+down) / jitter /
   per-flow loss / radio stats / GPS endpoints / derived events.
 - `out/*.png`: RTT-over-time, OWD-over-time, jitter, serving-RSRP, GPS route,
   and an RTT-vs-RSRP correlation (only the applicable plots are written).

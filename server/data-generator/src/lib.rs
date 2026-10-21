@@ -15,7 +15,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use fieldtest_core::aux_log::{write_events, AuxContext, EventRow};
+use fieldtest_core::aux_log::{dropped_rows_event, write_events, AuxContext, EventRow};
 use fieldtest_core::log_writer::{packet_channel, spawn_packet_writer, LogContext, SEGMENT_ROWS};
 use mp_contracts::{
     Flow, GeneratorCounters, GeneratorState, InternalGeneratorPrepare, InternalGeneratorStatus,
@@ -89,7 +89,7 @@ async fn prepare(
         device_id: req.device_id.clone(),
         session_id: req.session_id.clone(),
         test_id: req.test_id.clone(),
-        node: "server".to_string(),
+        node: fieldtest_core::log_writer::NODE_SERVER.to_string(),
     };
     let (sink, rx, dropped) = packet_channel(RING_CAPACITY);
     // One writer per flow into the shared server/ dir → flow-scoped filename
@@ -233,7 +233,7 @@ async fn prepare(
             device_id: req.device_id.clone(),
             session_id: req.session_id.clone(),
             test_id: req.test_id.clone(),
-            node: "server".to_string(),
+            node: fieldtest_core::log_writer::NODE_SERVER.to_string(),
         },
         protocol,
         test_id: req.test_id,
@@ -278,8 +278,22 @@ async fn stop(
         // flow thread finalizes the writer; brief blocking join is acceptable.
         let _ = tokio::task::spawn_blocking(move || h.join()).await;
     }
+    write_dropped_event(&e);
     write_peer_event(&e);
     Ok(Json(status_of(&generator_id, &e)))
+}
+
+/// ERROR event if this flow's log ring dropped rows (logger_sink.md).
+fn write_dropped_event(e: &GeneratorEntry) {
+    let Some(row) = dropped_rows_event(e.flow_id, e.dropped.load(Ordering::Relaxed)) else {
+        return;
+    };
+    let path = e
+        .log_dir
+        .join(format!("events_f{}_dropped.parquet", e.flow_id));
+    if let Err(err) = write_events(&path, &e.log_ctx, &[row]) {
+        tracing::warn!(flow_id = e.flow_id, %err, "could not write the dropped-rows event");
+    }
 }
 
 /// CLIENT_CONNECTED with the UE's address as the server saw it (after NAT),

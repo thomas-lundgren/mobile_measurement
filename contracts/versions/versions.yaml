@@ -8,7 +8,7 @@
 #                             control-plane wire (REST DTOs, command shape,
 #                             state-machine event names).
 #   schema_version          — bump on any non-additive change to the log
-#                             schemas (header.json, summary.json, parquet
+#                             schemas (header.json, parquet
 #                             columns). Additive changes (new optional
 #                             column, new enum variant) do NOT bump.
 #   logging_config_version  — server-managed monotonic counter, bumped each

@@ -33,6 +33,10 @@ pub struct LogContext {
     pub node: String, // "mobile" | "server"
 }
 
+/// `node` values (`enums.yaml` log_nodes); also the per-node folder names.
+pub const NODE_MOBILE: &str = "mobile";
+pub const NODE_SERVER: &str = "server";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     Sent,
@@ -482,8 +486,8 @@ impl LogSink {
         }
     }
 
-    /// Rows dropped to overflow so far. Surfaced in summary.json + an ERROR
-    /// event; a non-zero value marks the test PARTIAL.
+    /// Rows dropped to overflow so far. Surfaced as an ERROR event at stop
+    /// (`aux_log::dropped_rows_event`); a non-zero value marks the test PARTIAL.
     pub fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
     }
@@ -597,6 +601,43 @@ pub fn spawn_packet_writer_multi(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn contract_list(key: &str) -> Vec<String> {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../contracts/enums/enums.yaml");
+        let doc: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        doc[key]
+            .as_sequence()
+            .unwrap_or_else(|| panic!("enums.yaml {key}"))
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// The strings the writers log are `enums.yaml`'s, in order.
+    #[test]
+    fn logged_values_match_the_contract() {
+        assert_eq!(contract_list("log_nodes"), [NODE_MOBILE, NODE_SERVER]);
+        assert_eq!(
+            contract_list("packet_directions"),
+            [Direction::Sent.as_str(), Direction::Received.as_str()]
+        );
+        assert_eq!(
+            contract_list("packet_protocols"),
+            [Protocol::Udp.as_str(), Protocol::Tcp.as_str()]
+        );
+        use crate::udp_timing::SendStatus;
+        assert_eq!(
+            contract_list("send_statuses"),
+            [
+                SendStatus::Ok,
+                SendStatus::Eagain,
+                SendStatus::Enobufs,
+                SendStatus::Error
+            ]
+            .map(SendStatus::as_str)
+        );
+    }
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
     fn ctx() -> LogContext {

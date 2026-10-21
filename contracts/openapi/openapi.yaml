@@ -369,7 +369,7 @@ paths:
         '404':
           description: ''
         '503':
-          description: Upload held (device not on the local network); retry later
+          description: Upload held (device not on the local network) and every base file is already stored; retry after a network change
   /api/v1/tests/{test_id}/upload/{upload_id}/complete:
     post:
       tags:

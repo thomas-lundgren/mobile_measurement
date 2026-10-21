@@ -129,7 +129,12 @@ EVENTS = [
     "event_metadata",
 ]
 
-# Sent/received discriminator and protocol/connection wire values.
+# Logged values (contracts/enums/enums.yaml; tests/test_schema_contract.py).
+NODE_MOBILE = "mobile"
+NODE_SERVER = "server"
 DIR_SENT = "SENT"
 DIR_RECEIVED = "RECEIVED"
 PROTO_UDP = "UDP"
+PROTO_TCP = "TCP"
+#: radio.parquet transport for a Wi-Fi link (OpenAPI NetworkTransport).
+TRANSPORT_WIFI = "WIFI"

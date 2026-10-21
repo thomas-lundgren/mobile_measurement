@@ -67,6 +67,7 @@ CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 def test_qdisc_keys_are_the_contracts():
     spec = yaml.safe_load((CONTRACTS / "internal" / "mp_probe.yaml").read_text())
     assert set(bench._Q_KEYS) == set(spec["records"]["q"]["keys"]) - {"k"}
+    assert bench.PROBE_LOG == spec["test_file"]
 
 
 def test_contract_sample_records_load(tmp_path):

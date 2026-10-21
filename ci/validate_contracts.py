@@ -75,7 +75,7 @@ def check_json_examples(reg, schemas):
     # log header/summary
     for fname, key, schema in [
         ("log/header_examples.json", "header", "header.schema.json"),
-        ("log/summary_examples.json", "summary", "summary.schema.json"),
+        ("core/stop_summary_examples.json", "summary", "core_stop_summary.schema.json"),
     ]:
         doc = json.load(open(tv / fname))
         for ex in doc["examples"]:
@@ -185,6 +185,24 @@ def check_schema_parity():
         failures.extend(f"{name}: {d}" for d in out)
 
 
+def check_upload_paths():
+    """testvectors/upload/paths.json against the manifest schema's path pattern
+    (the server's valid_upload_path is tested against the same vectors)."""
+    import re
+
+    schema = json.load(open(CONTRACTS / "schemas" / "upload_manifest.schema.json"))
+    source = schema["$defs"]["ManifestFile"]["properties"]["path"]["pattern"]
+    # JSON Schema patterns are ECMA-262: "$" never matches before a final "\n"
+    pattern = re.compile(source[:-1] + r"\Z" if source.endswith("$") else source)
+    doc = json.load(open(CONTRACTS / "testvectors" / "upload" / "paths.json"))
+    for want, paths in ((True, doc["valid"]), (False, doc["invalid"])):
+        for p in paths:
+            ok = (pattern.search(p) is not None) == want
+            print(f"  paths.json:{p!r:44s} {'OK' if ok else 'FAIL'}")
+            if not ok:
+                failures.append(f"paths.json: {p!r} should be {'valid' if want else 'invalid'}")
+
+
 def check_time_sync_vectors():
     """contracts/packets/time_sync.md: reply = nonce (8, zero-padded) ++ t2 ++ t3 (i64 BE)."""
     doc = json.load(open(CONTRACTS / "testvectors" / "packets" / "time_sync_v1.json"))
@@ -204,6 +222,8 @@ def main():
     print("Packet golden vectors:")
     check_packet_vectors()
     check_time_sync_vectors()
+    print("Upload paths:")
+    check_upload_paths()
     print("JSON Schema vs Rust types (generated OpenAPI):")
     check_schema_parity()
     if failures:

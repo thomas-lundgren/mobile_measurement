@@ -164,7 +164,7 @@ event_type_provenance:
 
 # ---------------------------------------------------------------------------
 # Test result terminal states (remediation M4b). Reported on the
-# test-summary endpoint and recorded in summary.json.
+# upload manifest (test_result) and the test-summary endpoint.
 # ---------------------------------------------------------------------------
 test_results:
   - COMPLETED     # ran to scheduled end
@@ -208,6 +208,52 @@ clock_sources:
   - ntp          # an NTP server
   - chrony       # the host's chrony estimate (server node)
   - system       # the OS clock, unverified
+
+# ---------------------------------------------------------------------------
+# Log value sets written by the core (both nodes).
+# ---------------------------------------------------------------------------
+log_nodes:            # `node` column of every table; also the per-node folder name
+  - mobile
+  - server
+packet_directions:    # packets.parquet direction
+  - SENT
+  - RECEIVED
+packet_protocols:     # packets.parquet protocol
+  - UDP
+  - TCP
+send_statuses:        # packets.parquet send_status (SENT rows)
+  - OK                # handed to the kernel
+  - EAGAIN            # socket send buffer full: back pressure, dropped locally
+  - ENOBUFS           # dropped by the qdisc / driver queue
+  - ERROR             # any other error; not sent
+
+# ---------------------------------------------------------------------------
+# radio.parquet value sets (written by the Logger, read by the analysis).
+# ---------------------------------------------------------------------------
+# network_type: the radio mode the phone reports (TelephonyDisplayInfo
+# override type, else the network type). Any other TelephonyManager network
+# type is written as OTHER_<n>.
+radio_network_types:
+  - LTE
+  - LTE_CA             # carrier aggregation
+  - LTE_ADVANCED_PRO
+  - NR_NSA             # 5G anchored on LTE
+  - NR_ADVANCED        # 5G NSA with mmWave / high capacity
+  - NR_SA              # 5G standalone
+
+# cell_connection_status of the serving cell row (null when unknown).
+cell_connection_statuses:
+  - PRIMARY
+  - SECONDARY
+
+# wifi_standard of the Wi-Fi link (ScanResult.WIFI_STANDARD_*).
+wifi_standards:
+  - 802.11a/b/g
+  - 802.11n
+  - 802.11ac
+  - 802.11ax
+  - 802.11ad
+  - 802.11be
 
 # ---------------------------------------------------------------------------
 # App-traffic activity — what an app_traffic object is for. Carried as a u8

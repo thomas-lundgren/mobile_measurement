@@ -21,7 +21,7 @@ session_<date>/test_NNN/
     packets.parquet
     events.parquet
     clock.parquet
-    summary.json
+    probe.jsonl.gz       # mp-probe records, when it runs
 ```
 
 The mobile uploads exactly these files. The Parquet tables are written
@@ -58,6 +58,26 @@ the resume mechanism (file granularity).
 
 `POST /summary` is **idempotent**: re-posting the same manifest for the same
 `test_id` returns the same `upload_id` and a recomputed `needed_paths`.
+
+### Held uploads (away from the home network)
+
+A server started with `MP_UPLOAD_HOLD` holds a device's uploads while the
+device is not on the server's local network (and has enough free storage).
+A held upload still takes the test's **base files** — `header.json`,
+`gps.parquet`, `radio.parquet`, `mobile/clock*.parquet`,
+`mobile/events*.parquet` (`testvectors/upload/paths.json` `base`;
+server-main `uploads::is_base_path`) — so every test shows its route and
+radio on the server at once:
+
+1. `POST /summary` → `200` with `needed_paths` = the base files it still
+   lacks, or `503` when it has them all (nothing more is taken while away).
+2. The device PUTs those files.
+3. `POST /complete` → `409` (the rest is missing): the test stays pending on
+   the device.
+
+The device treats `503` on the summary and `409` on complete as **held**:
+it moves on to its next pending test, and retries the held ones after a
+network change (home Wi-Fi lifts the hold), not on a short backoff.
 Posting it is also how the device reports a test result with **no files**
 (e.g. a `FAILED` test that produced nothing): manifest `files` is empty.
 
@@ -113,7 +133,7 @@ outstanding `needed_paths`; the client returns to Phase 2.
 - `identity` — **default for `*.parquet`**. Parquet is already zstd-
   compressed internally (`core/log_writer.rs`); re-compressing the file
   wastes CPU for ~no gain.
-- `zstd` — allowed for `*.json` (`header.json`, `summary.json`), which are
+- `zstd` — allowed for `*.json` (`header.json`), which are
   small and compress well. Optional; `identity` is always acceptable.
 
 The SHA-256 in the manifest is over the **stored (post-encoding) bytes** —

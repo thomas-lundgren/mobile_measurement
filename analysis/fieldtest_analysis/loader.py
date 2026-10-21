@@ -6,8 +6,8 @@ A test directory looks like::
       header.json            # optional
       gps.parquet            # mobile only, optional
       radio.parquet          # mobile only, optional
-      mobile/  { packets, events, clock }.parquet  (+ summary.json)
-      server/  { packets, events, clock }.parquet  (+ summary.json)
+      mobile/  { packets, events, clock }.parquet  (+ probe.jsonl.gz)
+      server/  { packets, events, clock }.parquet
 
 Everything is optional: a mobile-only upload (no ``server/``, no ``clock``,
 no ``header``) loads fine; per-node ``packets.parquet`` may be **segmented**

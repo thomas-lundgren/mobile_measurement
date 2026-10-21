@@ -260,7 +260,7 @@ public final class LoggerService extends Service {
                 String deviceId = enrollIfNeeded(client, prefs, token);
                 String session = authenticate(client, deviceId);
                 JSONObject cfg = client.register(session, Wire.capability());
-                loggingConfigVersion = cfg.optInt("version", 1);
+                loggingConfigVersion = cfg.optInt(Contract.Fields.LoggingConfig.VERSION, 1);
                 loggingConfig = cfg;
 
                 setState(Contract.LoggerStates.IDLE);
@@ -291,7 +291,7 @@ public final class LoggerService extends Service {
         long lastStatus = 0;
         while (running) {
             JSONObject cmd = client.pollCommand(session, deviceId);
-            String command = cmd != null ? cmd.optString("command") : "";
+            String command = cmd != null ? cmd.optString(Contract.Fields.DeviceCommand.COMMAND) : "";
             if (Contract.Commands.RUN_TEST.equals(command)) {
                 runTest(client, session, deviceId, cmd);
             } else if (Contract.Commands.SET_LOGGING_CONFIG.equals(command)) {
@@ -315,12 +315,12 @@ public final class LoggerService extends Service {
      *  logging, invariant 3). */
     private void applyLoggingConfig(ServerClient client, String session, String deviceId, JSONObject cmd)
             throws Exception {
-        JSONObject payload = cmd.optJSONObject("payload");
+        JSONObject payload = cmd.optJSONObject(Contract.Fields.DeviceCommand.PAYLOAD);
         if (payload != null) {
-            loggingConfigVersion = payload.optInt("version", loggingConfigVersion);
+            loggingConfigVersion = payload.optInt(Contract.Fields.LoggingConfig.VERSION, loggingConfigVersion);
             loggingConfig = payload; // retained for the next test
         }
-        client.ackCommand(session, deviceId, cmd.getLong("command_id"));
+        client.ackCommand(session, deviceId, cmd.getLong(Contract.Fields.DeviceCommand.COMMAND_ID));
         setState("CONFIG_UPDATED v" + loggingConfigVersion);
     }
 
@@ -332,7 +332,7 @@ public final class LoggerService extends Service {
         JSONObject body = Wire.enroll(KeystoreSigner.publicKeySpkiB64(),
                 android.os.Build.MODEL, android.os.Build.MANUFACTURER, android.os.Build.VERSION.RELEASE);
         JSONObject resp = client.enroll(token == null ? "" : token, body);
-        String deviceId = resp.getString("device_id");
+        String deviceId = resp.getString(Contract.Fields.EnrollResponse.DEVICE_ID);
         prefs.edit().putString("device_id", deviceId).apply();
         return deviceId;
     }
@@ -340,8 +340,10 @@ public final class LoggerService extends Service {
     private String authenticate(ServerClient client, String deviceId) throws Exception {
         JSONObject c = client.challenge(deviceId);
         String sig = KeystoreSigner.signChallengeB64(
-                c.getString("server_id"), c.getString("challenge_id"), c.getString("nonce"));
-        return client.verify(c.getString("challenge_id"), sig).getString("session_token");
+                c.getString(Contract.Fields.ChallengeResponse.SERVER_ID), c.getString(Contract.Fields.ChallengeResponse.CHALLENGE_ID),
+                c.getString(Contract.Fields.ChallengeResponse.NONCE));
+        return client.verify(c.getString(Contract.Fields.ChallengeResponse.CHALLENGE_ID), sig)
+                .getString(Contract.Fields.VerifyResponse.SESSION_TOKEN);
     }
 
     /** Refuse to start below this much free space — logging-first means a full
@@ -349,10 +351,10 @@ public final class LoggerService extends Service {
     private static final long MIN_FREE_BYTES = 200L * 1024 * 1024;
 
     private void runTest(ServerClient client, String session, String deviceId, JSONObject cmd) throws Exception {
-        JSONObject payload = cmd.getJSONObject("payload");
-        String testId = payload.getString("test_id");
-        String sessionId = payload.getString("session_id");
-        long commandId = cmd.getLong("command_id");
+        JSONObject payload = cmd.getJSONObject(Contract.Fields.DeviceCommand.PAYLOAD);
+        String testId = payload.getString(Contract.Fields.RunTestPayload.TEST_ID);
+        String sessionId = payload.getString(Contract.Fields.RunTestPayload.SESSION_ID);
+        long commandId = cmd.getLong(Contract.Fields.DeviceCommand.COMMAND_ID);
 
         // Delivery is at-least-once: a RUN_TEST comes back if its ack was lost
         // or the app died mid-test. Never run a test twice — just re-ack.
@@ -415,7 +417,7 @@ public final class LoggerService extends Service {
         clock.start();
 
         setState(Contract.LoggerStates.RUNNING_TEST + " " + testId);
-        int durationSec = payload.getJSONObject("test_plan").optInt("duration_sec", 30);
+        int durationSec = payload.getJSONObject(Contract.Fields.RunTestPayload.TEST_PLAN).optInt(Contract.Fields.TestPlan.DURATION_SEC, 30);
         MpProbe.fast(durationSec + 30);
         long startUtcNs = Clock.now()[1];
         PowerManager.WakeLock screen = screenOnDuringTest();
@@ -433,18 +435,18 @@ public final class LoggerService extends Service {
             radio.stop();
             clock.stop();
             MpProbe.fast(0);
-            RustCore.stopTest(h);
+            String testResult = Wire.testResult(RustCore.stopTest(h));
             JSONArray sealed = new JSONArray(RustCore.sealedFiles(h));
             if (header != null) {
                 sealed.put(header.getAbsolutePath());
             }
-            File probeLog = MpProbe.fetch(new File(mobileDir, "probe.jsonl.gz"),
+            File probeLog = MpProbe.fetch(new File(mobileDir, Contract.MpProbe.TEST_FILE),
                     startUtcNs - 5_000_000_000L, Clock.now()[1] + 1_000_000_000L);
             if (probeLog != null) {
                 sealed.put(probeLog.getAbsolutePath());
             }
             RustCore.destroy(h);
-            uploads.queue(testRoot, testId, sealed);
+            uploads.queue(testRoot, testId, sealed, testResult);
             uploads.setMeasuring(false);
         }
 
@@ -464,7 +466,7 @@ public final class LoggerService extends Service {
     private File writeHeader(File testRoot, JSONObject payload, String deviceId) {
         try {
             long[] t = Clock.now();
-            JSONObject loggingCfg = payload.optJSONObject("logging_config_override");
+            JSONObject loggingCfg = payload.optJSONObject(Contract.Fields.RunTestPayload.LOGGING_CONFIG_OVERRIDE);
             if (loggingCfg == null) {
                 loggingCfg = loggingConfig != null ? loggingConfig : new JSONObject();
             }

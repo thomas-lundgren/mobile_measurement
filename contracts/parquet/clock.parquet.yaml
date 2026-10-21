@@ -13,7 +13,7 @@ join_columns:
   - { name: device_id,  type: utf8, nullable: false }
   - { name: session_id, type: utf8, nullable: false }
   - { name: test_id,    type: utf8, nullable: false }
-  - { name: node,       type: utf8, nullable: false, doc: "mobile | server." }
+  - { name: node,       type: utf8, nullable: false, doc: "enums.yaml log_nodes (mobile | server)." }
 
 columns:
   - { name: mono_ns, type: uint64, nullable: false }

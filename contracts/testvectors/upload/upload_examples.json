@@ -14,7 +14,7 @@
           { "path": "mobile/packets.parquet", "size_bytes": 220190, "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "encoding": "identity" },
           { "path": "mobile/events.parquet", "size_bytes": 1204, "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "encoding": "identity" },
           { "path": "mobile/clock.parquet", "size_bytes": 3320, "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "encoding": "identity" },
-          { "path": "mobile/summary.json", "size_bytes": 988, "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "encoding": "zstd" }
+          { "path": "mobile/probe.jsonl.gz", "size_bytes": 988, "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "encoding": "identity" }
         ]
       },
       "init_response": {
@@ -22,7 +22,7 @@
         "needed_paths": [
           "header.json", "gps.parquet", "radio.parquet",
           "mobile/packets.parquet", "mobile/events.parquet",
-          "mobile/clock.parquet", "mobile/summary.json"
+          "mobile/clock.parquet", "mobile/probe.jsonl.gz"
         ]
       }
     },
@@ -39,13 +39,13 @@
           { "path": "mobile/packets.parquet", "size_bytes": 220190, "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "encoding": "identity" },
           { "path": "mobile/events.parquet", "size_bytes": 1204, "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "encoding": "identity" },
           { "path": "mobile/clock.parquet", "size_bytes": 3320, "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "encoding": "identity" },
-          { "path": "mobile/summary.json", "size_bytes": 988, "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "encoding": "zstd" }
+          { "path": "mobile/probe.jsonl.gz", "size_bytes": 988, "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "encoding": "identity" }
         ]
       },
       "init_response": {
         "upload_id": "upl_01HZ8R9F0J2YK3P5Q7S9V1W3X5",
         "needed_paths": [
-          "mobile/packets.parquet", "mobile/clock.parquet", "mobile/summary.json"
+          "mobile/packets.parquet", "mobile/clock.parquet", "mobile/probe.jsonl.gz"
         ]
       }
     },

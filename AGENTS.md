@@ -199,17 +199,18 @@ When you add or change such a value:
 | all of the above, for the Logger | `Contract.java`, **generated** by `contracts/codegen/java_contract.py`: versions, enums, REST paths, row keys, mp-probe | `java_contract.py --check`; Logger JVM tests (`android/logger/src/test`) validate every body it sends against the schemas |
 | RUN_TEST flows → core | the Logger passes each flow whole (`Wire.ueConfig`) | `core/tests/test_plan_contract.rs`: the core reads every field of every example, and the examples use every flow property |
 | `packets/time_sync.md` + vectors | server-main `time_sync.rs`, Logger `ClockSampler` | golden tests on both sides |
+| `packets/reach.md` + `reach_v1.json` | server-main `reach.rs`, Logger `ReachabilityChecker` | golden tests on both sides |
+| `schemas/core_stop_summary.schema.json` | core `FlowSummary` → Logger (`Wire.testResult`) | `ue::flow_summary_matches_the_contract`; Logger JVM tests |
+| logged value sets (`enums.yaml` log_nodes, packet_directions, packet_protocols, send_statuses, radio_network_types, …) | core writers, Logger `Contract`, analysis `schema.py` / `findings.py` | `log_writer::logged_values_match_the_contract`; `test_schema_contract.py` |
 | `internal/mp_probe.yaml` + `testvectors/mp_probe/` | `probe/` (Rust), Logger `MpProbe`, `analysis` `bench.py` | probe tests, Logger JVM tests, `test_bench.py` |
 
-The Logger builds every JSON body it sends in `Wire.java` from `Contract` constants — never inline a wire string or key elsewhere.
+In the Logger, wire values and the keys it reads come from the generated `Contract` (including `Contract.Fields.<Type>` for OpenAPI and schema-only types); every JSON body it sends is built in `Wire.java` — never inline a wire string elsewhere.
 
 New fields in a JSON body need an example in `contracts/testvectors/` that uses them, because the shape check compares names and enum values, not bounds.
 
 **Still unchecked: fix these, don't extend them.**
 
-- The reach protocol (`packets/reach.md`) has no golden vectors.
-- The JSON *responses* the Logger reads (e.g. challenge, logging config) are read by hand-typed keys.
-- Value sets documented only in YAML docs (radio `network_type`, `transport`, `cell_connection_status`) are not enums yet.
+- The `internal_*` schemas (server-main ↔ test-control ↔ data-generator) are checked only through examples, not shape-compared with their Rust types.
 
 ---
 
@@ -227,12 +228,11 @@ session_2026_05_20/
       packets.parquet        # all flows, mobile's view
       events.parquet
       clock.parquet
-      summary.json
+      probe.jsonl.gz         # mp-probe records for the test window, when it runs
     server/
       packets.parquet        # all flows, server's view
       events.parquet
       clock.parquet
-      summary.json
 ```
 
 ### File Purposes
@@ -243,7 +243,7 @@ session_2026_05_20/
 - `gps.parquet` — GPS snapshots (latitude, longitude, speed, heading, accuracy); **mobile-only, one per test** shared by all flows
 - `clock.parquet` — clock calibration snapshots (monotonic timestamp, UTC timestamp, source, uncertainty, estimated offset)
 - `events.parquet` — system events + derived events (HO from PCI changes, coverage gaps, band changes)
-- `summary.json` — compact test summary (RTT percentiles, one-way latency percentiles, loss, jitter, inter-packet timing, radio statistics, handover count, neighbor cell stats, GPS start/end, PCI changes, upload state)
+- No per-node summary file: the test summary is an analysis product (`fieldtest-analyze`, spec §12.8). Rows lost to a log ring overflow are an `ERROR` event in `events.parquet`, and the mobile uploads the test as `PARTIAL`.
 
 ---
 

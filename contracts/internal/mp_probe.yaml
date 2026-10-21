@@ -33,6 +33,9 @@ commands:
 
 fast_max_s: 3600
 
+# Where the Logger stores a test's window (RANGE) for upload, gzipped.
+test_file: probe.jsonl.gz   # in the test's mobile/ folder
+
 # Record lines: one JSON object per line. Every record has t (phone UTC ns,
 # the Logger's clock) and k (kind). Keys listed per kind; all are always
 # present unless marked optional.

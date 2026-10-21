@@ -34,16 +34,16 @@ columns:
   - { name: lte_rsrp, type: int32,  nullable: true }
 
   - { name: bandwidth_mhz,          type: uint32, nullable: true, doc: "LTE serving-cell bandwidth (MHz, CellIdentityLte)." }
-  - { name: cell_connection_status, type: utf8,   nullable: true, doc: "PRIMARY | SECONDARY | UNKNOWN." }
-  - { name: network_type,           type: utf8,   nullable: true, doc: "Radio mode the device reports: LTE | LTE_CA | NR_NSA | NR_ADVANCED | NR_SA (OTHER_<n> for other TelephonyManager network types). NR columns describe a serving 5G cell only when this is NR_*." }
+  - { name: cell_connection_status, type: utf8,   nullable: true, doc: "enums.yaml cell_connection_statuses; null when unknown." }
+  - { name: network_type,           type: utf8,   nullable: true, doc: "Radio mode the device reports: enums.yaml radio_network_types, or OTHER_<n> for other TelephonyManager network types. NR columns describe a serving 5G cell only when this is NR_*." }
 
   # Data path. The cellular columns describe the modem even while traffic
   # goes over Wi-Fi; transport says which network actually carries it.
-  - { name: transport,     type: utf8,   nullable: true, doc: "CELLULAR | WIFI | ETHERNET | OTHER | NONE (active network's transport)." }
+  - { name: transport,     type: utf8,   nullable: true, doc: "Active network's transport: OpenAPI NetworkTransport (CELLULAR | WIFI | ETHERNET | OTHER | NONE)." }
   - { name: wifi_freq_mhz, type: uint32, nullable: true, doc: "Wi-Fi centre frequency of the primary 20 MHz channel (MHz), when transport = WIFI." }
   - { name: wifi_channel,  type: uint32, nullable: true, doc: "Wi-Fi channel number derived from wifi_freq_mhz." }
   - { name: wifi_bw_mhz,   type: uint32, nullable: true, doc: "Channel width (20/40/80/160/320) from the connected AP's scan entry." }
-  - { name: wifi_standard, type: utf8,   nullable: true, doc: "802.11a/b/g | 802.11n | 802.11ac | 802.11ax | 802.11ad | 802.11be." }
+  - { name: wifi_standard, type: utf8,   nullable: true, doc: "enums.yaml wifi_standards." }
   - { name: wifi_rssi,     type: int32,  nullable: true, doc: "Wi-Fi RSSI (dBm)." }
   - { name: wifi_tx_mbps,  type: uint32, nullable: true, doc: "Wi-Fi transmit (uplink) link speed (Mbit/s)." }
   - { name: wifi_rx_mbps,  type: uint32, nullable: true, doc: "Wi-Fi receive (downlink) link speed (Mbit/s)." }

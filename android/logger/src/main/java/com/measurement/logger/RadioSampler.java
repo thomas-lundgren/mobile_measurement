@@ -107,21 +107,21 @@ public final class RadioSampler {
     static String describe(TelephonyDisplayInfo info) {
         switch (info.getOverrideNetworkType()) {
             case TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA:
-                return "NR_NSA";
+                return Contract.RadioNetworkTypes.NR_NSA;
             case TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED:
-                return "NR_ADVANCED";
+                return Contract.RadioNetworkTypes.NR_ADVANCED;
             case TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_CA:
-                return "LTE_CA";
+                return Contract.RadioNetworkTypes.LTE_CA;
             case TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_ADVANCED_PRO:
-                return "LTE_ADVANCED_PRO";
+                return Contract.RadioNetworkTypes.LTE_ADVANCED_PRO;
             default:
                 break;
         }
         switch (info.getNetworkType()) {
             case TelephonyManager.NETWORK_TYPE_NR:
-                return "NR_SA";
+                return Contract.RadioNetworkTypes.NR_SA;
             case TelephonyManager.NETWORK_TYPE_LTE:
-                return "LTE";
+                return Contract.RadioNetworkTypes.LTE;
             case TelephonyManager.NETWORK_TYPE_UNKNOWN:
                 return null;
             default:
@@ -256,7 +256,7 @@ public final class RadioSampler {
                         putIfValid(row, Contract.RadioRow.TAC, id.getTac());
                         putIfValid(row, Contract.RadioRow.NRARFCN, id.getNrarfcn());
                         putNrSignal(row, ss);
-                        row.put(Contract.RadioRow.CELL_CONNECTION_STATUS, primary ? "PRIMARY" : "SECONDARY");
+                        row.put(Contract.RadioRow.CELL_CONNECTION_STATUS, primary ? Contract.CellConnectionStatuses.PRIMARY : Contract.CellConnectionStatuses.SECONDARY);
                     } else {
                         neighbors.put(neighbor(id.getPci(), ss.getSsRsrp()));
                     }
@@ -293,7 +293,7 @@ public final class RadioSampler {
                             row.remove(Contract.RadioRow.SINR);
                             putNrSignal(row, ss);
                             if (!row.has(Contract.RadioRow.CELL_CONNECTION_STATUS)) {
-                                row.put(Contract.RadioRow.CELL_CONNECTION_STATUS, haveLte ? "SECONDARY" : "PRIMARY");
+                                row.put(Contract.RadioRow.CELL_CONNECTION_STATUS, haveLte ? Contract.CellConnectionStatuses.SECONDARY : Contract.CellConnectionStatuses.PRIMARY);
                             }
                             break;
                         }
@@ -392,14 +392,14 @@ public final class RadioSampler {
         Network active = cm.getActiveNetwork();
         NetworkCapabilities caps = active == null ? null : cm.getNetworkCapabilities(active);
         if (caps == null) {
-            row.put(Contract.RadioRow.TRANSPORT, "NONE");
+            row.put(Contract.RadioRow.TRANSPORT, Contract.NetworkTransport.NONE);
             return;
         }
         boolean wifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
-        String transport = wifi ? "WIFI"
-                : caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ? "CELLULAR"
-                : caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ? "ETHERNET"
-                : "OTHER";
+        String transport = wifi ? Contract.NetworkTransport.WIFI
+                : caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ? Contract.NetworkTransport.CELLULAR
+                : caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ? Contract.NetworkTransport.ETHERNET
+                : Contract.NetworkTransport.OTHER;
         row.put(Contract.RadioRow.TRANSPORT, transport);
         if (!wifi) {
             return;
@@ -468,12 +468,12 @@ public final class RadioSampler {
 
     static String wifiStandard(int std) {
         switch (std) {
-            case 1: return "802.11a/b/g";  // ScanResult.WIFI_STANDARD_LEGACY
-            case 4: return "802.11n";
-            case 5: return "802.11ac";
-            case 6: return "802.11ax";
-            case 7: return "802.11ad";
-            case 8: return "802.11be";
+            case 1: return Contract.WifiStandards._802_11A_B_G;  // ScanResult.WIFI_STANDARD_LEGACY
+            case 4: return Contract.WifiStandards._802_11N;
+            case 5: return Contract.WifiStandards._802_11AC;
+            case 6: return Contract.WifiStandards._802_11AX;
+            case 7: return Contract.WifiStandards._802_11AD;
+            case 8: return Contract.WifiStandards._802_11BE;
             default: return null;
         }
     }

@@ -128,7 +128,7 @@ impl UeEngine {
             device_id: cfg.device_id.clone(),
             session_id: cfg.session_id.clone(),
             test_id: cfg.test_id.clone(),
-            node: "mobile".to_string(),
+            node: crate::log_writer::NODE_MOBILE.to_string(),
         };
         let stop = Arc::new(AtomicBool::new(false));
         let mut rxs = Vec::with_capacity(cfg.flows.len());
@@ -650,6 +650,42 @@ fn dscp_probe_ue(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FlowSummary is what RustCore.stopTest hands the Logger: its keys are
+    /// contracts/schemas/core_stop_summary.schema.json's.
+    #[test]
+    fn flow_summary_matches_the_contract() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../contracts/schemas/core_stop_summary.schema.json"
+        );
+        let schema: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let mut want: Vec<&str> = schema["items"]["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
+        let got = serde_json::to_value(FlowSummary {
+            flow_id: 1,
+            packets_sent: 2,
+            packets_received: 3,
+            bytes_sent: 4,
+            bytes_received: 5,
+            dropped_rows: 6,
+        })
+        .unwrap();
+        let mut got: Vec<&str> = got
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
+        want.sort();
+        got.sort();
+        assert_eq!(got, want);
+    }
 
     #[test]
     fn reopens_only_after_sends_keep_failing() {

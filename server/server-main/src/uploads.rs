@@ -135,7 +135,7 @@ async fn upload_held(
     request_body = UploadManifest,
     responses(
         (status = 200, body = UploadInitResponse), (status = 401), (status = 404),
-        (status = 503, description = "Upload held (device not on the local network); retry later")
+        (status = 503, description = "Upload held (device not on the local network) and every base file is already stored; retry after a network change")
     )
 )]
 pub async fn summary(
@@ -146,8 +146,12 @@ pub async fn summary(
     Json(manifest): Json<UploadManifest>,
 ) -> Result<Json<UploadInitResponse>, AppError> {
     let (device_id, _) = owned_test(&st, &headers, &test_id).await?;
-    if let Some(why) = upload_held(&st, &device_id, peer).await? {
-        return Err(AppError::Unavailable(why));
+    let held = upload_held(&st, &device_id, peer).await?;
+    if let Some(bad) = manifest.files.iter().find(|f| !valid_upload_path(&f.path)) {
+        return Err(AppError::BadRequest(format!(
+            "not an upload path: {:?}",
+            bad.path
+        )));
     }
     let manifest_json = serde_json::to_string(&manifest).map_err(|_| AppError::Internal)?;
 
@@ -187,11 +191,61 @@ pub async fn summary(
         }
     };
 
-    let needed = missing_paths(&st, &test_id, &manifest).await?;
+    let mut needed = missing_paths(&st, &test_id, &manifest).await?;
+    if let Some(why) = held {
+        // Away from home: take the small base files (radio, GPS, …) so every
+        // test shows where and on what it ran at once; the rest waits.
+        needed.retain(|p| is_base_path(p));
+        if needed.is_empty() {
+            return Err(AppError::Unavailable(why));
+        }
+    }
     Ok(Json(UploadInitResponse {
         upload_id,
         needed_paths: needed,
     }))
+}
+
+/// The files a held upload still takes (contracts/upload/README.md "Held
+/// uploads"; vectors: testvectors/upload/paths.json `base`): the test's
+/// header, GPS, radio, clock and events — tens of kB, versus megabytes of
+/// packet logs.
+pub fn is_base_path(path: &str) -> bool {
+    if !valid_upload_path(path) {
+        return false;
+    }
+    let name = path.strip_prefix("mobile/").unwrap_or(path);
+    let base_name = !path.starts_with("mobile/");
+    path == "header.json"
+        || (base_name && (name.starts_with("gps") || name.starts_with("radio")))
+        || (!base_name && (name.starts_with("clock") || name.starts_with("events")))
+}
+
+/// A path the mobile may upload, test-relative — the `files[].path` pattern
+/// of contracts/schemas/upload_manifest.schema.json (vectors:
+/// testvectors/upload/paths.json). Anything else (absolute, `..`, another
+/// node's folder) could land outside the test's folder, so it is refused.
+pub fn valid_upload_path(path: &str) -> bool {
+    // <stem>.parquet or <stem>_NNNN.parquet (4+ digits)
+    fn table(name: &str, stems: &[&str]) -> bool {
+        let Some(base) = name.strip_suffix(".parquet") else {
+            return false;
+        };
+        stems.iter().any(|stem| match base.strip_prefix(stem) {
+            Some("") => true,
+            Some(rest) => rest
+                .strip_prefix('_')
+                .is_some_and(|n| n.len() >= 4 && n.bytes().all(|b| b.is_ascii_digit())),
+            None => false,
+        })
+    }
+    match path.split_once('/') {
+        None => path == "header.json" || table(path, &["gps", "radio"]),
+        Some(("mobile", name)) => {
+            name == "probe.jsonl.gz" || table(name, &["packets", "events", "clock", "pings"])
+        }
+        Some(_) => false,
+    }
 }
 
 /// Manifest files not yet stored with a matching hash.
@@ -243,7 +297,7 @@ pub async fn put_file(
     body: Bytes,
 ) -> Result<StatusCode, AppError> {
     let (_device_id, session_id) = owned_test(&st, &headers, &test_id).await?;
-    if path.contains("..") {
+    if !valid_upload_path(&path) {
         return Err(AppError::BadRequest("invalid path".into()));
     }
     let manifest = load_manifest(&st, &upload_id, &test_id).await?;
@@ -313,4 +367,47 @@ pub async fn complete(
     // and stop the server-side generators so their server/ Parquet is flushed.
     crate::tests_api::finalize_from_upload(&st, &test_id, manifest.test_result).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_base_path, valid_upload_path};
+
+    #[test]
+    fn base_paths_follow_the_contract_vectors() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../contracts/testvectors/upload/paths.json"
+        );
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let base: Vec<&str> = doc["base"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p.as_str().unwrap())
+            .collect();
+        for key in ["valid", "invalid"] {
+            for p in doc[key].as_array().unwrap() {
+                let p = p.as_str().unwrap();
+                assert_eq!(is_base_path(p), base.contains(&p), "{p:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn upload_paths_follow_the_contract_vectors() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../contracts/testvectors/upload/paths.json"
+        );
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        for (want, key) in [(true, "valid"), (false, "invalid")] {
+            for p in doc[key].as_array().unwrap() {
+                let p = p.as_str().unwrap();
+                assert_eq!(valid_upload_path(p), want, "{p:?}");
+            }
+        }
+    }
 }

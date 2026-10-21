@@ -62,6 +62,31 @@ public class ProtocolTest {
         }
     }
 
+    /** contracts/testvectors/packets/reach_v1.json: the request the server
+     *  answers, and how the device reads replies. */
+    @Test
+    public void reachRequestsAndReplies() throws Exception {
+        JSONObject doc = Contracts.json("testvectors/packets/reach_v1.json");
+        JSONArray server = doc.getJSONArray("server");
+        for (int i = 0; i < server.length(); i++) {
+            JSONObject c = server.getJSONObject(i);
+            if (c.isNull("reply")) {
+                continue;
+            }
+            // the requests the server answers are the ones a device builds
+            String nonce = c.getString("reply").split(" ")[2];
+            assertEquals(c.getString("name"), c.getString("request").replace("\n", ""),
+                    ReachabilityChecker.requestLine(nonce).replace("\n", ""));
+        }
+        JSONArray client = doc.getJSONArray("client");
+        for (int i = 0; i < client.length(); i++) {
+            JSONObject c = client.getJSONObject(i);
+            String reply = c.isNull("reply") ? null : c.getString("reply");
+            String want = c.isNull("seen_as") ? null : c.getString("seen_as");
+            assertEquals(c.getString("name"), want, ReachabilityChecker.seenAs(c.getString("nonce"), reply));
+        }
+    }
+
     /** contracts/testvectors/auth_signing/vector.json: the blob the Keystore
      *  signs, and the signature format the server verifies. */
     @Test

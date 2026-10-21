@@ -29,6 +29,9 @@ MPREACH1 OK <nonce> <ip>:<port>\n
   times, 500 ms apart.
 - Anything else gets no reply (UDP) or a closed connection (TCP).
 
+Golden vectors: `contracts/testvectors/packets/reach_v1.json` (server replies
+and client parsing; Rust `server-main/src/reach.rs`, Java Logger unit tests).
+
 ## Ports
 
 The server's reach responders listen on internal ports set by

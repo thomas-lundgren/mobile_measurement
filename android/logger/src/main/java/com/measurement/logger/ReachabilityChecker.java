@@ -208,7 +208,7 @@ final class ReachabilityChecker {
             s.setSoTimeout(TIMEOUT_MS);
             OutputStream out = s.getOutputStream();
             long t0 = System.nanoTime();
-            out.write(("MPREACH1 " + nonce + "\n").getBytes(StandardCharsets.US_ASCII));
+            out.write(requestLine(nonce).getBytes(StandardCharsets.US_ASCII));
             out.flush();
             String reply = new BufferedReader(
                     new InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII)).readLine();
@@ -219,7 +219,7 @@ final class ReachabilityChecker {
 
     private JSONObject udpProbe(Network net, Target target) throws Exception {
         String nonce = nonce();
-        byte[] req = ("MPREACH1 " + nonce + "\n").getBytes(StandardCharsets.US_ASCII);
+        byte[] req = requestLine(nonce).getBytes(StandardCharsets.US_ASCII);
         InetAddress addr = net.getByName(host);
         try (DatagramSocket s = new DatagramSocket()) {
             net.bindSocket(s);
@@ -242,13 +242,28 @@ final class ReachabilityChecker {
         }
     }
 
-    /** "MPREACH1 OK <nonce> <ip:port>" with our nonce, else bad_reply. */
     private JSONObject fromReply(Target target, String nonce, String reply, double rttMs) throws Exception {
-        String[] parts = reply == null ? new String[0] : reply.trim().split(" ");
-        if (parts.length == 4 && "MPREACH1".equals(parts[0]) && "OK".equals(parts[1]) && nonce.equals(parts[2])) {
-            return result(target, true).put("rtt_ms", round(rttMs)).put("seen_as", parts[3]);
+        String seenAs = seenAs(nonce, reply);
+        if (seenAs != null) {
+            return result(target, true).put("rtt_ms", round(rttMs)).put("seen_as", seenAs);
         }
         return failed(target, "bad_reply");
+    }
+
+    // --- wire protocol: contracts/packets/reach.md (vectors: testvectors/packets/reach_v1.json) ---
+
+    static String requestLine(String nonce) {
+        return "MPREACH1 " + nonce + "\n";
+    }
+
+    /** The address the server saw us as, from "MPREACH1 OK <nonce> <ip:port>"
+     *  echoing our nonce; null for anything else. */
+    static String seenAs(String nonce, String reply) {
+        String[] parts = reply == null ? new String[0] : reply.trim().split(" ");
+        if (parts.length == 4 && "MPREACH1".equals(parts[0]) && "OK".equals(parts[1]) && nonce.equals(parts[2])) {
+            return parts[3];
+        }
+        return null;
     }
 
     private static JSONObject result(Target target, boolean ok) throws Exception {

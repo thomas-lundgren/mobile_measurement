@@ -20,7 +20,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from . import timing
+from . import schema, timing
 
 #: 3 s of 200 ms bins on each side of a candidate change.
 REGIME_WINDOW = 15
@@ -45,13 +45,16 @@ def _frame(day: dict, test: dict) -> pd.DataFrame:
     return df.astype(object).where(df.notna(), None)  # all-null columns would read as NaN
 
 
+#: Label per radio.parquet network_type (enums.yaml radio_network_types).
+RADIO_MODE_LABELS = {"NR_SA": "5G SA", "NR_NSA": "5G NSA", "NR_ADVANCED": "5G+", "LTE_CA": "4G CA",
+                     "LTE_ADVANCED_PRO": "4G+", "LTE": "4G"}  # fmt: skip
+
+
 def _radio_label(day: dict, df: pd.DataFrame) -> str | None:
     """Most common radio over the test, e.g. "5G NSA · B8 + n78"."""
-    names = {"NR_SA": "5G SA", "NR_NSA": "5G NSA", "NR_ADVANCED": "5G+", "LTE_CA": "4G CA",
-             "LTE_ADVANCED_PRO": "4G+", "LTE": "4G"}  # fmt: skip
     labels = []
     for r in df.itertuples(index=False):
-        if r.transport == "WIFI":
+        if r.transport == schema.TRANSPORT_WIFI:
             f = r.wifi_freq_mhz
             band = None if f is None else ("2.4 GHz" if f < 2500 else "5 GHz" if f < 5925 else "6 GHz")
             labels.append(" · ".join(x for x in ["Wi-Fi", band] if x))
@@ -64,7 +67,7 @@ def _radio_label(day: dict, df: pd.DataFrame) -> str | None:
         if r.mode and r.mode.startswith("NR"):
             nr = day.get("channels", {}).get("nr", {}).get(str(int(r.nrarfcn))) if r.nrarfcn is not None else None
             bands.append(nr.split(" · ")[0] if nr else "n?")
-        name = names.get(r.mode, "mode not recorded")
+        name = RADIO_MODE_LABELS.get(r.mode, "mode not recorded")
         labels.append(f"{name} · {' + '.join(bands)}" if bands else name)
     if not labels:
         return None

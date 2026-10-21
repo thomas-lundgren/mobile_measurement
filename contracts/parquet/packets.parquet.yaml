@@ -11,16 +11,16 @@ join_columns:
   - { name: device_id,  type: utf8, nullable: false, doc: "Owning device (dictionary-encoded constant)." }
   - { name: session_id, type: utf8, nullable: false }
   - { name: test_id,    type: utf8, nullable: false }
-  - { name: node,       type: utf8, nullable: false, doc: "mobile | server." }
+  - { name: node,       type: utf8, nullable: false, doc: "enums.yaml log_nodes (mobile | server)." }
 
 columns:
   - { name: flow_id,         type: uint32, nullable: false }
   - { name: sequence_number, type: uint64, nullable: false }
-  - { name: direction,       type: utf8,   nullable: false, doc: "SENT | RECEIVED (remediation 4.3). Without it bidirectional data is uninterpretable." }
+  - { name: direction,       type: utf8,   nullable: false, doc: "enums.yaml packet_directions (SENT | RECEIVED; remediation 4.3). Without it bidirectional data is uninterpretable." }
   - { name: mono_ns,         type: uint64, nullable: false, doc: "Local monotonic time of this send/receive event." }
   - { name: utc_ns,          type: uint64, nullable: false, doc: "Local UTC time of this event." }
   - { name: payload_size,    type: uint32, nullable: false, doc: "On-wire UDP payload / TCP chunk size in bytes." }
-  - { name: protocol,        type: utf8,   nullable: false, doc: "UDP | TCP." }
+  - { name: protocol,        type: utf8,   nullable: false, doc: "enums.yaml packet_protocols (UDP | TCP)." }
   - { name: local_port,      type: uint32, nullable: true }
   - { name: remote_port,     type: uint32, nullable: true }
 
@@ -41,7 +41,7 @@ columns:
   # Delivery timing / back pressure (realtime_udp only — null otherwise).
   # See spec "Realtime UDP Flow" (delivery timing and back pressure) and core/src/udp_timing.rs.
   - { name: kernel_rx_utc_ns, type: uint64, nullable: true, doc: "RECEIVED: kernel receive time (SO_TIMESTAMPNS, UTC ns) — when the driver handed the packet up. utc_ns minus this = host wake-up latency." }
-  - { name: send_status,      type: utf8,   nullable: true, doc: "SENT: OK | EAGAIN (socket send buffer full: back pressure) | ENOBUFS (qdisc/driver drop) | ERROR. One row per attempt; non-OK attempts never left the host." }
+  - { name: send_status,      type: utf8,   nullable: true, doc: "SENT: enums.yaml send_statuses — OK | EAGAIN (socket send buffer full: back pressure) | ENOBUFS (qdisc/driver drop) | ERROR. One row per attempt; non-OK attempts never left the host." }
   - { name: send_call_ns,     type: uint32, nullable: true, doc: "SENT: duration of the send syscall (long when a blocking send waited for buffer space)." }
   - { name: sock_outq_bytes,  type: uint32, nullable: true, doc: "SENT: bytes queued below the socket after the send (SIOCOUTQ), not yet released by the qdisc/driver. Null if the ioctl is refused." }
 

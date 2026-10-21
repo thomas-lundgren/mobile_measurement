@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate the Logger's wire constants (``Contract.java``) from contracts/.
 
-Sources: versions/versions.yaml, enums/enums.yaml, the string enums and REST
-paths of openapi/openapi.yaml, the row keys of the parquet tables the Logger
+Sources: versions/versions.yaml, enums/enums.yaml, the string enums, object
+property names and REST paths of openapi/openapi.yaml, the row keys of the parquet tables the Logger
 hands to the Rust core as JSON (gps, clock, radio), and
 internal/mp_probe.yaml. The output is committed; ``--check`` exits 1 when it
 is out of date (ci/check.sh runs that).
@@ -13,6 +13,7 @@ is out of date (ci/check.sh runs that).
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -98,6 +99,34 @@ def generate() -> str:
             continue
         lines += strings_class(name, f"OpenAPI {name} (a Rust enum on the server)", values)
 
+    # property names of every OpenAPI object type (request and response bodies)
+    lines += [
+        "    /** Property names of the OpenAPI object types: read and write JSON bodies with these. */",
+        "    public static final class Fields {",
+        "        private Fields() {}",
+    ]
+    for name, comp in sorted(openapi["components"]["schemas"].items()):
+        props = comp.get("properties")
+        if not props:
+            continue
+        lines += ["", f"        /** OpenAPI {name} */", f"        public static final class {name} {{", f"            private {name}() {{}}", ""]
+        for prop in props:
+            lines.append(f'            public static final String {const_name(prop)} = "{prop}";')
+        lines.append("        }")
+    # JSON Schemas with no OpenAPI type (on-device files, the core's JNI results)
+    for path in sorted((CONTRACTS / "schemas").glob("*.schema.json")):
+        schema = json.loads(path.read_text())
+        title = schema.get("title")
+        props = schema.get("properties") or (schema.get("items") or {}).get("properties")
+        if not title or not props or title in openapi["components"]["schemas"]:
+            continue
+        lines += ["", f"        /** contracts/schemas/{path.name} */", f"        public static final class {title} {{",
+                  f"            private {title}() {{}}", ""]
+        for prop in props:
+            lines.append(f'            public static final String {const_name(prop)} = "{prop}";')
+        lines.append("        }")
+    lines += ["    }", ""]
+
     # REST paths
     lines += [
         "    /** REST paths (OpenAPI operationId); fill {params} in order with {@link #path}. */",
@@ -171,6 +200,7 @@ def generate() -> str:
         "",
         f"        public static final int PORT = {probe['port']};",
         f"        public static final int FAST_MAX_S = {probe['fast_max_s']};",
+        f'        public static final String TEST_FILE = "{probe['test_file']}";',
     ]
     for cmd in probe["commands"]:
         lines.append(f'        public static final String {cmd["name"]} = "{cmd["name"]}";')

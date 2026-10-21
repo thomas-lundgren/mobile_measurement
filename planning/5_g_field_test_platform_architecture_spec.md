@@ -1180,12 +1180,11 @@ session_2026_05_20/
       packets.parquet        # all flows, mobile's view
       events.parquet
       clock.parquet
-      summary.json
+      probe.jsonl.gz         # mp-probe records for the test window, when it runs
     server/
       packets.parquet        # all flows, server's view
       events.parquet
       clock.parquet
-      summary.json
 ```
 
 Notes:
@@ -1332,23 +1331,23 @@ Derived in post-processing from `radio.parquet`:
 
 ---
 
-## 12.8 summary.json
+## 12.8 Test summary (analysis product)
 
-Compact test summary.
+The nodes write **no** summary file: every statistic is computed once, by the
+analysis (`fieldtest-analyze <test_dir> -o summary.json`, `analysis/summary.py`),
+from the Parquet logs. This keeps statistics work off the phone while it
+measures and leaves one implementation of each metric. (An earlier design had a
+per-node `summary.json`; it was never written and was retired on 2026-10-21.)
 
-Contains:
+The analysis summary contains RTT, one-way delay (offset-corrected, up and
+down), jitter, per-flow loss, radio statistics (serving RSRP/SINR/RSRQ, PCI
+changes, radio-mode shares), GPS endpoints, derived events (handover count …)
+and stall episodes.
 
-- RTT percentiles
-- one-way latency percentiles (uplink / downlink)
-- loss
-- jitter
-- inter-packet timing statistics (mean gap deviation, burst count)
-- radio statistics (RSRP min/mean/max, SINR min/mean/max)
-- handover count (derived from PCI/NCI changes)
-- neighbor cell statistics (unique cells seen, max concurrent neighbors)
-- GPS start/end
-- PCI changes
-- upload state
+What a node must report at the end of a test is in its logs: rows lost to a
+log ring overflow are an `ERROR` event in `events.parquet`
+(`{"sink":"packets","dropped":N}`, contracts/internal/logger_sink.md), and the
+mobile then uploads the test as `PARTIAL`.
 
 ---
 
@@ -1380,6 +1379,15 @@ The Logger's uploader therefore stays off the network while a test runs: it
 does not start an upload during a test and pauses one in progress at the next
 file boundary, resuming after the test (the server's `needed_paths` makes
 the upload resumable per file).
+
+**Held uploads (mobile data).** The server may hold a device's uploads while
+it is away from the home network (`MP_UPLOAD_HOLD`; not when its storage runs
+low). Every test still has its **base** on the server at once: while held,
+the server takes the small base files — `header.json`, `gps.parquet`,
+`radio.parquet`, `mobile/clock*`, `mobile/events*` (tens of kB) — and only the
+packet logs and mp-probe records wait for the home network. A measurement
+therefore always shows where it ran and on which radio, even before the rest
+arrives. Protocol: contracts/upload/README.md "Held uploads".
 
 ---
 

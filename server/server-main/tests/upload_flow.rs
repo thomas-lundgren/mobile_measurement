@@ -359,11 +359,22 @@ async fn foreign_test_and_unauth_rejected() {
 }
 
 /// POST the summary as if from `peer` (the server runs with connect info).
+/// Phase 1 from `peer` with a packets-only manifest (nothing a held upload takes).
 async fn summary_from(st: &AppState, test_id: &str, session: &str, peer: &str) -> StatusCode {
     let manifest = json!({
         "test_result": "COMPLETED", "node": "mobile",
-        "files": [ manifest_file("header.json", b"{}") ]
+        "files": [ manifest_file("mobile/packets_0000.parquet", b"PAR1") ]
     });
+    summary_with(st, test_id, session, peer, manifest).await.0
+}
+
+async fn summary_with(
+    st: &AppState,
+    test_id: &str,
+    session: &str,
+    peer: &str,
+    manifest: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
     let addr: std::net::SocketAddr = peer.parse().unwrap();
     let r = Request::builder()
         .method("POST")
@@ -373,7 +384,79 @@ async fn summary_from(st: &AppState, test_id: &str, session: &str, peer: &str) -
         .extension(axum::extract::ConnectInfo(addr))
         .body(Body::from(manifest.to_string()))
         .unwrap();
-    build_router(st.clone()).oneshot(r).await.unwrap().status()
+    let resp = build_router(st.clone()).oneshot(r).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+/// Away from home the server takes only the base files (radio, GPS, …):
+/// the test's map and radio show at once, the packet logs wait for home.
+#[tokio::test]
+async fn held_upload_takes_the_base_files_and_keeps_the_rest_pending() {
+    let root = tempfile::tempdir().unwrap();
+    let st = state(root.path())
+        .await
+        .with_server_host("2.248.90.179")
+        .with_upload_hold(mp_server_main::UploadHold { min_free_bytes: 0 });
+    let (device_id, session) = device_session(&st).await;
+    let test_id = "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X5";
+    make_test(&st, &device_id, test_id).await;
+    let files: [(&str, &[u8]); 4] = [
+        ("header.json", b"{}"),
+        ("gps.parquet", b"GPS"),
+        ("radio.parquet", b"RADIO"),
+        ("mobile/packets_0000.parquet", b"PACKETS"),
+    ];
+    let manifest = json!({
+        "test_result": "COMPLETED", "node": "mobile",
+        "files": files.iter().map(|(p, b)| manifest_file(p, b)).collect::<Vec<_>>()
+    });
+    let away = "90.129.122.158:40000";
+
+    let (s, body) = summary_with(&st, test_id, &session, away, manifest.clone()).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["needed_paths"],
+        json!(["header.json", "gps.parquet", "radio.parquet"])
+    );
+    let upload_id = body["upload_id"].as_str().unwrap().to_string();
+    for (path, bytes) in &files[..3] {
+        let url = format!("/api/v1/tests/{test_id}/upload/{upload_id}/files/{path}");
+        let (s, _) = req(
+            &st,
+            "PUT",
+            &url,
+            Some(&session),
+            Body::from(bytes.to_vec()),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::NO_CONTENT, "put {path}");
+    }
+    // the packets are still missing: not complete, so the device keeps the test pending
+    let complete = format!("/api/v1/tests/{test_id}/upload/{upload_id}/complete");
+    let (s, _) = req(&st, "POST", &complete, Some(&session), Body::empty(), None).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert!(root
+        .path()
+        .join("ses_up")
+        .join(test_id)
+        .join("radio.parquet")
+        .exists());
+
+    // still away, base stored: held (retry after a network change)
+    let (s, _) = summary_with(&st, test_id, &session, away, manifest.clone()).await;
+    assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
+    // home: the rest
+    let (s, body) = summary_with(&st, test_id, &session, "192.168.1.57:40000", manifest).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["needed_paths"], json!(["mobile/packets_0000.parquet"]));
 }
 
 #[tokio::test]

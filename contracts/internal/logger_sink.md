@@ -105,10 +105,13 @@ timing is not critical:
 
 ## Reporting drops
 
-`dropped_rows` (per sink) is surfaced two ways at test end:
-- as a field in `summary.json` (so a gap is visible without scanning Parquet);
-- as an `ERROR` event row (`event_metadata = {"sink":"packets","dropped":N}`)
-  when N > 0.
+`dropped_rows` (per sink) is surfaced at test end:
+- as an `ERROR` event row (`flow_id`, `event_metadata =
+  {"sink":"packets","dropped":N}`) when N > 0 — `aux_log::dropped_rows_event`,
+  written by the core into `mobile/events.parquet` and by the data-generator
+  into `server/events_f<flow>_dropped.parquet`;
+- in the core's stop summary to the Logger (`dropped_rows`,
+  `schemas/core_stop_summary.schema.json`).
 
 A non-zero `dropped_rows` marks the test `PARTIAL` (recording incomplete) —
 consistent with the upload protocol's PARTIAL rule.

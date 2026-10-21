@@ -239,6 +239,23 @@ pub struct EventRow {
     pub event_metadata: Option<String>,
 }
 
+/// The ERROR event for packet rows a flow's log ring dropped on overflow
+/// (`contracts/internal/logger_sink.md` "Reporting drops"); None if none were.
+pub fn dropped_rows_event(flow_id: u32, dropped: u64) -> Option<EventRow> {
+    (dropped > 0).then(|| {
+        let ts = crate::timestamp::Timestamp::now();
+        EventRow {
+            mono_ns: ts.mono_ns,
+            utc_ns: ts.utc_ns,
+            event_type: "ERROR".into(),
+            flow_id: Some(flow_id),
+            event_metadata: Some(
+                serde_json::json!({"sink": "packets", "dropped": dropped}).to_string(),
+            ),
+        }
+    })
+}
+
 fn events_schema() -> Schema {
     Schema::new(vec![
         Field::new("device_id", DataType::Utf8, false),
@@ -499,6 +516,18 @@ mod tests {
             .unwrap();
         assert_eq!(meta.value(0), r#"{"peer_ip":"192.0.2.7"}"#);
         assert_eq!(batch.column_by_name("event_type").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn dropped_rows_event_only_when_rows_were_dropped() {
+        assert!(dropped_rows_event(3, 0).is_none());
+        let e = dropped_rows_event(3, 1250).unwrap();
+        assert_eq!(e.event_type, "ERROR");
+        assert_eq!(e.flow_id, Some(3));
+        assert_eq!(
+            e.event_metadata.as_deref(),
+            Some(r#"{"dropped":1250,"sink":"packets"}"#)
+        );
     }
 
     fn ctx() -> AuxContext {

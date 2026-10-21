@@ -39,8 +39,8 @@
       "properties": {
         "path": {
           "type": "string",
-          "pattern": "^(header\\.json|mobile/summary\\.json|(gps|radio)(_[0-9]{4,})?\\.parquet|mobile/(packets|events|clock|pings)(_[0-9]{4,})?\\.parquet)$",
-          "description": "Test-relative path. The known mobile-side log layout (CLAUDE.md). Parquet tables are written SEGMENTED (`<table>_NNNN.parquet`, see parquet/README.md), so each segment is its own manifest entry; the bare `<table>.parquet` form is also accepted. `pings.parquet` is present when logging_config.ping is enabled. The server rejects unlisted paths."
+          "pattern": "^(header\\.json|(gps|radio)(_[0-9]{4,})?\\.parquet|mobile/(packets|events|clock|pings)(_[0-9]{4,})?\\.parquet|mobile/probe\\.jsonl\\.gz)$",
+          "description": "Test-relative path. The known mobile-side log layout (CLAUDE.md). Parquet tables are written SEGMENTED (`<table>_NNNN.parquet`, see parquet/README.md), so each segment is its own manifest entry; the bare `<table>.parquet` form is also accepted. `pings.parquet` is present when logging_config.ping is enabled; `mobile/probe.jsonl.gz` when mp-probe runs. The server rejects any other path (server-main uploads::valid_upload_path; vectors in testvectors/upload/paths.json)."
         },
         "size_bytes": {
           "type": "integer", "minimum": 0,

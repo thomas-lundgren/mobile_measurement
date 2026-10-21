@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://measurement-platform/contracts/schemas/core_stop_summary.schema.json",
+  "title": "CoreStopSummary",
+  "description": "What the shared Rust core returns to the Logger when a test stops (RustCore.stopTest / pollStatus over JNI; core/src/ue.rs FlowSummary): per-flow counters. dropped_rows > 0 means the flow's log ring overflowed — the core also writes an ERROR event (contracts/internal/logger_sink.md) and the Logger uploads the test as PARTIAL.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["flow_id", "packets_sent", "packets_received", "bytes_sent", "bytes_received", "dropped_rows"],
+    "properties": {
+      "flow_id":          { "type": "integer", "minimum": 0 },
+      "packets_sent":     { "type": "integer", "minimum": 0 },
+      "packets_received": { "type": "integer", "minimum": 0 },
+      "bytes_sent":       { "type": "integer", "minimum": 0 },
+      "bytes_received":   { "type": "integer", "minimum": 0 },
+      "dropped_rows":     { "type": "integer", "minimum": 0, "description": "Packet rows lost to ring overflow (not packets lost on the network)." }
+    }
+  }
+}

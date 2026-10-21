@@ -24,6 +24,11 @@ import java.util.function.Consumer;
  *
  * While a test runs ({@link #setMeasuring}) it stays off the network, so an
  * upload never shares the link with a measurement; it resumes after the seal.
+ *
+ * Away from home the server holds uploads but still takes each test's small
+ * base files (header, GPS, radio, clock, events; contracts/upload/README.md
+ * "Held uploads"): a held test is skipped, not retried in a loop, and the
+ * queue waits for a network change (home Wi-Fi lifts the hold).
  */
 final class Uploader {
     private static final String UPLOAD_PENDING = "upload_pending.json";
@@ -31,6 +36,8 @@ final class Uploader {
     private static final String UPLOAD_REJECTED = "upload_rejected.json";
     private static final long UPLOAD_BACKOFF_MIN_MS = 5_000;
     private static final long UPLOAD_BACKOFF_MAX_MS = 300_000;
+    /** Held by the server: retry on a network change, or after this long. */
+    private static final long HELD_RECHECK_MS = 30 * 60_000;
 
     private final File filesDir;
     private final String server;
@@ -88,13 +95,14 @@ final class Uploader {
     }
 
     /** Durably queue a sealed test for upload. */
-    void queue(File testRoot, String testId, JSONArray sealed) {
+    void queue(File testRoot, String testId, JSONArray sealed, String testResult) {
         try {
             JSONArray rel = new JSONArray();
             for (int i = 0; i < sealed.length(); i++) {
                 rel.put(relPath(testRoot, new File(sealed.getString(i))));
             }
-            JSONObject marker = new JSONObject().put("test_id", testId).put("files", rel);
+            JSONObject marker = new JSONObject().put("test_id", testId).put("files", rel)
+                    .put("test_result", testResult);
             File tmp = new File(testRoot, UPLOAD_PENDING + ".tmp");
             Files.write(tmp.toPath(), marker.toString().getBytes(StandardCharsets.UTF_8));
             // atomic publish: the uploader never sees a half-written marker
@@ -160,6 +168,7 @@ final class Uploader {
                     }
                     continue;
                 }
+                boolean held = false;
                 for (File marker : pending) {
                     if (!running) {
                         return;
@@ -167,9 +176,23 @@ final class Uploader {
                     if (measuring) {
                         throw new Paused();
                     }
-                    uploadOne(client, s, marker);
+                    try {
+                        uploadOne(client, s, marker);
+                    } catch (java.io.IOException e) {
+                        if (!isHeld(e)) {
+                            throw e;
+                        }
+                        held = true; // its base files are up; the rest waits for home
+                    }
                 }
                 backoff = UPLOAD_BACKOFF_MIN_MS;
+                if (held) {
+                    synchronized (signal) {
+                        if (!retryNow) {
+                            signal.wait(HELD_RECHECK_MS);
+                        }
+                    }
+                }
             } catch (InterruptedException e) {
                 return;
             } catch (Paused e) {
@@ -197,7 +220,8 @@ final class Uploader {
         JSONObject m = new JSONObject(new String(Files.readAllBytes(marker.toPath()), StandardCharsets.UTF_8));
         String testId = m.getString("test_id");
         try {
-            upload(client, session, testId, testRoot, m.getJSONArray("files"));
+            upload(client, session, testId, testRoot, m.getJSONArray("files"),
+                    m.optString("test_result", Contract.TestResults.COMPLETED));
         } catch (java.nio.file.NoSuchFileException e) {
             reject(marker, testId, "file missing: " + e.getMessage());
             return;
@@ -219,18 +243,18 @@ final class Uploader {
         report.accept("ERROR: upload of " + testId + " rejected (" + why + "); data kept on device");
     }
 
-    private void upload(ServerClient client, String session, String testId, File testRoot, JSONArray relPaths)
-            throws Exception {
+    private void upload(ServerClient client, String session, String testId, File testRoot, JSONArray relPaths,
+                        String testResult) throws Exception {
         JSONArray files = new JSONArray();
         for (int i = 0; i < relPaths.length(); i++) {
             String rel = relPaths.getString(i);
             byte[] bytes = Files.readAllBytes(new File(testRoot, rel).toPath());
             files.put(Wire.manifestFile(rel, bytes.length, sha256Hex(bytes)));
         }
-        JSONObject manifest = Wire.manifest(files);
+        JSONObject manifest = Wire.manifest(files, testResult);
         JSONObject init = client.uploadSummary(session, testId, manifest);
-        String uploadId = init.getString("upload_id");
-        JSONArray needed = init.getJSONArray("needed_paths");
+        String uploadId = init.getString(Contract.Fields.UploadInitResponse.UPLOAD_ID);
+        JSONArray needed = init.getJSONArray(Contract.Fields.UploadInitResponse.NEEDED_PATHS);
         for (int i = 0; i < needed.length(); i++) {
             if (measuring) {
                 throw new Paused();
@@ -240,6 +264,13 @@ final class Uploader {
             client.putFile(session, testId, uploadId, rel, bytes);
         }
         client.uploadComplete(session, testId, uploadId);
+    }
+
+    /** The server is holding this upload (away from home): 503 on the
+     *  summary, or 409 on complete after it took only the base files. */
+    static boolean isHeld(java.io.IOException e) {
+        String m = String.valueOf(e.getMessage());
+        return m.startsWith("HTTP 503") || m.equals("complete -> 409");
     }
 
     /** A test started mid-upload; the rest of the files go after it. */

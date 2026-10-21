@@ -1,0 +1,22 @@
+{
+  "schema": "../../schemas/core_stop_summary.schema.json",
+  "examples": [
+    {
+      "name": "complete",
+      "test_result": "COMPLETED",
+      "summary": [
+        { "flow_id": 1, "packets_sent": 90000, "packets_received": 0, "bytes_sent": 18000000, "bytes_received": 0, "dropped_rows": 0 },
+        { "flow_id": 2, "packets_sent": 4500, "packets_received": 4497, "bytes_sent": 99000, "bytes_received": 98934, "dropped_rows": 0 }
+      ]
+    },
+    {
+      "name": "ring_overflow",
+      "test_result": "PARTIAL",
+      "summary": [
+        { "flow_id": 1, "packets_sent": 90000, "packets_received": 0, "bytes_sent": 18000000, "bytes_received": 0, "dropped_rows": 1250 },
+        { "flow_id": 2, "packets_sent": 4500, "packets_received": 4497, "bytes_sent": 99000, "bytes_received": 98934, "dropped_rows": 0 }
+      ]
+    },
+    { "name": "idle", "test_result": "COMPLETED", "summary": [] }
+  ]
+}

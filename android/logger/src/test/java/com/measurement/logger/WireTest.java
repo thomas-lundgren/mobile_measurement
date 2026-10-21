@@ -61,7 +61,32 @@ public class WireTest {
         JSONArray files = new JSONArray()
                 .put(Wire.manifestFile("header.json", 412, "a".repeat(64)))
                 .put(Wire.manifestFile("mobile/packets_0000.parquet", 220_190, "b".repeat(64)));
-        Contracts.assertValid("upload_manifest.schema.json", Wire.manifest(files));
+        Contracts.assertValid("upload_manifest.schema.json", Wire.manifest(files, Contract.TestResults.COMPLETED));
+        Contracts.assertValid("upload_manifest.schema.json", Wire.manifest(files, Contract.TestResults.PARTIAL));
+    }
+
+    /** A held upload (contracts/upload/README.md) is recognised from the
+     *  server's answers; any other failure is not. */
+    @Test
+    public void heldUploadsAreRecognised() {
+        assertTrue(Uploader.isHeld(new java.io.IOException("HTTP 503: upload held until the device is on the local network")));
+        assertTrue(Uploader.isHeld(new java.io.IOException("complete -> 409")));
+        assertFalse(Uploader.isHeld(new java.io.IOException("HTTP 404: unknown test")));
+        assertFalse(Uploader.isHeld(new java.io.IOException("complete -> 500")));
+        assertFalse(Uploader.isHeld(new java.io.IOException((String) null)));
+    }
+
+    /** contracts/testvectors/core/stop_summary_examples.json: a ring overflow
+     *  makes the upload PARTIAL. */
+    @Test
+    public void testResultFromTheCoreStopSummary() throws Exception {
+        JSONArray examples = Contracts.json("testvectors/core/stop_summary_examples.json").getJSONArray("examples");
+        for (int i = 0; i < examples.length(); i++) {
+            JSONObject ex = examples.getJSONObject(i);
+            assertEquals(ex.getString("name"), ex.getString("test_result"),
+                    Wire.testResult(ex.getJSONArray("summary").toString()));
+        }
+        assertEquals(Contract.TestResults.COMPLETED, Wire.testResult("not json"));
     }
 
     @Test

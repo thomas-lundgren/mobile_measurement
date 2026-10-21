@@ -14,7 +14,7 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
 | `openapi/` | REST API (device-facing + controller-facing) | **Code-first via `utoipa`** on the Rust server — emitted as `openapi/openapi.yaml` | Rust types (native), Kotlin client (Android Controller) |
 | `internal/` | Server-side control IPC (server-main → test-control → data-generator) + the in-process generator→logger sink | Markdown + JSON Schema (`internal_*`) over **local HTTP+JSON** | server processes (axum/serde); not public |
 | `packets/` | Wire-format layout tables for `ProbePacket`, `RealtimePacket` | Markdown layout table + golden hex vectors | Encode/decode conformance tests in every language |
-| `schemas/` | `header.json`, `summary.json`, capability, logging-config, test_plan, RUN_TEST, upload manifest/init | JSON Schema | DTO derivation; tolerant readers in analysis |
+| `schemas/` | `header.json`, the core's stop summary, capability, logging-config, test_plan, RUN_TEST, upload manifest/init | JSON Schema | DTO derivation; tolerant readers in analysis |
 | `upload/` | Upload protocol (phases, resume, compression, test-result reporting) | Markdown spec | Upload manager (mobile) + upload handler (server) |
 | `parquet/` | Arrow schema per log file | Arrow schema (`.fbs` or YAML) | Rust writer (`core/log_writer.rs`), Python loader |
 | `auth/` | (reserved) | — | AUTH_* constants currently colocated in `versions/versions.yaml` |
@@ -51,8 +51,8 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
 - **Time sync and mp-probe**: `packets/time_sync.md` and
   `internal/mp_probe.yaml`, with vectors, checked in Rust, Java and Python.
 
-**Not checked yet** (see CLAUDE.md invariant 7): reach protocol vectors; the
-responses the Logger reads; value sets documented only in YAML docs.
+**Not checked yet** (see CLAUDE.md invariant 7): the `internal_*` schemas
+are checked only through examples, not shape-compared with their Rust types.
 
 ## Authoring rules
 
@@ -83,7 +83,7 @@ responses the Logger reads; value sets documented only in YAML docs.
 | `schemas/capability.schema.json` + `schemas/logging_config.schema.json` | drafted — radio / qos / mobility feature groups + timestamp_sources (capability) and + events / gps / clock_calibration_interval_sec (config). `supported_features` dropped (remediation 1.4). Examples validated. |
 | `upload/README.md` + `schemas/upload_manifest.schema.json` + `schemas/upload_init_response.schema.json` | drafted — 3-phase resumable per-file upload; test_result + PARTIAL definition (remediation 1.3 + M4b). Examples validated. |
 | `parquet/*.yaml` (packets / radio / gps / clock / events) | drafted — Arrow schemas with dual clock, join columns, nullable capability fields; `core/log_writer.rs` packets schema needs extending to match (currently 6 cols, contract has more). Examples not binary-tested yet. |
-| `schemas/header.schema.json` + `schemas/summary.schema.json` | drafted — header = versions + identities + test_plan + logging_config ($ref); summary = per-flow/radio/gps/upload stats (all optional). Examples validated. |
+| `schemas/header.schema.json` | drafted — header = versions + identities + test_plan + logging_config ($ref). (The per-node `summary.schema.json` was retired 2026-10-21: summaries are an analysis product, spec §12.8.) |
 | `schemas/device_status.schema.json` | drafted — POST /status heartbeat: logger_state, current_test_id, logging_config_version, battery, storage, pending_uploads, radio snapshot (remediation 3.6). Examples validated. |
 | `schemas/create_test_request.schema.json` | drafted — operator create-test body; `CreateTestRequest.plan` is exactly a `$ref` to TestPlan (no duplicated flow defs) (remediation 3.7). The controller REST surface is now in the generated `openapi/openapi.yaml`. Examples validated. |
 | `internal/` (control_api + logger_sink) + `schemas/internal_*.json` | drafted — server-side control IPC over local HTTP+JSON + the generator→logger ring contract (remediation 3.4). Examples validated. |

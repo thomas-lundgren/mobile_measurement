@@ -82,29 +82,30 @@ These are the design decisions that span components and are easy to violate piec
    | all of the above, for the Logger | `Contract.java`, **generated** by `contracts/codegen/java_contract.py`: versions, enums, REST paths, row keys, mp-probe | `java_contract.py --check`; Logger JVM tests (`android/logger/src/test`) validate every body it sends against the schemas |
    | RUN_TEST flows → core | the Logger passes each flow whole (`Wire.ueConfig`) | `core/tests/test_plan_contract.rs`: the core reads every field of every example, and the examples use every flow property |
    | `packets/time_sync.md` + vectors | server-main `time_sync.rs`, Logger `ClockSampler` | golden tests on both sides |
+   | `packets/reach.md` + `reach_v1.json` | server-main `reach.rs`, Logger `ReachabilityChecker` | golden tests on both sides |
+   | `schemas/core_stop_summary.schema.json` | core `FlowSummary` → Logger (`Wire.testResult`) | `ue::flow_summary_matches_the_contract`; Logger JVM tests |
+   | logged value sets (`enums.yaml` log_nodes, packet_directions, packet_protocols, send_statuses, radio_network_types, …) | core writers, Logger `Contract`, analysis `schema.py` / `findings.py` | `log_writer::logged_values_match_the_contract`; `test_schema_contract.py` |
    | `internal/mp_probe.yaml` + `testvectors/mp_probe/` | `probe/` (Rust), Logger `MpProbe`, `analysis` `bench.py` | probe tests, Logger JVM tests, `test_bench.py` |
 
-   The Logger builds every JSON body it sends in `Wire.java` from `Contract` constants — never inline a wire string or key elsewhere.
+   In the Logger, wire values and the keys it reads come from the generated `Contract` (including `Contract.Fields.<Type>` for OpenAPI and schema-only types); every JSON body it sends is built in `Wire.java` — never inline a wire string elsewhere.
 
    New fields in a JSON body need an example in `contracts/testvectors/` that uses them, because the shape check compares names and enum values, not bounds.
 
    **Still unchecked: fix these, don't extend them.**
 
-   - The reach protocol (`packets/reach.md`) has no golden vectors.
-   - The JSON *responses* the Logger reads (e.g. challenge, logging config) are read by hand-typed keys.
-   - Value sets documented only in YAML docs (radio `network_type`, `transport`, `cell_connection_status`) are not enums yet.
+   - The `internal_*` schemas (server-main ↔ test-control ↔ data-generator) are checked only through examples, not shape-compared with their Rust types.
 
 ## Log layout (per test)
 
-A test aggregates **both nodes'** recordings under one `test_id`. Each node writes its per-node files (`packets.parquet`, `events.parquet`, `clock.parquet`, `summary.json`) into a `mobile/` or `server/` subfolder; the mobile-only `gps.parquet` and `radio.parquet` sit at the test root and are recorded **once per test** regardless of flow count:
+A test aggregates **both nodes'** recordings under one `test_id`. Each node writes its per-node files (`packets.parquet`, `events.parquet`, `clock.parquet`) into a `mobile/` or `server/` subfolder; the mobile-only `gps.parquet` and `radio.parquet` sit at the test root and are recorded **once per test** regardless of flow count:
 
 ```
 session_<date>/test_NNN/
   header.json
   gps.parquet            # mobile only, 1/test
   radio.parquet          # mobile only, 1/test
-  mobile/  { packets, events, clock .parquet + summary.json }
-  server/  { packets, events, clock .parquet + summary.json }
+  mobile/  { packets, events, clock .parquet; probe.jsonl.gz }
+  server/  { packets, events, clock .parquet }
 ```
 
 See spec §12 for field-level schemas. Some `events.parquet` rows (HANDOVER, COVERAGE_GAP, BAND_CHANGE) are *derived in post-processing* from `radio.parquet`, not logged live.

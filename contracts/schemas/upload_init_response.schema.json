@@ -18,7 +18,7 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "pattern": "^(header\\.json|mobile/summary\\.json|(gps|radio)(_[0-9]{4,})?\\.parquet|mobile/(packets|events|clock)(_[0-9]{4,})?\\.parquet)$"
+        "pattern": "^(header\\.json|(gps|radio)(_[0-9]{4,})?\\.parquet|mobile/(packets|events|clock|pings)(_[0-9]{4,})?\\.parquet|mobile/probe\\.jsonl\\.gz)$"
       },
       "description": "Manifest paths the server does NOT already hold with a matching hash. Empty array means every file is already present and the client may go straight to POST .../complete."
     }

@@ -122,22 +122,22 @@ final class Wire {
                 .put("schema_version", Contract.SCHEMA_VERSION)
                 .put("protocol_version", Contract.PROTOCOL_VERSION)
                 .put("app_version", appVersion)
-                .put("session_id", payload.getString("session_id"))
-                .put("test_id", payload.getString("test_id"))
+                .put("session_id", payload.getString(Contract.Fields.RunTestPayload.SESSION_ID))
+                .put("test_id", payload.getString(Contract.Fields.RunTestPayload.TEST_ID))
                 .put("test_start_utc_ns", utcNs)
                 .put("test_start_mono_ns", monoNs)
                 .put("device", new JSONObject()
                         .put("device_id", deviceId)
-                        .put("node_id", "mobile")
+                        .put("node_id", Contract.LogNodes.MOBILE)
                         .put("platform", Contract.Platforms.ANDROID)
                         .put("model", model)
                         .put("manufacturer", manufacturer)
                         .put("os_version", osVersion))
                 .put("server", new JSONObject()
-                        .put("node_id", "server")
-                        .put("host", payload.getString("server_host")))
-                .put("test_plan", payload.getJSONObject("test_plan"))
-                .put("flow_bindings", payload.getJSONArray("flow_bindings"))
+                        .put("node_id", Contract.LogNodes.SERVER)
+                        .put("host", payload.getString(Contract.Fields.RunTestPayload.SERVER_HOST)))
+                .put("test_plan", payload.getJSONObject(Contract.Fields.RunTestPayload.TEST_PLAN))
+                .put("flow_bindings", payload.getJSONArray(Contract.Fields.RunTestPayload.FLOW_BINDINGS))
                 .put("logging_config", loggingConfig);
     }
 
@@ -149,14 +149,14 @@ final class Wire {
      *  (core/tests/test_plan_contract.rs checks the core reads them all). */
     static String ueConfig(JSONObject payload, String deviceId, String mobileDir) throws Exception {
         JSONObject ports = new JSONObject();
-        JSONArray fb = payload.getJSONArray("flow_bindings");
+        JSONArray fb = payload.getJSONArray(Contract.Fields.RunTestPayload.FLOW_BINDINGS);
         for (int i = 0; i < fb.length(); i++) {
             JSONObject b = fb.getJSONObject(i);
-            if (!b.isNull("server_port")) {
-                ports.put(String.valueOf(b.getInt("flow_id")), b.getInt("server_port"));
+            if (!b.isNull(Contract.Fields.FlowBinding.SERVER_PORT)) {
+                ports.put(String.valueOf(b.getInt(Contract.Fields.FlowBinding.FLOW_ID)), b.getInt(Contract.Fields.FlowBinding.SERVER_PORT));
             }
         }
-        JSONArray planFlows = payload.getJSONObject("test_plan").getJSONArray("flows");
+        JSONArray planFlows = payload.getJSONObject(Contract.Fields.RunTestPayload.TEST_PLAN).getJSONArray(Contract.Fields.TestPlan.FLOWS);
         JSONArray flows = new JSONArray();
         for (int i = 0; i < planFlows.length(); i++) {
             JSONObject f = copy(planFlows.getJSONObject(i));
@@ -167,10 +167,10 @@ final class Wire {
             flows.put(f);
         }
         return new JSONObject()
-                .put("test_id", payload.getString("test_id"))
+                .put("test_id", payload.getString(Contract.Fields.RunTestPayload.TEST_ID))
                 .put("device_id", deviceId)
-                .put("session_id", payload.getString("session_id"))
-                .put("server_host", payload.getString("server_host"))
+                .put("session_id", payload.getString(Contract.Fields.RunTestPayload.SESSION_ID))
+                .put("server_host", payload.getString(Contract.Fields.RunTestPayload.SERVER_HOST))
                 .put("log_dir", mobileDir)
                 .put("flows", flows)
                 .toString();
@@ -195,9 +195,25 @@ final class Wire {
                 .put("encoding", Contract.FileEncoding.IDENTITY);
     }
 
-    static JSONObject manifest(JSONArray files) throws Exception {
+    /** PARTIAL if any flow's log ring dropped rows (the core's stop summary,
+     *  contracts/schemas/core_stop_summary.schema.json), else COMPLETED. */
+    static String testResult(String coreStopSummary) {
+        try {
+            JSONArray flows = new JSONArray(coreStopSummary);
+            for (int i = 0; i < flows.length(); i++) {
+                if (flows.getJSONObject(i).optLong(Contract.Fields.CoreStopSummary.DROPPED_ROWS, 0) > 0) {
+                    return Contract.TestResults.PARTIAL;
+                }
+            }
+        } catch (Exception e) {
+            // unreadable: the logs on disk still tell (events.parquet)
+        }
+        return Contract.TestResults.COMPLETED;
+    }
+
+    static JSONObject manifest(JSONArray files, String testResult) throws Exception {
         return new JSONObject()
-                .put("test_result", Contract.TestResults.COMPLETED)
+                .put("test_result", testResult)
                 .put("node", Contract.UploadNode.MOBILE)
                 .put("files", files);
     }

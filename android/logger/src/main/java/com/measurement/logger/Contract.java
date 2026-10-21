@@ -189,6 +189,72 @@ public final class Contract {
         public static final String SYSTEM = "system";
     }
 
+    /** enums.yaml log_nodes */
+    public static final class LogNodes {
+        private LogNodes() {}
+
+        public static final String MOBILE = "mobile";
+        public static final String SERVER = "server";
+    }
+
+    /** enums.yaml packet_directions */
+    public static final class PacketDirections {
+        private PacketDirections() {}
+
+        public static final String SENT = "SENT";
+        public static final String RECEIVED = "RECEIVED";
+    }
+
+    /** enums.yaml packet_protocols */
+    public static final class PacketProtocols {
+        private PacketProtocols() {}
+
+        public static final String UDP = "UDP";
+        public static final String TCP = "TCP";
+    }
+
+    /** enums.yaml send_statuses */
+    public static final class SendStatuses {
+        private SendStatuses() {}
+
+        public static final String OK = "OK";
+        public static final String EAGAIN = "EAGAIN";
+        public static final String ENOBUFS = "ENOBUFS";
+        public static final String ERROR = "ERROR";
+    }
+
+    /** enums.yaml radio_network_types */
+    public static final class RadioNetworkTypes {
+        private RadioNetworkTypes() {}
+
+        public static final String LTE = "LTE";
+        public static final String LTE_CA = "LTE_CA";
+        public static final String LTE_ADVANCED_PRO = "LTE_ADVANCED_PRO";
+        public static final String NR_NSA = "NR_NSA";
+        public static final String NR_ADVANCED = "NR_ADVANCED";
+        public static final String NR_SA = "NR_SA";
+    }
+
+    /** enums.yaml cell_connection_statuses */
+    public static final class CellConnectionStatuses {
+        private CellConnectionStatuses() {}
+
+        public static final String PRIMARY = "PRIMARY";
+        public static final String SECONDARY = "SECONDARY";
+    }
+
+    /** enums.yaml wifi_standards */
+    public static final class WifiStandards {
+        private WifiStandards() {}
+
+        public static final String _802_11A_B_G = "802.11a/b/g";
+        public static final String _802_11N = "802.11n";
+        public static final String _802_11AC = "802.11ac";
+        public static final String _802_11AX = "802.11ax";
+        public static final String _802_11AD = "802.11ad";
+        public static final String _802_11BE = "802.11be";
+    }
+
     /** enums.yaml app_activities */
     public static final class AppActivities {
         private AppActivities() {}
@@ -320,6 +386,605 @@ public final class Contract {
         private UploadNode() {}
 
         public static final String MOBILE = "mobile";
+    }
+
+    /** Property names of the OpenAPI object types: read and write JSON bodies with these. */
+    public static final class Fields {
+        private Fields() {}
+
+        /** OpenAPI AppAction */
+        public static final class AppAction {
+            private AppAction() {}
+
+            public static final String ACTIVITY = "activity";
+            public static final String AT_MS = "at_ms";
+            public static final String BYTES = "bytes";
+            public static final String CHUNK_BYTES = "chunk_bytes";
+            public static final String COUNT = "count";
+            public static final String DELAY_MS = "delay_ms";
+            public static final String KIND = "kind";
+            public static final String PARALLEL = "parallel";
+            public static final String RATE_KBPS = "rate_kbps";
+            public static final String UP_BYTES = "up_bytes";
+        }
+
+        /** OpenAPI Battery */
+        public static final class Battery {
+            private Battery() {}
+
+            public static final String CHARGING = "charging";
+            public static final String LEVEL_PCT = "level_pct";
+        }
+
+        /** OpenAPI Capability */
+        public static final class Capability {
+            private Capability() {}
+
+            public static final String MOBILITY = "mobility";
+            public static final String MONITOR = "monitor";
+            public static final String QOS = "qos";
+            public static final String RADIO = "radio";
+            public static final String SUPPORTS_PING = "supports_ping";
+            public static final String TIMESTAMP_SOURCES = "timestamp_sources";
+        }
+
+        /** OpenAPI CaptureConfig */
+        public static final class CaptureConfig {
+            private CaptureConfig() {}
+
+            public static final String APPS = "apps";
+            public static final String ENABLED = "enabled";
+            public static final String QUOTA_MB_PER_DAY = "quota_mb_per_day";
+            public static final String SCOPE = "scope";
+        }
+
+        /** OpenAPI ChallengeRequest */
+        public static final class ChallengeRequest {
+            private ChallengeRequest() {}
+
+            public static final String DEVICE_ID = "device_id";
+        }
+
+        /** OpenAPI ChallengeResponse */
+        public static final class ChallengeResponse {
+            private ChallengeResponse() {}
+
+            public static final String AUTH_DOMAIN = "auth_domain";
+            public static final String CHALLENGE_ID = "challenge_id";
+            public static final String EXPIRES_AT_UTC_NS = "expires_at_utc_ns";
+            public static final String NONCE = "nonce";
+            public static final String SERVER_ID = "server_id";
+            public static final String SERVER_TIME_UTC_NS = "server_time_utc_ns";
+        }
+
+        /** OpenAPI CreateTestRequest */
+        public static final class CreateTestRequest {
+            private CreateTestRequest() {}
+
+            public static final String DEVICE_ID = "device_id";
+            public static final String LOGGING_CONFIG_OVERRIDE = "logging_config_override";
+            public static final String PLAN = "plan";
+        }
+
+        /** OpenAPI DeviceCommand */
+        public static final class DeviceCommand {
+            private DeviceCommand() {}
+
+            public static final String COMMAND = "command";
+            public static final String COMMAND_ID = "command_id";
+            public static final String PAYLOAD = "payload";
+        }
+
+        /** OpenAPI DeviceStatus */
+        public static final class DeviceStatus {
+            private DeviceStatus() {}
+
+            public static final String BATTERY = "battery";
+            public static final String CURRENT_TEST_ID = "current_test_id";
+            public static final String LINK_STATE = "link_state";
+            public static final String LOGGER_STATE = "logger_state";
+            public static final String LOGGING_CONFIG_VERSION = "logging_config_version";
+            public static final String MONITOR_STATE = "monitor_state";
+            public static final String PENDING_UPLOADS = "pending_uploads";
+            public static final String RADIO = "radio";
+            public static final String SAMPLED_AT = "sampled_at";
+            public static final String STORAGE = "storage";
+        }
+
+        /** OpenAPI DeviceSummary */
+        public static final class DeviceSummary {
+            private DeviceSummary() {}
+
+            public static final String BATTERY_LEVEL_PCT = "battery_level_pct";
+            public static final String CURRENT_TEST_ID = "current_test_id";
+            public static final String DEVICE_ID = "device_id";
+            public static final String DEVICE_LABEL = "device_label";
+            public static final String ENROLLED_AT_UTC_NS = "enrolled_at_utc_ns";
+            public static final String HARDWARE_ID = "hardware_id";
+            public static final String LAST_SEEN_UTC_NS = "last_seen_utc_ns";
+            public static final String LOGGER_STATE = "logger_state";
+            public static final String LOGGING_CONFIG_VERSION = "logging_config_version";
+            public static final String MODEL = "model";
+            public static final String PLATFORM = "platform";
+            public static final String ROLE = "role";
+            public static final String STATUS = "status";
+        }
+
+        /** OpenAPI DualClock */
+        public static final class DualClock {
+            private DualClock() {}
+
+            public static final String MONO_NS = "mono_ns";
+            public static final String UTC_NS = "utc_ns";
+        }
+
+        /** OpenAPI EnrollRequest */
+        public static final class EnrollRequest {
+            private EnrollRequest() {}
+
+            public static final String DEVICE_PUBKEY = "device_pubkey";
+            public static final String HARDWARE_ID = "hardware_id";
+            public static final String HW_INFO = "hw_info";
+            public static final String PLATFORM = "platform";
+            public static final String PROTOCOL_VERSION = "protocol_version";
+            public static final String PUBKEY_FORMAT = "pubkey_format";
+            public static final String ROLE = "role";
+            public static final String SIG_ALG = "sig_alg";
+            public static final String SIG_FORMAT = "sig_format";
+        }
+
+        /** OpenAPI EnrollResponse */
+        public static final class EnrollResponse {
+            private EnrollResponse() {}
+
+            public static final String DEVICE_ID = "device_id";
+            public static final String LOGGING_CONFIG_VERSION = "logging_config_version";
+            public static final String NODE_ID = "node_id";
+            public static final String SCHEMA_VERSION = "schema_version";
+            public static final String SERVER_TIME_UTC_NS = "server_time_utc_ns";
+        }
+
+        /** OpenAPI FlowBinding */
+        public static final class FlowBinding {
+            private FlowBinding() {}
+
+            public static final String FLOW_ID = "flow_id";
+            public static final String SERVER_PORT = "server_port";
+        }
+
+        /** OpenAPI HwInfo */
+        public static final class HwInfo {
+            private HwInfo() {}
+
+            public static final String DEVICE_LABEL = "device_label";
+            public static final String MANUFACTURER = "manufacturer";
+            public static final String MODEL = "model";
+            public static final String OS_VERSION = "os_version";
+        }
+
+        /** OpenAPI InterfaceLinkState */
+        public static final class InterfaceLinkState {
+            private InterfaceLinkState() {}
+
+            public static final String DEFAULT_GW = "default_gw";
+            public static final String SINCE_MONO_NS = "since_mono_ns";
+        }
+
+        /** OpenAPI LinkState */
+        public static final class LinkState {
+            private LinkState() {}
+
+            public static final String RMNET = "rmnet";
+            public static final String WLAN = "wlan";
+        }
+
+        /** OpenAPI LoggingConfig */
+        public static final class LoggingConfig {
+            private LoggingConfig() {}
+
+            public static final String CAPTURE = "capture";
+            public static final String CLOCK_CALIBRATION_INTERVAL_SEC = "clock_calibration_interval_sec";
+            public static final String EVENTS = "events";
+            public static final String GPS = "gps";
+            public static final String MOBILITY = "mobility";
+            public static final String PING = "ping";
+            public static final String QOS = "qos";
+            public static final String RADIO = "radio";
+            public static final String VERSION = "version";
+        }
+
+        /** OpenAPI LoggingConfigAck */
+        public static final class LoggingConfigAck {
+            private LoggingConfigAck() {}
+
+            public static final String DEVICE_ID = "device_id";
+            public static final String LOGGING_CONFIG_VERSION = "logging_config_version";
+        }
+
+        /** OpenAPI LoginRequest */
+        public static final class LoginRequest {
+            private LoginRequest() {}
+
+            public static final String PASSWORD = "password";
+            public static final String USERNAME = "username";
+        }
+
+        /** OpenAPI LoginResponse */
+        public static final class LoginResponse {
+            private LoginResponse() {}
+
+            public static final String EXPIRES_AT_UTC_NS = "expires_at_utc_ns";
+            public static final String JWT = "jwt";
+            public static final String ROLE = "role";
+        }
+
+        /** OpenAPI ManifestFile */
+        public static final class ManifestFile {
+            private ManifestFile() {}
+
+            public static final String ENCODING = "encoding";
+            public static final String PATH = "path";
+            public static final String SHA256 = "sha256";
+            public static final String SIZE_BYTES = "size_bytes";
+        }
+
+        /** OpenAPI MobilityCapability */
+        public static final class MobilityCapability {
+            private MobilityCapability() {}
+
+            public static final String BEAM_SWITCH = "beam_switch";
+            public static final String EXPLICIT_HO_EVENTS = "explicit_ho_events";
+            public static final String RRC_STATE = "rrc_state";
+        }
+
+        /** OpenAPI MobilityLogging */
+        public static final class MobilityLogging {
+            private MobilityLogging() {}
+
+            public static final String BEAM_SWITCH = "beam_switch";
+            public static final String EXPLICIT_HO_EVENTS = "explicit_ho_events";
+            public static final String RRC_STATE = "rrc_state";
+        }
+
+        /** OpenAPI MonitorCapability */
+        public static final class MonitorCapability {
+            private MonitorCapability() {}
+
+            public static final String CAN_LIST_APPS = "can_list_apps";
+            public static final String SUPPORTS_VPN_CAPTURE = "supports_vpn_capture";
+        }
+
+        /** OpenAPI MonitorState */
+        public static final class MonitorState {
+            private MonitorState() {}
+
+            public static final String ACTIVE = "active";
+            public static final String APPS_INVENTORY_VERSION = "apps_inventory_version";
+            public static final String BUCKETS_PENDING = "buckets_pending";
+            public static final String BYTES_OBSERVED = "bytes_observed";
+            public static final String BYTES_TODAY = "bytes_today";
+            public static final String PINGS_LOST = "pings_lost";
+            public static final String PINGS_SENT = "pings_sent";
+            public static final String QUOTA_REMAINING_MB = "quota_remaining_mb";
+            public static final String SCOPE = "scope";
+            public static final String TOP_PEERS = "top_peers";
+        }
+
+        /** OpenAPI NetworkContext */
+        public static final class NetworkContext {
+            private NetworkContext() {}
+
+            public static final String OPERATOR = "operator";
+            public static final String TRANSPORT = "transport";
+            public static final String VALIDATED = "validated";
+            public static final String WIFI_FREQ_MHZ = "wifi_freq_mhz";
+            public static final String WIFI_SSID = "wifi_ssid";
+        }
+
+        /** OpenAPI PingConfig */
+        public static final class PingConfig {
+            private PingConfig() {}
+
+            public static final String AUTO_TARGET_COUNT = "auto_target_count";
+            public static final String DEFAULT_INTERVAL_MS = "default_interval_ms";
+            public static final String ENABLED = "enabled";
+            public static final String FOLLOW_APPS = "follow_apps";
+            public static final String TARGETS = "targets";
+        }
+
+        /** OpenAPI PingTarget */
+        public static final class PingTarget {
+            private PingTarget() {}
+
+            public static final String HOST = "host";
+            public static final String INTERVAL_MS = "interval_ms";
+            public static final String LABEL = "label";
+        }
+
+        /** OpenAPI QosCapability */
+        public static final class QosCapability {
+            private QosCapability() {}
+
+            public static final String _5QI = "5qi";
+            public static final String QFI = "qfi";
+            public static final String SLICE_INFO = "slice_info";
+        }
+
+        /** OpenAPI QosLogging */
+        public static final class QosLogging {
+            private QosLogging() {}
+
+            public static final String _5QI = "5qi";
+            public static final String QFI = "qfi";
+            public static final String SLICE_INFO = "slice_info";
+        }
+
+        /** OpenAPI RadioCapability */
+        public static final class RadioCapability {
+            private RadioCapability() {}
+
+            public static final String BLER = "bler";
+            public static final String BWP = "bwp";
+            public static final String CQI = "cqi";
+            public static final String DRX = "drx";
+            public static final String HARQ = "harq";
+            public static final String LTE_FALLBACK = "lte_fallback";
+            public static final String MCS = "mcs";
+            public static final String MIMO_LAYERS = "mimo_layers";
+            public static final String NEIGHBOR_CELLS = "neighbor_cells";
+            public static final String SERVING_CELL = "serving_cell";
+            public static final String TX_POWER = "tx_power";
+        }
+
+        /** OpenAPI RadioLogging */
+        public static final class RadioLogging {
+            private RadioLogging() {}
+
+            public static final String BLER = "bler";
+            public static final String BWP = "bwp";
+            public static final String CQI = "cqi";
+            public static final String DRX = "drx";
+            public static final String HARQ = "harq";
+            public static final String LTE_FALLBACK = "lte_fallback";
+            public static final String MCS = "mcs";
+            public static final String MIMO_LAYERS = "mimo_layers";
+            public static final String NEIGHBOR_CELLS = "neighbor_cells";
+            public static final String SERVING_CELL = "serving_cell";
+            public static final String TX_POWER = "tx_power";
+        }
+
+        /** OpenAPI RadioSnapshot */
+        public static final class RadioSnapshot {
+            private RadioSnapshot() {}
+
+            public static final String NCI = "nci";
+            public static final String PCI = "pci";
+            public static final String RSRP = "rsrp";
+            public static final String RSRQ = "rsrq";
+            public static final String SINR = "sinr";
+        }
+
+        /** OpenAPI ReachCheck */
+        public static final class ReachCheck {
+            private ReachCheck() {}
+
+            public static final String ERROR = "error";
+            public static final String KIND = "kind";
+            public static final String OK = "ok";
+            public static final String PORT = "port";
+            public static final String PROTOCOL = "protocol";
+            public static final String RTT_MS = "rtt_ms";
+            public static final String SEEN_AS = "seen_as";
+        }
+
+        /** OpenAPI ReachabilityReport */
+        public static final class ReachabilityReport {
+            private ReachabilityReport() {}
+
+            public static final String CHECKED_AT = "checked_at";
+            public static final String CHECKS = "checks";
+            public static final String NETWORK = "network";
+            public static final String TRIGGER = "trigger";
+        }
+
+        /** OpenAPI RunTestPayload */
+        public static final class RunTestPayload {
+            private RunTestPayload() {}
+
+            public static final String FLOW_BINDINGS = "flow_bindings";
+            public static final String LOGGING_CONFIG_OVERRIDE = "logging_config_override";
+            public static final String SERVER_HOST = "server_host";
+            public static final String SESSION_ID = "session_id";
+            public static final String TEST_ID = "test_id";
+            public static final String TEST_PLAN = "test_plan";
+        }
+
+        /** OpenAPI ServerTime */
+        public static final class ServerTime {
+            private ServerTime() {}
+
+            public static final String SERVER_UTC_NS = "server_utc_ns";
+            public static final String TIME_UDP_PORT = "time_udp_port";
+        }
+
+        /** OpenAPI Storage */
+        public static final class Storage {
+            private Storage() {}
+
+            public static final String FREE_BYTES = "free_bytes";
+            public static final String TOTAL_BYTES = "total_bytes";
+        }
+
+        /** OpenAPI TestPlan */
+        public static final class TestPlan {
+            private TestPlan() {}
+
+            public static final String DURATION_SEC = "duration_sec";
+            public static final String FLOWS = "flows";
+            public static final String NAME = "name";
+            public static final String VERSION = "version";
+        }
+
+        /** OpenAPI TestStatus */
+        public static final class TestStatus {
+            private TestStatus() {}
+
+            public static final String CREATED_UTC_NS = "created_utc_ns";
+            public static final String DEVICE_ID = "device_id";
+            public static final String ENDED_UTC_NS = "ended_utc_ns";
+            public static final String PLAN_NAME = "plan_name";
+            public static final String RESULT = "result";
+            public static final String STARTED_UTC_NS = "started_utc_ns";
+            public static final String STATE = "state";
+            public static final String TEST_ID = "test_id";
+        }
+
+        /** OpenAPI TestSummary */
+        public static final class TestSummary {
+            private TestSummary() {}
+
+            public static final String CREATED_UTC_NS = "created_utc_ns";
+            public static final String DEVICE_ID = "device_id";
+            public static final String ENDED_UTC_NS = "ended_utc_ns";
+            public static final String PLAN_NAME = "plan_name";
+            public static final String RESULT = "result";
+            public static final String STATE = "state";
+            public static final String TEST_ID = "test_id";
+        }
+
+        /** OpenAPI TopPeer */
+        public static final class TopPeer {
+            private TopPeer() {}
+
+            public static final String APP_LABEL = "app_label";
+            public static final String BYTES_60S = "bytes_60s";
+            public static final String PEER_IP = "peer_ip";
+        }
+
+        /** OpenAPI UploadInitResponse */
+        public static final class UploadInitResponse {
+            private UploadInitResponse() {}
+
+            public static final String NEEDED_PATHS = "needed_paths";
+            public static final String UPLOAD_ID = "upload_id";
+        }
+
+        /** OpenAPI UploadManifest */
+        public static final class UploadManifest {
+            private UploadManifest() {}
+
+            public static final String FILES = "files";
+            public static final String NODE = "node";
+            public static final String RESULT_REASON = "result_reason";
+            public static final String TEST_RESULT = "test_result";
+        }
+
+        /** OpenAPI VerifyRequest */
+        public static final class VerifyRequest {
+            private VerifyRequest() {}
+
+            public static final String CHALLENGE_ID = "challenge_id";
+            public static final String SIGNATURE = "signature";
+        }
+
+        /** OpenAPI VerifyResponse */
+        public static final class VerifyResponse {
+            private VerifyResponse() {}
+
+            public static final String EXPIRES_AT_UTC_NS = "expires_at_utc_ns";
+            public static final String LOGGING_CONFIG_VERSION = "logging_config_version";
+            public static final String SESSION_TOKEN = "session_token";
+        }
+
+        /** contracts/schemas/app_list.schema.json */
+        public static final class AppList {
+            private AppList() {}
+
+            public static final String DEVICE_ID = "device_id";
+            public static final String INVENTORY_VERSION = "inventory_version";
+            public static final String COLLECTED_UTC_NS = "collected_utc_ns";
+            public static final String APPS = "apps";
+        }
+
+        /** contracts/schemas/core_stop_summary.schema.json */
+        public static final class CoreStopSummary {
+            private CoreStopSummary() {}
+
+            public static final String FLOW_ID = "flow_id";
+            public static final String PACKETS_SENT = "packets_sent";
+            public static final String PACKETS_RECEIVED = "packets_received";
+            public static final String BYTES_SENT = "bytes_sent";
+            public static final String BYTES_RECEIVED = "bytes_received";
+            public static final String DROPPED_ROWS = "dropped_rows";
+        }
+
+        /** contracts/schemas/header.schema.json */
+        public static final class Header {
+            private Header() {}
+
+            public static final String SCHEMA_VERSION = "schema_version";
+            public static final String PROTOCOL_VERSION = "protocol_version";
+            public static final String APP_VERSION = "app_version";
+            public static final String SESSION_ID = "session_id";
+            public static final String TEST_ID = "test_id";
+            public static final String TEST_START_UTC_NS = "test_start_utc_ns";
+            public static final String TEST_START_MONO_NS = "test_start_mono_ns";
+            public static final String DEVICE = "device";
+            public static final String SERVER = "server";
+            public static final String TEST_PLAN = "test_plan";
+            public static final String FLOW_BINDINGS = "flow_bindings";
+            public static final String LOGGING_CONFIG = "logging_config";
+        }
+
+        /** contracts/schemas/internal_generator_prepare.schema.json */
+        public static final class InternalGeneratorPrepare {
+            private InternalGeneratorPrepare() {}
+
+            public static final String TEST_ID = "test_id";
+            public static final String DEVICE_ID = "device_id";
+            public static final String SESSION_ID = "session_id";
+            public static final String FLOW = "flow";
+            public static final String SERVER_PORT = "server_port";
+            public static final String NODE_LOG_DIR = "node_log_dir";
+        }
+
+        /** contracts/schemas/internal_generator_status.schema.json */
+        public static final class InternalGeneratorStatus {
+            private InternalGeneratorStatus() {}
+
+            public static final String GENERATOR_ID = "generator_id";
+            public static final String TEST_ID = "test_id";
+            public static final String FLOW_ID = "flow_id";
+            public static final String STATE = "state";
+            public static final String BOUND_PORT = "bound_port";
+            public static final String COUNTERS = "counters";
+            public static final String ERROR = "error";
+        }
+
+        /** contracts/schemas/internal_start_test.schema.json */
+        public static final class InternalStartTest {
+            private InternalStartTest() {}
+
+            public static final String TEST_ID = "test_id";
+            public static final String DEVICE_ID = "device_id";
+            public static final String SESSION_ID = "session_id";
+            public static final String SERVER_HOST = "server_host";
+            public static final String PLAN = "plan";
+            public static final String LOGGING_CONFIG_OVERRIDE = "logging_config_override";
+        }
+
+        /** contracts/schemas/internal_test_status.schema.json */
+        public static final class InternalTestStatus {
+            private InternalTestStatus() {}
+
+            public static final String TEST_ID = "test_id";
+            public static final String DEVICE_ID = "device_id";
+            public static final String STATE = "state";
+            public static final String FLOW_BINDINGS = "flow_bindings";
+            public static final String GENERATORS = "generators";
+            public static final String RESULT = "result";
+            public static final String ERROR = "error";
+        }
     }
 
     /** REST paths (OpenAPI operationId); fill {params} in order with {@link #path}. */
@@ -466,6 +1131,7 @@ public final class Contract {
 
         public static final int PORT = 47600;
         public static final int FAST_MAX_S = 3600;
+        public static final String TEST_FILE = "probe.jsonl.gz";
         public static final String PING = "PING";
         public static final String FAST = "FAST";
         public static final String RANGE = "RANGE";

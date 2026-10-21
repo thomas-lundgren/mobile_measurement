@@ -1,6 +1,7 @@
 //! Reach responders for the device's reachability check
 //! (`contracts/packets/reach.md`): on each configured port, answer
-//! `MPREACH1 <nonce>` with `MPREACH1 OK <nonce> <ip>:<port>` — the device's
+//! `MPREACH1 <nonce>` with `MPREACH1 OK <nonce> <ip>:<port>` (contracts/packets/reach.md,
+//! vectors in contracts/testvectors/packets/reach_v1.json) — the device's
 //! address as seen here, which shows NAT and proxies in the path.
 //!
 //! Configured by `MP_REACH_LISTEN`, e.g. `tcp:8443,udp:8443,tcp:3478`; the
@@ -122,6 +123,21 @@ mod tests {
         );
         assert!(parse_listen("sctp:1").is_err());
         assert!(parse_listen("tcp:99999").is_err());
+    }
+
+    #[test]
+    fn golden_reach_v1() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../contracts/testvectors/packets/reach_v1.json"
+        );
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        for c in doc["server"].as_array().unwrap() {
+            let peer: SocketAddr = c["peer"].as_str().unwrap().parse().unwrap();
+            let got = reply_for(c["request"].as_str().unwrap().as_bytes(), peer);
+            assert_eq!(got.as_deref(), c["reply"].as_str(), "{}", c["name"]);
+        }
     }
 
     #[test]

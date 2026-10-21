@@ -93,7 +93,7 @@ public final class ServerClient {
     public long serverTimeNs() throws Exception {
         Request req = new Request.Builder().url(base + Contract.Api.SERVER_TIME).get().build();
         try (Response r = http.newCall(req).execute()) {
-            return new JSONObject(bodyString(r)).getLong("server_utc_ns");
+            return new JSONObject(bodyString(r)).getLong(Contract.Fields.ServerTime.SERVER_UTC_NS);
         }
     }
 
@@ -106,7 +106,7 @@ public final class ServerClient {
     public int timeUdpPort() throws Exception {
         Request req = new Request.Builder().url(base + Contract.Api.SERVER_TIME).get().build();
         try (Response r = http.newCall(req).execute()) {
-            return new JSONObject(bodyString(r)).optInt("time_udp_port", 0);
+            return new JSONObject(bodyString(r)).optInt(Contract.Fields.ServerTime.TIME_UDP_PORT, 0);
         }
     }
 

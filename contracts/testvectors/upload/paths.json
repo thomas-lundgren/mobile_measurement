@@ -1,0 +1,41 @@
+{
+  "description": "Upload paths (contracts/schemas/upload_manifest.schema.json files[].path pattern): what the mobile may upload, test-relative. The server stores only these (server-main uploads::valid_upload_path), so a manifest can never name a file outside the test's folder. `base` (a subset of valid): the files the server still takes while it holds a device's upload away from home (contracts/upload/README.md, server-main uploads::is_base_path).",
+  "valid": [
+    "header.json",
+    "gps.parquet",
+    "radio.parquet",
+    "radio_0003.parquet",
+    "mobile/packets.parquet",
+    "mobile/packets_0000.parquet",
+    "mobile/packets_12345.parquet",
+    "mobile/events.parquet",
+    "mobile/clock.parquet",
+    "mobile/clock_0001.parquet",
+    "mobile/pings.parquet",
+    "mobile/probe.jsonl.gz"
+  ],
+  "invalid": [
+    "",
+    "/etc/passwd",
+    "../header.json",
+    "mobile/../../x.parquet",
+    "mobile/packets_01.parquet",
+    "mobile/packets_0000.parquet.tmp",
+    "server/packets_0000.parquet",
+    "mobile/summary.json",
+    "mobile/packets_000a.parquet",
+    "packets_0000.parquet",
+    "mobile//packets.parquet",
+    "header.json\n",
+    "Header.json"
+  ],
+  "base": [
+    "header.json",
+    "gps.parquet",
+    "radio.parquet",
+    "radio_0003.parquet",
+    "mobile/events.parquet",
+    "mobile/clock.parquet",
+    "mobile/clock_0001.parquet"
+  ]
+}

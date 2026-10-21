@@ -30,7 +30,7 @@ Non-goals:
 |---|---|
 | `versions.yaml`: `protocol_version`, `schema_version`, `auth_scheme_version` | Defined (all 1). Protocol checked at enroll/verify. |
 | `header.json` per test, with `app_version`, `schema_version`, `protocol_version`, plan, bindings | **Specified** (`contracts/schemas/header.schema.json`) **but not written** by the Logger or the server; uploaded tests have no header. |
-| `summary.json` per node | Specified, not written. |
+| `summary.json` per node | Retired 2026-10-21: summaries are an analysis product (spec §12.8). |
 | Logger version | `versionCode 1` / `versionName "0.1.0"` forever (`android/logger/build.gradle`). Not reported anywhere. |
 | Log readers | Forward compatible: unknown columns ignored, missing read as null (invariant 4; `analysis/fieldtest_analysis/loader.py`). |
 | Capability | Enrollment `Capability` has radio/QoS/mobility/timestamp sources, `supports_ping`; **no list of supported flow types**. |
