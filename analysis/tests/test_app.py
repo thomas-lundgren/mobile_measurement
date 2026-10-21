@@ -211,3 +211,20 @@ def test_open_loop_lateness_and_dropped_tasks():
     assert (t["loop"], t["started"], t["dropped"]) == ("open", 2, 1)
     (i,) = app.intent(td)
     assert i["late_ms"]["p50"] == 40 and i["conn_wait_ms"] is None
+
+
+def test_graph_wait_counts_from_the_last_dependency():
+    """A fetch planned with its task at 0 ms but waiting for a search that
+    ended at 500 ms, started at 510 ms: it waited 10 ms, not 510."""
+    base = {"flow_id": 4, "agent": 0, "task": 1, "activity": "web_fetch", "plan_up_bytes": 0, "plan_down_bytes": 10,
+            "plan_delay_ms": 0, "plan_rate_bps": 0, "planned_mono_ns": 0, "outcome": "ok", "bytes_down": 10}
+    rows = [
+        dict(base, object_id=1, step=1, step_kind="search", activity="web_search", after_objects=[],
+             start_mono_ns=0, first_byte_mono_ns=400 * MS, done_mono_ns=500 * MS),
+        dict(base, object_id=2, step=2, step_kind="fetch", after_objects=[1],
+             start_mono_ns=510 * MS, first_byte_mono_ns=600 * MS, done_mono_ns=700 * MS),
+    ]
+    td = synthetic_test()
+    td.app_events = pd.DataFrame(rows)
+    i = {x["activity"]: x for x in app.intent(td)}
+    assert i["web_fetch"]["conn_wait_ms"]["p50"] == 10

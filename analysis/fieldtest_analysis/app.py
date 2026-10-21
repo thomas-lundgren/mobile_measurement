@@ -244,13 +244,25 @@ def tasks(td) -> list[dict] | None:
 
 def intent(td) -> list[dict] | None:
     """Per activity, planned against observed: how long objects waited for a
-    connection (planned → start; closed loop), how late they started (due →
+    connection (ready → start; closed loop: ready is when the burst was
+    planned, in a task graph when the last object it waited for ended), how late they started (due →
     start; open loop), the server's planned think time against the observed
     wait for the first byte (the rest is network and upload), and for paced
     streams their planned length against the observed one."""
     ev = _app_events(td)
     if ev is None:
         return None
+    # when each object could start: planned, or in a task graph when the last
+    # object it waited for ended
+    done = dict(zip(ev["object_id"], pd.to_numeric(ev["done_mono_ns"], errors="coerce")))
+
+    def ready(r):
+        deps = r["after_objects"]
+        if deps is None or isinstance(deps, float) or len(deps) == 0:
+            return r["planned_mono_ns"]
+        return max(done.get(d, np.nan) for d in deps)
+
+    ev = ev.assign(ready_mono_ns=ev.apply(ready, axis=1))
     out = []
     for act, a in ev.groupby("activity"):
         started = a[a["start_mono_ns"].notna()]
@@ -263,7 +275,7 @@ def intent(td) -> list[dict] | None:
         out.append({
             "activity": act, "objects": len(a),
             "outcomes": {k: int(v) for k, v in a["outcome"].value_counts().items()},
-            "conn_wait_ms": stats.pcts(_ms(started["planned_mono_ns"], started["start_mono_ns"]), (50, 90), nd=0)
+            "conn_wait_ms": stats.pcts(_ms(started["ready_mono_ns"], started["start_mono_ns"]), (50, 90), nd=0)
             if started["due_mono_ns"].isna().all() else None,
             "late_ms": stats.pcts(_ms(started["due_mono_ns"], started["start_mono_ns"]), (50, 90), nd=0),
             "think_plan_ms": stats.pcts(think, (50, 90), nd=0),
