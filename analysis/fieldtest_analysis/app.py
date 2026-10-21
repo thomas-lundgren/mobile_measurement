@@ -20,6 +20,13 @@ download or an upload. So per object:
 Objects of one *episode* (``object_id >> 20``: a page view with its objects, a
 mail sync, a video segment burst) together give e.g. the **page load time**.
 
+**Tasks and intent** (tests whose phone wrote ``mobile/app_events_*.parquet``):
+the scheduler's own record of every object — agent → task → step, what the
+model asked for, and when it was planned, started, got its first byte and
+ended, with its outcome. ``tasks`` gives per kind of task (an AI agent's task,
+a page view, a mail sync, ...) how many finished and how long they took;
+``intent`` gives per activity what was planned against what happened.
+
 **Impact** on the realtime streams of the same test: their excess one-way
 delay (delay minus the stream's minimum, so the clock offset cancels) and loss
 while any app object was in flight versus while the apps were idle. Packets
@@ -167,6 +174,93 @@ def impact(td, obj: pd.DataFrame) -> list[dict]:
     return out
 
 
+#: What a task is, by the kind of its first step (enums.yaml app_step_kinds).
+TASK_KINDS = {
+    "llm_turn": "agent task",
+    "page_html": "page view",
+    "mail_sync": "mail sync",
+    "video_start": "video session",
+    "feed": "feed scroll",
+    "script_action": "script action",
+}
+
+
+def _ms(a, b) -> pd.Series:
+    """b − a in ms, NaN where either is missing."""
+    return (pd.to_numeric(b, errors="coerce") - pd.to_numeric(a, errors="coerce")) / 1e6
+
+
+def tasks(td) -> list[dict] | None:
+    """Per kind of task: how many started and finished, and for the finished
+    ones the task time (planned → last byte) and steps. A task finished when
+    every object was ``ok`` and the agent went on to another task (the last
+    task of each agent was still running when the test ended)."""
+    ev = td.app_events
+    if ev is None or ev.empty:
+        return None
+    ev = ev.copy()
+    ev["ok"] = ev["outcome"] == "ok"
+    key = ["flow_id", "agent", "task"]
+    g = ev.groupby(key, sort=True)
+    t = pd.DataFrame({
+        "first_kind": g.apply(lambda x: x.sort_values("step")["step_kind"].iloc[0], include_groups=False),
+        "steps": g["step"].max(),
+        "objects": g.size(),
+        "all_ok": g["ok"].all(),
+        "t0": g["planned_mono_ns"].min(),
+        "t1": g["done_mono_ns"].max(),
+    }).reset_index()
+    last = t.groupby(["flow_id", "agent"])["task"].transform("max")
+    t["finished"] = t["all_ok"] & (t["task"] < last)
+    t["kind"] = t["first_kind"].map(TASK_KINDS).fillna(t["first_kind"])
+    t["ms"] = _ms(t["t0"], t["t1"])
+    # task numbers are per agent: join the objects to their task's kind
+    ev = ev.merge(t[key + ["kind"]], on=key, how="left")
+    out = []
+    for kind, k in t.groupby("kind"):
+        f = k[k["finished"]]
+        out.append({
+            "kind": kind, "started": len(k), "finished": len(f),
+            "ms": stats.pcts(f["ms"], (50, 90), with_max=True, nd=0),
+            "steps": stats.pcts(f["steps"], (50, 90), nd=0),
+            "objects_not_ok": round(float((~ev[ev["kind"] == kind]["ok"]).mean()), 3),
+        })  # fmt: skip
+    return sorted(out, key=lambda x: -x["started"])
+
+
+def intent(td) -> list[dict] | None:
+    """Per activity, planned against observed: how long objects waited for a
+    connection (planned → start), the server's planned think time against
+    the observed wait for the first byte (the rest is network and upload),
+    and for paced streams their planned length against the observed one."""
+    ev = td.app_events
+    if ev is None or ev.empty:
+        return None
+    out = []
+    for act, a in ev.groupby("activity"):
+        started = a[a["start_mono_ns"].notna()]
+        ok = a[a["outcome"] == "ok"]
+        first = _ms(ok["start_mono_ns"], ok["first_byte_mono_ns"])
+        think = pd.to_numeric(ok["plan_delay_ms"], errors="coerce")
+        paced = ok[(pd.to_numeric(ok["plan_rate_bps"]) > 0) & (pd.to_numeric(ok["plan_down_bytes"]) > 0)]
+        plan_stream = pd.to_numeric(paced["plan_down_bytes"]) * 8 / pd.to_numeric(paced["plan_rate_bps"]) * 1e3
+        obs_stream = _ms(paced["first_byte_mono_ns"], paced["done_mono_ns"])
+        out.append({
+            "activity": act, "objects": len(a),
+            "outcomes": {k: int(v) for k, v in a["outcome"].value_counts().items()},
+            "conn_wait_ms": stats.pcts(_ms(started["planned_mono_ns"], started["start_mono_ns"]), (50, 90), nd=0),
+            "think_plan_ms": stats.pcts(think, (50, 90), nd=0),
+            "first_byte_ms": stats.pcts(first, (50, 90), nd=0),
+            "beyond_think_ms": stats.pcts(first - think, (50, 90), nd=0),
+            "stream_plan_ms": stats.pcts(plan_stream, (50,), nd=0),
+            "stream_ms": stats.pcts(obs_stream, (50,), nd=0),
+            "mbytes_plan": round(float(pd.to_numeric(a["plan_down_bytes"]).sum()) / 1e6, 2),
+            "mbytes_moved": round(float(pd.to_numeric(a["bytes_down"]).sum()) / 1e6, 2),
+            "new_conn_share": None if started.empty else round(float(started["new_connection"].fillna(False).astype(bool).mean()), 3),
+        })  # fmt: skip
+    return sorted(out, key=lambda x: -x["objects"])
+
+
 def analyze(td) -> dict | None:
     """Summary for one test, or None if it ran no app_traffic."""
     obj = objects(td)
@@ -199,4 +293,6 @@ def analyze(td) -> dict | None:
         "activities": sorted(acts, key=lambda a: -a["objects"]),
         "episodes": episodes,
         "impact": impact(td, obj),
+        "tasks": tasks(td),
+        "intent": intent(td),
     }

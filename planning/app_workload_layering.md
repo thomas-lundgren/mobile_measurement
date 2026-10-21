@@ -3,8 +3,9 @@
 **Status:** accepted with adjustments, 2026-10-20; **A done** (2026-10-20:
 `core/src/exchange.rs`); **A′ done** (2026-10-21: engine without names or
 rows, `exchange::Pool`, `core/tests/layering.rs`); **B1 done** (2026-10-21: model
-`StepMeta`, `scheduler` / `executor`, `app_events` log). Next: B2 (analysis
-and page). Supersedes the step order in
+`StepMeta`, `scheduler` / `executor`, `app_events` log); **B2 done**
+(2026-10-21: `app.tasks` / `app.intent`, Tasks and planned-vs-observed tables
+on the findings page). Next: C. Supersedes the step order in
 `ai_traffic_implementation_plan.md` (see its "Order" section).
 
 ## 1. The proposal (summary)
@@ -149,8 +150,12 @@ turns bursts into `Operation`s and writes `mobile/app_events_<flow>.parquet`;
 `app_traffic/executor.rs` runs a burst through `exchange` and reports a
 `Done` (start, first byte, end, bytes, outcome, new connection) per
 operation. Contract: `parquet/app_events.parquet.yaml`, `enums.yaml`
-`app_step_kinds` / `app_outcomes`, the upload path. **B2:** analysis (tasks,
-planned vs observed) and the page.
+`app_step_kinds` / `app_outcomes`, the upload path. **B2 (done):**
+`analysis` `app.tasks` (per kind of task: started, finished, task time,
+steps, objects not ok) and `app.intent` (per activity: wait for a connection,
+planned think against observed first byte, planned against observed stream
+length, outcomes, new connections); both on the findings page's App traffic
+tab.
 
 - `Operation { id, agent, task, step, kind, activity, engine, fetch,
   after: Vec<id>, parallel_group }` emitted by the models (today's `Step` +

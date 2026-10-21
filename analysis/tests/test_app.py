@@ -125,3 +125,66 @@ def test_sends_after_the_receiver_stopped_are_not_loss():
     td.packets = pd.concat([pk, tail], ignore_index=True)
     [i] = app.impact(td, app.objects(td))
     assert i["idle"]["loss"] == 0.0
+
+
+def _events():
+    """app_events of two agents. Agent 0 (an AI agent): task 1 = LLM turn,
+    two tools, LLM turn, all ok, 0 → 5 s; task 2 = an LLM turn cut by the
+    test's end. Agent 1: page views, task 1 (HTML + 2 objects) done in
+    400 ms, task 2 still running at the end."""
+    rows = []
+
+    def ev(agent, task, step, kind, act, t_plan, t_start, t_first, t_done, outcome="ok", **plan):
+        rows.append({
+            "flow_id": 4, "object_id": len(rows), "agent": agent, "task": task, "step": step,
+            "step_kind": kind, "activity": act, "episode": 0, "parallel": 1,
+            "plan_up_bytes": plan.get("up", 0), "plan_down_bytes": plan.get("down", 1000),
+            "plan_delay_ms": plan.get("delay", 0), "plan_rate_bps": plan.get("rate", 0), "plan_chunk_bytes": 0,
+            "planned_mono_ns": t_plan * MS, "start_mono_ns": None if t_start is None else t_start * MS,
+            "first_byte_mono_ns": None if t_first is None else t_first * MS,
+            "done_mono_ns": None if t_done is None else t_done * MS,
+            "bytes_up": 44, "bytes_down": plan.get("down", 1000) if outcome == "ok" else 10,
+            "outcome": outcome, "new_connection": step == 1,
+        })  # fmt: skip
+
+    # LLM: 900 ms think, observed first byte 1000 ms; 6000 B at 48 kbit/s = 1000 ms planned, 1200 observed
+    ev(0, 1, 1, "llm_turn", "llm_call", 0, 10, 1010, 2210, delay=900, down=6000, rate=48_000)
+    ev(0, 1, 2, "tools", "mcp_call", 2210, 2220, 2400, 2500, delay=150)
+    ev(0, 1, 2, "tools", "web_fetch", 2210, 2300, 2500, 2700, delay=100)
+    ev(0, 1, 3, "llm_turn", "llm_call", 2700, 2700, 3700, 5000, delay=900, down=6000, rate=48_000)
+    ev(0, 2, 1, "llm_turn", "llm_call", 9000, 9000, None, None, outcome="stopped", delay=900)
+    ev(1, 1, 1, "page_html", "web_page", 0, 0, 50, 100)
+    ev(1, 1, 2, "page_objects", "web_object", 100, 100, 150, 300)
+    ev(1, 1, 2, "page_objects", "web_object", 100, 120, 200, 400)
+    ev(1, 2, 1, "page_html", "web_page", 9000, 9000, 9050, 9100)
+    td = synthetic_test()
+    td.app_events = pd.DataFrame(rows)
+    return td
+
+
+def test_tasks_finished_time_and_steps():
+    t = {x["kind"]: x for x in app.tasks(_events())}
+    agent = t["agent task"]
+    assert (agent["started"], agent["finished"]) == (2, 1)
+    assert agent["ms"]["p50"] == 5000  # planned 0 → last byte 5000 ms
+    assert agent["steps"]["p50"] == 3
+    assert agent["objects_not_ok"] == 0.2  # 1 of agent 0's 5 objects
+    page = t["page view"]
+    assert (page["started"], page["finished"]) == (2, 1)  # the last one was still open
+    assert page["ms"]["p50"] == 400
+
+
+def test_intent_planned_against_observed():
+    i = {x["activity"]: x for x in app.intent(_events())}
+    llm = i["llm_call"]
+    assert llm["outcomes"] == {"ok": 2, "stopped": 1}
+    assert llm["think_plan_ms"]["p50"] == 900
+    assert llm["first_byte_ms"]["p50"] == 1000
+    assert llm["beyond_think_ms"]["p50"] == 100
+    assert llm["stream_plan_ms"]["p50"] == 1000 and llm["stream_ms"]["p50"] == 1250  # 1200, 1300
+    fetch = i["web_fetch"]
+    assert fetch["conn_wait_ms"]["p50"] == 90  # planned 2210, started 2300
+
+
+def test_no_app_events_no_tasks():
+    assert app.tasks(synthetic_test()) is None and app.intent(synthetic_test()) is None
