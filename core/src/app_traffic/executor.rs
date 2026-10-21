@@ -7,6 +7,7 @@
 
 use std::io;
 use std::net::TcpStream;
+use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -20,6 +21,7 @@ use crate::exchange::{self, Pool};
 use crate::log_writer::{Direction, LogSink, PacketRow};
 use crate::packet::{AppBurstRequest, AppExchange};
 use crate::timestamp::Timestamp;
+use crate::udp_timing;
 
 /// How an operation's bytes move (`enums.yaml` app_engines, in order).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,6 +262,8 @@ fn run_one(x: &Exec, pool: &Mutex<Pool>, op: &Operation) -> Done {
             Err(_) => return Done::not_started(Outcome::Skipped),
         },
     };
+    // mark (or unmark: a pooled connection may carry an earlier marking)
+    let _ = udp_timing::set_tos(conn.as_raw_fd(), op.dscp.map_or(0, |d| d << 2));
     let d = transfer(x, &mut conn, op, fresh);
     if op.engine == Engine::Exchange && d.outcome == Outcome::Ok {
         pool.lock().unwrap().put_back(vec![conn]);
@@ -283,7 +287,7 @@ fn udp_burst(x: &Exec, server: &str, op: &Operation) -> Done {
         object_id: op.id,
         activity: f.activity,
         direction,
-        dscp: burst::UNMARKED,
+        dscp: op.dscp.unwrap_or(burst::UNMARKED),
         count,
         size,
         interval_us: interval.as_micros() as u32,
@@ -347,10 +351,9 @@ fn transfer(x: &Exec, conn: &mut TcpStream, op: &Operation, fresh: bool) -> Done
     let (mut start, mut first_byte) = (None, None);
     let (mut up, mut down) = (0u64, 0u64);
     let r = exchange::transfer(conn, &ex, x.stop, |dir, n| {
-        x.sink
-            .lock()
-            .unwrap()
-            .push(PacketRow::exchange(x.flow_id, &ex, false, dir, n));
+        x.sink.lock().unwrap().push(PacketRow::exchange_marked(
+            x.flow_id, &ex, false, dir, n, op.dscp,
+        ));
         match dir {
             Direction::Sent => {
                 start.get_or_insert_with(Timestamp::now);
@@ -399,6 +402,7 @@ mod tests {
             after: None,
             due: None,
             engine: Engine::Exchange,
+            dscp: None,
             meta: StepMeta {
                 task: 1,
                 step: 1,

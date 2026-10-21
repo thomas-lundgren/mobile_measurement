@@ -143,6 +143,7 @@ APP_EVENTS = [
     "step_kind",
     "activity",
     "engine",
+    "dscp",
     "episode",
     "after_episode",
     "after_objects",

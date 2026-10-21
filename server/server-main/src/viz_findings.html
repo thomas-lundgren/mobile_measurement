@@ -224,6 +224,13 @@
         connections) or bulk (a connection of its own per object). <b>Outcomes</b>: ok, timeout, stopped (the
         test ended), error (connection lost), skipped (no connection).</p>
       <div class="scroll"><table id="appIntent"></table></div>
+      <h2>UDP bursts</h2>
+      <p class="intro">Objects moved as paced UDP datagrams (engine <code>udp_burst</code>) per activity and direction:
+        datagrams that <b>arrived</b> of those planned, the received datagrams' <b>extra delay</b> (above that
+        stream's own minimum, so the clock offset cancels), <b>IPDV</b> (how much the gap between consecutive
+        datagrams of a burst changed on the way) and the <b>DSCP</b>: what the sender marked, and the share that
+        arrived still marked (<b>kept</b>) — a network that ignores or bleaches the marking shows here.</p>
+      <div class="scroll"><table id="appBursts"></table></div>
     </section>
   </div>
 
@@ -419,6 +426,15 @@ function renderApp() {
       a.stream_ms ? `${one(a.stream_plan_ms)} / ${one(a.stream_ms)}` : '<span class="muted">–</span>',
       pct(a.new_conn_share), `${num(a.mbytes_plan, 2)} / ${num(a.mbytes_moved, 2)}`])),
     "No tests with the phone's task record this day.");
+  const p99 = (p) => (p ? `${num(p.p50, 1)} / ${num(p.p99, 1)}` : '<span class="muted">–</span>');
+  const mark = (b) => (b.dscp_sent == null ? '<span class="muted">unmarked</span>'
+    : `${b.dscp_sent} → ${Object.entries(b.dscp_recv || {}).map(([d, n]) => `${d}×${n}`).join(", ") || "–"}`
+      + (b.dscp_kept == null ? "" : ` <span class="muted">(${pct(b.dscp_kept)} kept)</span>`));
+  table($("appBursts"), [["Time"], ["Activity"], ["Direction"], ["Bursts", "num"], ["Arrived / planned", "num"],
+    ["Loss", "num"], ["Extra delay p50 / p99 ms", "num"], ["IPDV p50 / p99 ms", "num"], ["DSCP sent → received"]],
+    ts.flatMap((t) => (t.app.bursts || []).map((b) => [when(t), esc(b.activity), esc(b.direction), num(b.bursts),
+      `${b.arrived} / ${b.planned}`, pct(b.loss), p99(b.extra_delay_ms), p99(b.ipdv_ms), mark(b)])),
+    "No UDP bursts this day.");
 }
 
 const KIND_CLASS = {

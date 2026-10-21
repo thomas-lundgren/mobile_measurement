@@ -282,6 +282,7 @@
               "workers": 2,
               "placement": "hybrid",
               "engines": { "web_fetch": "bulk" },
+              "dscp": { "llm_call": 46 },
               "loop": "open",
               "task_interval_s": 30,
               "max_open_tasks": 3,

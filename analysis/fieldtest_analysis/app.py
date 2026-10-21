@@ -292,11 +292,86 @@ def intent(td) -> list[dict] | None:
     return sorted(out, key=lambda x: -x["objects"])
 
 
+def bursts(td) -> list[dict] | None:
+    """UDP bursts (engine udp_burst) per activity and direction: datagrams
+    that arrived of those planned, the received datagrams' extra one-way
+    delay (above the burst stream's minimum, so the clock offset cancels) and
+    delay variation between consecutive datagrams of a burst (IPDV), and the
+    DSCP: what the sender marked and the share that arrived with it."""
+    ev = _app_events(td)
+    pk = td.packets
+    if ev is None or pk is None or pk.empty or "app_packet_index" not in pk:
+        return None
+    ev = ev[ev["engine"] == "udp_burst"]
+    if ev.empty:
+        return None
+    pk = pk[(pk["protocol"] == schema.PROTO_UDP) & pk["app_packet_index"].notna()]
+    out = []
+    for (act, direction), sender, receiver in (
+        (key, *nodes)
+        for key, nodes in {
+            (a, d): (("server", "mobile") if d == "downlink" else ("mobile", "server"))
+            for a in sorted(ev["activity"].unique())
+            for d in ("downlink", "uplink")
+        }.items()
+    ):
+        objs = ev[(ev["activity"] == act) & ((ev["plan_down_bytes"] > 0) == (direction == "downlink"))]
+        if objs.empty:
+            continue
+        rows = pk[pk["sequence_number"].isin(objs["object_id"])]
+        rx = rows[(rows["node"] == receiver) & (rows["direction"] == schema.DIR_RECEIVED)]
+        tx = rows[(rows["node"] == sender) & (rows["direction"] == schema.DIR_SENT)]
+        rec = {
+            "activity": act, "direction": direction, "bursts": len(objs),
+            "planned": int(pd.to_numeric(objs["plan_packets"]).sum()),
+            "arrived": int(pd.to_numeric(objs["packets"]).fillna(0).sum()),
+            "extra_delay_ms": None, "ipdv_ms": None, "dscp_sent": None, "dscp_kept": None,
+        }  # fmt: skip
+        rec["loss"] = round(1 - rec["arrived"] / rec["planned"], 4) if rec["planned"] else None
+        if not rx.empty and rx["sender_utc_ns"].notna().any():
+            r = rx.assign(
+                owd=pd.to_numeric(rx["utc_ns"], errors="coerce") - pd.to_numeric(rx["sender_utc_ns"], errors="coerce"),
+                sent=pd.to_numeric(rx["sender_utc_ns"], errors="coerce"),
+                at=pd.to_numeric(rx["utc_ns"], errors="coerce"),
+            ).sort_values(["sequence_number", "app_packet_index"])
+            rec["extra_delay_ms"] = stats.pcts((r["owd"] - r["owd"].min()) / 1e6, (50, 99))
+            g = r.groupby("sequence_number")
+            ipdv = ((g["at"].diff() - g["sent"].diff()).abs() / 1e6).dropna()
+            rec["ipdv_ms"] = stats.pcts(ipdv, (50, 99), nd=2)
+        marks = pd.to_numeric(tx.get("dscp_sent"), errors="coerce").dropna() if not tx.empty else pd.Series(dtype=float)
+        if not marks.empty:
+            mark = int(marks.mode().iloc[0])
+            rec["dscp_sent"] = mark
+            got = pd.to_numeric(rx.get("dscp_recv"), errors="coerce").dropna() if not rx.empty else pd.Series(dtype=float)
+            rec["dscp_kept"] = round(float((got == mark).mean()), 3) if not got.empty else None
+            rec["dscp_recv"] = {int(k): int(v) for k, v in got.value_counts().items()} if not got.empty else {}
+        out.append(rec)
+    return out or None
+
+
+def _burst_intervals(td) -> pd.DataFrame:
+    """When each UDP burst was in flight (app_events, UTC): the app was busy
+    then too, though no TCP object was."""
+    ev = _app_events(td)
+    if ev is None:
+        return pd.DataFrame(columns=["t_req", "t_end"])
+    b = ev[(ev["engine"] == "udp_burst") & ev["start_utc_ns"].notna()]
+    return pd.DataFrame({"t_req": pd.to_numeric(b["start_utc_ns"]), "t_end": pd.to_numeric(b["done_utc_ns"])})
+
+
 def analyze(td) -> dict | None:
     """Summary for one test, or None if it ran no app_traffic."""
     obj = objects(td)
-    if obj.empty:
+    burst, burst_stats = _burst_intervals(td), bursts(td)
+    if obj.empty and burst.empty and burst_stats is None:
         return None
+    parts = [x for x in (obj[["t_req", "t_end"]] if not obj.empty else None, burst) if x is not None and not x.empty]
+    busy = pd.concat(parts) if parts else pd.DataFrame(columns=["t_req", "t_end"])
+    if obj.empty:
+        return {
+            "objects": 0, "mbytes_down": 0.0, "mbytes_up": 0.0, "span_s": None, "activities": [], "episodes": [],
+            "impact": impact(td, busy), "tasks": tasks(td), "intent": intent(td), "bursts": burst_stats,
+        }  # fmt: skip
     ep = _episodes(obj)
     acts = []
     for act, g in obj.groupby("activity"):
@@ -323,7 +398,8 @@ def analyze(td) -> dict | None:
         "span_s": round(float(span), 1) if np.isfinite(span) else None,
         "activities": sorted(acts, key=lambda a: -a["objects"]),
         "episodes": episodes,
-        "impact": impact(td, obj),
+        "impact": impact(td, busy),
         "tasks": tasks(td),
         "intent": intent(td),
+        "bursts": burst_stats,
     }

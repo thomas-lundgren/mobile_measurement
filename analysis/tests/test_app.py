@@ -228,3 +228,36 @@ def test_graph_wait_counts_from_the_last_dependency():
     td.app_events = pd.DataFrame(rows)
     i = {x["activity"]: x for x in app.intent(td)}
     assert i["web_fetch"]["conn_wait_ms"]["p50"] == 10
+
+
+def test_udp_bursts_loss_delay_and_dscp():
+    """One downlink burst of 4 datagrams, 10 ms apart, marked EF by the
+    server: 3 arrive (one lost), the third 5 ms late, two of the three still
+    EF and one bleached to 0."""
+    oid = (7 << 20) | 1
+    ev = pd.DataFrame([{
+        "flow_id": 4, "object_id": oid, "agent": 0, "task": 1, "step": 1, "activity": "video_chunk",
+        "engine": "udp_burst", "plan_down_bytes": 4800, "plan_packets": 4, "packets": 3, "outcome": "ok",
+        "planned_mono_ns": 0,
+    }])  # fmt: skip
+    rows = []
+    base = 1_000 * MS
+    for i in range(4):
+        sent = base + i * 10 * MS
+        tag = {"flow_id": 4, "sequence_number": oid, "protocol": "UDP", "app_activity": "video_chunk",
+               "app_packet_index": i, "payload_size": 1200}
+        rows.append(dict(tag, node="server", direction="SENT", utc_ns=sent, mono_ns=sent, dscp_sent=46))
+        if i == 1:
+            continue  # lost
+        late = 5 * MS if i == 2 else 0
+        rows.append(dict(tag, node="mobile", direction="RECEIVED", utc_ns=sent + 20 * MS + late, mono_ns=sent,
+                         sender_utc_ns=sent, sender_mono_ns=sent, dscp_recv=0 if i == 3 else 46))
+    td = synthetic_test(packets=make_packets(rows))
+    td.app_events = ev
+    (b,) = app.bursts(td)
+    assert (b["direction"], b["bursts"], b["planned"], b["arrived"], b["loss"]) == ("downlink", 1, 4, 3, 0.25)
+    assert b["extra_delay_ms"]["p50"] == 0.0 and b["extra_delay_ms"]["p99"] == 4.9  # 0, 5, 0 ms
+    assert b["ipdv_ms"]["p50"] == 5.0  # 0→2: 5 ms late; 2→3: 5 ms early again
+    assert (b["dscp_sent"], b["dscp_kept"]) == (46, 0.667)
+    # a test of UDP bursts alone still has an app summary
+    assert app.analyze(td)["bursts"] == [b]

@@ -35,8 +35,8 @@ columns:
 
   # DSCP transparency (dscp_probe flow only — null for all other flow types).
   # See contracts/packets/dscp_probe.md for the measurement protocol.
-  - { name: dscp_sent, type: uint8, nullable: true, doc: "DSCP value (0–63) this node intended to set on the outgoing IP packet. Present for dscp_probe SENT rows; null otherwise." }
-  - { name: dscp_recv, type: uint8, nullable: true, doc: "DSCP value (0–63) actually observed in the received packet's IP header (via IP_RECVTOS / IPV6_RECVTCLASS). Present for dscp_probe RECEIVED rows; null otherwise." }
+  - { name: dscp_sent, type: uint8, nullable: true, doc: "DSCP value (0–63) this node intended to set on the outgoing IP packet. Present for dscp_probe SENT rows, marked udp_burst SENT rows and marked app exchange SENT rows on the mobile; null otherwise." }
+  - { name: dscp_recv, type: uint8, nullable: true, doc: "DSCP value (0–63) actually observed in the received packet's IP header (via IP_RECVTOS / IPV6_RECVTCLASS). Present for dscp_probe and udp_burst RECEIVED rows (the socket reports it); null otherwise." }
 
   # Delivery timing / back pressure (realtime_udp only — null otherwise).
   # See spec "Realtime UDP Flow" (delivery timing and back pressure) and core/src/udp_timing.rs.

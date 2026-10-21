@@ -101,6 +101,9 @@ pub enum Flow {
         /// unlisted activities use exchange.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         engines: Option<std::collections::BTreeMap<String, AppEngine>>,
+        /// DSCP per activity (activity name -> 0–63); unlisted: unmarked.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        dscp: Option<std::collections::BTreeMap<String, u8>>,
         /// profiles "agent", "websearch": closed (default) or open loop.
         #[serde(rename = "loop", skip_serializing_if = "Option::is_none", default)]
         loop_mode: Option<AppLoop>,

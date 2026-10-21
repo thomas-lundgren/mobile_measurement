@@ -97,6 +97,9 @@ pub struct UeFlow {
     /// app_traffic: activity name -> "exchange" | "bulk".
     #[serde(default)]
     pub engines: Option<std::collections::BTreeMap<String, String>>,
+    /// app_traffic: activity name -> DSCP (0–63).
+    #[serde(default)]
+    pub dscp: Option<std::collections::BTreeMap<String, u8>>,
     /// app_traffic "closed" (default) | "open".
     #[serde(default, rename = "loop")]
     pub loop_mode: Option<String>,
@@ -318,6 +321,12 @@ fn spawn_flow(
                                     crate::app_traffic::Engine::parse(e)?,
                                 ))
                             })
+                            .collect(),
+                        dscp: flow
+                            .dscp
+                            .iter()
+                            .flatten()
+                            .map(|(act, d)| (crate::packet::app_activity_code(act), (*d).min(63)))
                             .collect(),
                         open: (flow.loop_mode.as_deref() == Some("open")).then(|| {
                             crate::app_traffic::OpenLoop {

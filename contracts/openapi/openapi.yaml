@@ -1047,6 +1047,17 @@ components:
             items:
               $ref: '#/components/schemas/AppAction'
             description: 'profile "script" only: the timeline to run.'
+          dscp:
+            type:
+            - object
+            - 'null'
+            description: 'DSCP per activity (activity name -> 0–63); unlisted: unmarked.'
+            additionalProperties:
+              type: integer
+              format: int32
+              minimum: 0
+            propertyNames:
+              type: string
           engines:
             type:
             - object

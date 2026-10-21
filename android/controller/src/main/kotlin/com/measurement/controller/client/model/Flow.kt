@@ -45,6 +45,7 @@ import com.google.gson.annotations.SerializedName
  * @param targetBytes 
  * @param pingIntervalMs Probe cadence in ms. Default 1000.
  * @param actions profile \"script\" only: the timeline to run.
+ * @param dscp DSCP per activity (activity name -> 0–63); unlisted: unmarked.
  * @param engines How each activity's objects move (activity name -> engine); unlisted activities use exchange.
  * @param loop profiles \"agent\", \"websearch\": closed (default) or open loop.
  * @param maxOpenTasks loop open: unfinished tasks per user before an arriving one is dropped (default 4).
@@ -99,6 +100,10 @@ data class Flow (
     /* profile \"script\" only: the timeline to run. */
     @SerializedName("actions")
     val actions: kotlin.collections.List<AppAction>? = null,
+
+    /* DSCP per activity (activity name -> 0–63); unlisted: unmarked. */
+    @SerializedName("dscp")
+    val dscp: kotlin.collections.Map<kotlin.String, kotlin.Int>? = null,
 
     /* How each activity's objects move (activity name -> engine); unlisted activities use exchange. */
     @SerializedName("engines")

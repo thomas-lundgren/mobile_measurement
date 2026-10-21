@@ -83,9 +83,11 @@ pub struct PacketRow {
     pub sender: Option<Timestamp>,
     pub expected_interval_ns: Option<u64>,
     pub actual_interval_ns: Option<u64>,
-    /// DSCP value set on outgoing packet (dscp_probe SENT rows; null for all other types).
+    /// DSCP value set on the outgoing packet (dscp_probe, marked udp_burst and
+    /// marked app exchange SENT rows; null otherwise).
     pub dscp_sent: Option<u8>,
-    /// DSCP value read from received packet IP header (dscp_probe RECEIVED rows; null otherwise).
+    /// DSCP value read from the received packet's IP header (dscp_probe and
+    /// udp_burst RECEIVED rows; null otherwise).
     pub dscp_recv: Option<u8>,
     /// Delivery-timing / back-pressure detail (realtime UDP); empty otherwise.
     pub timing: PacketTiming,
@@ -192,6 +194,7 @@ impl PacketRow {
                 mono_ns: d.send_mono_ns,
                 utc_ns: d.send_utc_ns,
             }),
+            dscp_sent: io.dscp_sent,
             dscp_recv: io.tos.map(|t| t >> 2),
             timing: PacketTiming {
                 kernel_rx_utc_ns: io.kernel_utc_ns,
@@ -221,7 +224,20 @@ impl PacketRow {
         direction: Direction,
         size: usize,
     ) -> Self {
+        Self::exchange_marked(flow_id, x, v1, direction, size, None)
+    }
+
+    /// `exchange`, with the DSCP the sender marked its SENT rows with.
+    pub fn exchange_marked(
+        flow_id: u32,
+        x: &AppExchange,
+        v1: bool,
+        direction: Direction,
+        size: usize,
+        dscp: Option<u8>,
+    ) -> Self {
         Self {
+            dscp_sent: dscp.filter(|_| direction == Direction::Sent),
             timing: PacketTiming {
                 app_activity: Some(app_activity_name(x.activity)),
                 app_object_bytes: Some(if v1 {

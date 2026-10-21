@@ -5,6 +5,7 @@
 #   app-agent, app-agent4, app-agent-device/-cloud/-hybrid (AI agents)
 #   app-websearch, app-websearch-cloud/-hybrid (an agent answering by web search: task graphs)
 #   app-websearch-open, app-agent-open (open loop: tasks arrive every ~TASK_S s, default 20)
+#   app-video-tcp, app-video-udp, app-video-udp-ef (the same video over TCP, paced UDP, UDP marked EF)
 # PHASE_SEC (default 90), SCALE (object size factor, default 1.0), SEED.
 # Data per default cycle: roughly 100-200 MB.
 # One cycle per run; appends to ~/mp-data/logs/app.log. Each phase waits (up
@@ -40,4 +41,8 @@ phase app-websearch-hybrid "$PHASE" "[$UDP, $(users websearch 2 hybrid)]"
 # the same users (same SEED) in open loop: work arrives whatever the network does
 phase app-websearch-open   "$PHASE" "[$UDP, $(users websearch 2 device "$OPEN")]"
 phase app-agent-open       "$PHASE" "[$UDP, $(users agent 2 device "$OPEN")]"
+# the same video sessions (same SEED): segments over TCP, as paced UDP bursts, and marked EF
+phase app-video-tcp    "$PHASE" "[$UDP, $(users video 1)]"
+phase app-video-udp    "$PHASE" "[$UDP, $(users video 1 "" '"engines":{"video_chunk":"udp_burst"}')]"
+phase app-video-udp-ef "$PHASE" "[$UDP, $(users video 1 "" '"engines":{"video_chunk":"udp_burst"},"dscp":{"video_chunk":46}')]"
 log "app cycle done"

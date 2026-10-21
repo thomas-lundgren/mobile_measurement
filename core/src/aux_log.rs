@@ -14,7 +14,7 @@ use std::sync::Arc;
 use arrow::array::{
     Array, ArrayRef, BooleanArray, Float32Array, Float64Array, Int32Array, Int32Builder,
     Int64Array, ListBuilder, RecordBatch, StringArray, StructBuilder, UInt32Array, UInt32Builder,
-    UInt64Array, UInt64Builder,
+    UInt64Array, UInt64Builder, UInt8Array,
 };
 use arrow::datatypes::{DataType, Field, Fields, Schema};
 use parquet::arrow::ArrowWriter;
@@ -503,6 +503,7 @@ pub struct AppEventRow {
     pub step_kind: &'static str,
     pub activity: &'static str,
     pub engine: &'static str,
+    pub dscp: Option<u8>,
     pub episode: u64,
     pub after_episode: Option<u64>,
     pub after_objects: Option<Vec<u64>>,
@@ -542,6 +543,7 @@ fn app_events_schema() -> Schema {
         utf8("step_kind"),
         utf8("activity"),
         utf8("engine"),
+        Field::new("dscp", DataType::UInt8, true),
         u64n("episode", false),
         u64n("after_episode", true),
         Field::new(
@@ -608,6 +610,9 @@ pub fn write_app_events(
             strs(&|r| r.step_kind),
             strs(&|r| r.activity),
             strs(&|r| r.engine),
+            Arc::new(UInt8Array::from(
+                rows.iter().map(|r| r.dscp).collect::<Vec<_>>(),
+            )) as _,
             u64s(&|r| r.episode),
             opt64(&|r| r.after_episode),
             {

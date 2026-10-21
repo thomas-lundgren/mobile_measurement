@@ -90,6 +90,52 @@ pub fn set_tos(fd: RawFd, tos: u8) -> io::Result<()> {
     setsockopt_int(fd, libc::IPPROTO_IP, libc::IP_TOS, tos as libc::c_int)
 }
 
+/// `send_to` with this datagram alone marked `tos` (`dscp << 2`): an
+/// `IP_TOS` control message, so concurrent senders sharing one socket each
+/// keep their own marking. IPv4 destinations only (the UE reaches the server
+/// over IPv4): `Unsupported` for others, which the caller sends unmarked.
+pub fn send_to_tos(fd: RawFd, buf: &[u8], to: SocketAddr, tos: u8) -> io::Result<usize> {
+    let SocketAddr::V4(v4) = to else {
+        return Err(io::ErrorKind::Unsupported.into());
+    };
+    let addr = libc::sockaddr_in {
+        sin_family: libc::AF_INET as libc::sa_family_t,
+        sin_port: v4.port().to_be(),
+        sin_addr: libc::in_addr {
+            s_addr: u32::from_ne_bytes(v4.ip().octets()),
+        },
+        sin_zero: [0; 8],
+    };
+    let mut iov = libc::iovec {
+        iov_base: buf.as_ptr() as *mut libc::c_void,
+        iov_len: buf.len(),
+    };
+    let mut cmsg_buf = [0u64; 4]; // room for one int-sized cmsg, aligned
+    let mut msg: libc::msghdr = unsafe { mem::zeroed() };
+    msg.msg_name = &addr as *const _ as *mut libc::c_void;
+    msg.msg_namelen = mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
+    msg.msg_controllen = unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as u32) } as _;
+    unsafe {
+        let cmsg = libc::CMSG_FIRSTHDR(&msg);
+        (*cmsg).cmsg_level = libc::IPPROTO_IP;
+        (*cmsg).cmsg_type = libc::IP_TOS;
+        (*cmsg).cmsg_len = libc::CMSG_LEN(mem::size_of::<libc::c_int>() as u32) as _;
+        std::ptr::write_unaligned(
+            libc::CMSG_DATA(cmsg) as *mut libc::c_int,
+            tos as libc::c_int,
+        );
+    }
+    let n = unsafe { libc::sendmsg(fd, &msg, 0) };
+    if n < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(n as usize)
+    }
+}
+
 /// Back-pressure mode for a sending socket: `SO_SNDBUF` = `bytes` (the kernel
 /// doubles it and enforces a small minimum) and qdisc drops reported via
 /// `IP_RECVERR`. Returns the effective buffer size the kernel reports.

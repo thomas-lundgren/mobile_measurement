@@ -51,6 +51,8 @@ pub struct AppTraffic {
     /// How each activity's objects move (activity code -> engine); others
     /// use `Engine::Exchange`.
     pub engines: std::collections::BTreeMap<u8, Engine>,
+    /// DSCP per activity code (0–63); others unmarked.
+    pub dscp: std::collections::BTreeMap<u8, u8>,
 }
 
 /// How tasks arrive in open loop.
@@ -89,6 +91,8 @@ pub struct Operation {
     /// Open loop: when it is due.
     pub due: Option<Timestamp>,
     pub engine: Engine,
+    /// DSCP to mark it with; none: unmarked.
+    pub dscp: Option<u8>,
     pub meta: StepMeta,
     pub fetch: Fetch,
     pub parallel: usize,
@@ -307,6 +311,7 @@ fn operations(
                 .get(&n.fetch.activity)
                 .copied()
                 .unwrap_or(Engine::Exchange),
+            dscp: cfg.dscp.get(&n.fetch.activity).copied(),
             meta: n.meta,
             fetch: n.fetch,
             parallel,
@@ -332,6 +337,7 @@ fn row(flow_id: u32, op: &Operation, d: Done) -> AppEventRow {
         step_kind: op.meta.kind,
         activity: activity_name(f.activity),
         engine: op.engine.as_str(),
+        dscp: op.dscp,
         episode: op.episode,
         after_episode: op.after_episode,
         after_objects: op.after.clone(),

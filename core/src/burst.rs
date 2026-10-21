@@ -54,6 +54,8 @@ pub struct BurstIo<'a> {
     /// and the IP TOS byte.
     pub kernel_utc_ns: Option<u64>,
     pub tos: Option<u8>,
+    /// SENT: the DSCP the datagram was marked with; none when unmarked.
+    pub dscp_sent: Option<u8>,
 }
 
 /// What a burst moved, for the caller's record.
@@ -105,6 +107,9 @@ pub fn run(
 ) -> io::Result<BurstResult> {
     let fd = sock.as_raw_fd();
     let mut r = BurstResult::default();
+    // the phone marks everything it sends for this burst
+    let dscp_sent = (req.dscp != UNMARKED).then_some(req.dscp & 0x3F);
+    let _ = udp_timing::set_tos(fd, dscp_sent.map_or(0, |d| d << 2));
     let head = req.to_bytes();
     let send = |b: &[u8], r: &mut BurstResult| {
         if sock.send(b).is_ok() {
@@ -147,6 +152,7 @@ pub fn run(
                     data: &d,
                     kernel_utc_ns: None,
                     tos: None,
+                    dscp_sent,
                 });
             }
         }
@@ -228,6 +234,7 @@ pub fn run(
             data: &d,
             kernel_utc_ns: rx.kernel_utc_ns,
             tos: rx.tos,
+            dscp_sent: None,
         });
         if r.received == req.count {
             return Ok(r);
@@ -306,6 +313,7 @@ pub fn serve(sock: &UdpSocket, stop: &AtomicBool, on_io: &(dyn Fn(BurstIo, u8) +
                         data: &d,
                         kernel_utc_ns: rx.kernel_utc_ns,
                         tos: rx.tos,
+                        dscp_sent: None,
                     },
                     activity,
                 );
@@ -326,7 +334,8 @@ pub fn serve(sock: &UdpSocket, stop: &AtomicBool, on_io: &(dyn Fn(BurstIo, u8) +
     });
 }
 
-/// A downlink burst: the think time, then the datagrams, paced, to `to`.
+/// A downlink burst: the think time, then the datagrams, paced, to `to`,
+/// each marked with the request's DSCP (per datagram: the socket is shared).
 fn send_burst(
     sock: &UdpSocket,
     to: SocketAddr,
@@ -341,6 +350,7 @@ fn send_burst(
         }
         thread::sleep((start - Instant::now()).min(Duration::from_millis(50)));
     }
+    let dscp_sent = (req.dscp != UNMARKED).then_some(req.dscp & 0x3F);
     let mut pacer = Pacer::new(Duration::from_micros(req.interval_us as u64));
     for index in 0..req.count {
         if stop.load(Ordering::Acquire) {
@@ -357,7 +367,12 @@ fn send_burst(
             send_utc_ns: at.utc_ns,
         };
         let b = data_bytes(&d, req.size as usize);
-        if sock.send_to(&b, to).is_ok() {
+        let sent = match dscp_sent {
+            Some(dscp) => udp_timing::send_to_tos(sock.as_raw_fd(), &b, to, dscp << 2)
+                .or_else(|_| sock.send_to(&b, to)),
+            None => sock.send_to(&b, to),
+        };
+        if sent.is_ok() {
             on_io(
                 BurstIo {
                     direction: Direction::Sent,
@@ -366,6 +381,7 @@ fn send_burst(
                     data: &d,
                     kernel_utc_ns: None,
                     tos: None,
+                    dscp_sent,
                 },
                 req.activity,
             );
@@ -434,6 +450,41 @@ mod tests {
             .unwrap();
             assert_eq!((sent, r.received), (20, 20));
             assert_eq!(server_rx.load(Ordering::Acquire), 20);
+            stop.store(true, Ordering::Release);
+        });
+    }
+
+    /// Marked EF (46): the phone's uplink datagrams and the server's downlink
+    /// ones (marked per datagram on the shared socket) arrive with 46, and
+    /// the sending side reports the marking it applied.
+    #[test]
+    fn dscp_marks_both_directions() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let addr = server.local_addr().unwrap().to_string();
+        let stop = AtomicBool::new(false);
+        let server_tos = Mutex::new(Vec::new());
+        thread::scope(|s| {
+            let (server, stop, server_tos) = (&server, &stop, &server_tos);
+            s.spawn(move || {
+                serve(server, stop, &|io: BurstIo, _| match io.direction {
+                    Direction::Received => server_tos.lock().unwrap().push(io.tos),
+                    Direction::Sent => assert_eq!(io.dscp_sent, Some(46)),
+                })
+            });
+            let sock = socket(&addr).unwrap();
+            let mut down = request(DOWNLINK, 10, 1000, 11);
+            down.dscp = 46;
+            let mut tos = vec![];
+            run(&sock, &down, stop, |io| tos.push(io.tos)).unwrap();
+            assert_eq!(tos, vec![Some(46 << 2); 10], "the server's marking arrived");
+            let mut up = request(UPLINK, 10, 1000, 12);
+            up.dscp = 46;
+            run(&sock, &up, stop, |io| assert_eq!(io.dscp_sent, Some(46))).unwrap();
+            assert_eq!(
+                *server_tos.lock().unwrap(),
+                vec![Some(46 << 2); 10],
+                "the phone's marking arrived"
+            );
             stop.store(true, Ordering::Release);
         });
     }

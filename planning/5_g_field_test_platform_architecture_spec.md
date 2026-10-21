@@ -839,6 +839,12 @@ and how the apps themselves fare (page load time, video segment time).
   the phone requests a downlink burst or sends an uplink one, the server
   sends or counts and acknowledges; both log every datagram). An upload with
   a rate is paced on the phone.
+- `dscp` maps activities to a DSCP marking (0–63). UDP bursts are marked
+  both ways (the phone its datagrams, the server its own, per datagram) and
+  both nodes log the marking that arrived, so the page shows whether the
+  network keeps, rewrites or bleaches it; TCP exchanges are marked on the
+  phone's uplink only (the server's reply and TCP observation need a wire
+  change and capture).
 - `loop` (agent, websearch): `closed` (default) — a user starts the next
   task after the last one ended, so a slow network makes them ask for less —
   or `open`: tasks arrive at random (mean `task_interval_s`) whatever is still

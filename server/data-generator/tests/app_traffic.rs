@@ -96,6 +96,7 @@ async fn scripted_user_downloads_and_uploads_objects() {
         log: Some(app_log(dir.path())),
         open: None,
         engines: Default::default(),
+        dscp: Default::default(),
     };
     let (sink, mut rx, _) = packet_channel(1 << 16);
     let stop = AtomicBool::new(false);
@@ -274,7 +275,9 @@ impl Ev {
 }
 
 fn app_events(path: &std::path::Path) -> Vec<Ev> {
-    use arrow::array::{Array, BooleanArray, ListArray, StringArray, UInt32Array, UInt64Array};
+    use arrow::array::{
+        Array, BooleanArray, ListArray, StringArray, UInt32Array, UInt64Array, UInt8Array,
+    };
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     let reader = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(path).unwrap())
         .unwrap()
@@ -289,6 +292,8 @@ fn app_events(path: &std::path::Path) -> Vec<Ev> {
                 let v = if col.is_null(i) {
                     json!(null)
                 } else if let Some(a) = col.as_any().downcast_ref::<UInt64Array>() {
+                    json!(a.value(i))
+                } else if let Some(a) = col.as_any().downcast_ref::<UInt8Array>() {
                     json!(a.value(i))
                 } else if let Some(a) = col.as_any().downcast_ref::<UInt32Array>() {
                     json!(a.value(i))
@@ -341,6 +346,7 @@ async fn websearch_task_runs_as_a_graph() {
         log: Some(app_log(dir.path())),
         open: None,
         engines: Default::default(),
+        dscp: Default::default(),
     };
     let (sink, _rx, _) = packet_channel(1 << 18);
     let stop = AtomicBool::new(false);
@@ -431,6 +437,7 @@ async fn open_loop_tasks_start_when_due_and_overflow_is_dropped() {
             max_open_tasks: 2,
         }),
         engines: Default::default(),
+        dscp: Default::default(),
     };
     let (sink, _rx, _) = packet_channel(1 << 18);
     let stop = AtomicBool::new(false);
@@ -521,6 +528,7 @@ async fn bulk_engine_uploads_on_its_own_paced_connection() {
         )]
         .into_iter()
         .collect(),
+        dscp: Default::default(),
     };
     let (sink, _rx, _) = packet_channel(1 << 16);
     let stop = AtomicBool::new(false);
@@ -606,6 +614,10 @@ async fn udp_bursts_both_ways_beside_an_exchange() {
         ]
         .into_iter()
         .collect(),
+        // video marked EF both ways; the page object's uplink marked AF41
+        dscp: [(code("video_chunk"), 46), (code("web_object"), 34)]
+            .into_iter()
+            .collect(),
     };
     let (sink, mut rx, _) = packet_channel(1 << 16);
     let stop = AtomicBool::new(false);
@@ -643,6 +655,17 @@ async fn udp_bursts_both_ways_beside_an_exchange() {
     assert!(video_rx.iter().all(|r| r.direction == Direction::Received
         && r.sender.is_some()
         && r.timing.app_packet_index.is_some()));
+    assert!(
+        video_rx.iter().all(|r| r.dscp_recv == Some(46)),
+        "the server's EF marking arrived"
+    );
+    assert_eq!(by("video_chunk").u("dscp"), 46);
+    assert!(by("photo_upload").opt("dscp").is_none(), "unmarked");
+    // the page object's uplink rows carry the marking the phone set
+    assert!(rows
+        .iter()
+        .filter(|r| r.timing.app_activity == Some("web_object") && r.direction == Direction::Sent)
+        .all(|r| r.dscp_sent == Some(34)));
     let mut idx: Vec<u32> = video_rx
         .iter()
         .map(|r| r.timing.app_packet_index.unwrap())
@@ -693,6 +716,7 @@ async fn stopping_mid_object_logs_stopped() {
         log: Some(app_log(dir.path())),
         open: None,
         engines: Default::default(),
+        dscp: Default::default(),
     };
     let (sink, _rx, _) = packet_channel(1 << 16);
     let stop = AtomicBool::new(false);

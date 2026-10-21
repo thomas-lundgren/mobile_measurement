@@ -134,6 +134,12 @@
           "additionalProperties": { "enum": ["exchange", "bulk", "udp_burst"] },
           "description": "How each activity's objects move (activity name from enums.yaml app_activities -> enums.yaml app_engines); unlisted activities use exchange. exchange: request/response on the user's pooled connections. bulk: the same exchange on a connection opened for that object alone (its own handshake, slow start and congestion window; never shared or reused). udp_burst: the object as paced UDP datagrams on the flow's port (contracts/packets/app_burst.md): 1200-byte datagrams (an object's chunk_bytes when set) at its rate_bps, or 8 Mbit/s when it has none."
         },
+        "dscp": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z_]+$" },
+          "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 63 },
+          "description": "DSCP to mark each activity's objects with (activity name -> 0-63); unlisted activities are unmarked. udp_burst: both directions — the phone marks its datagrams, the server its own (AppBurstRequest.dscp) — and both log the marking that arrived (dscp_recv). exchange, bulk: the phone's uplink only (marking the server's TCP reply and seeing TCP markings need a wire change and capture)."
+        },
         "loop": {
           "enum": ["closed", "open"],
           "description": "profiles agent and websearch: how work arrives (default closed). closed: a user starts the next task only after the last one ended and they read the answer, so a slow network makes them ask for less. open: tasks arrive at random (exponential gaps, mean task_interval_s) whatever is still running, and every object of a task starts when it is due (the task's arrival plus its planned offset: the dependencies' think times and transfers at a nominal 20 Mbit/s), finished dependencies or not; a task arriving while max_open_tasks are unfinished is dropped (logged skipped), so the offered load stays visible. Other profiles run closed."
