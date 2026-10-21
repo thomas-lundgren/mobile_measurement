@@ -12,6 +12,7 @@
     "mobile/clock.parquet",
     "mobile/clock_0001.parquet",
     "mobile/pings.parquet",
+    "mobile/app_events_0004.parquet",
     "mobile/probe.jsonl.gz"
   ],
   "invalid": [
@@ -27,7 +28,8 @@
     "packets_0000.parquet",
     "mobile//packets.parquet",
     "header.json\n",
-    "Header.json"
+    "Header.json",
+    "mobile/app_events_f4.parquet"
   ],
   "base": [
     "header.json",

@@ -152,6 +152,31 @@ impl Fetch {
     }
 }
 
+/// Kinds of burst (`enums.yaml` app_step_kinds, in order).
+pub const STEP_KINDS: [&str; 10] = [
+    "llm_turn",
+    "tools",
+    "cloud_tools",
+    "page_html",
+    "page_objects",
+    "mail_sync",
+    "video_start",
+    "video_segment",
+    "feed",
+    "script_action",
+];
+
+/// Where a burst belongs: the agent's `task` (one unit of user intent, from
+/// 1), the burst's `step` in it (from 1) and what it is (`STEP_KINDS`).
+/// Assigned as the model emits the burst, without drawing from the random
+/// generator, so a seed gives the same sequence with or without it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StepMeta {
+    pub task: u32,
+    pub step: u32,
+    pub kind: &'static str,
+}
+
 /// What an agent does next.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
@@ -159,6 +184,7 @@ pub enum Step {
     Burst {
         fetches: Vec<Fetch>,
         parallel: usize,
+        meta: StepMeta,
     },
     /// Stay idle until this long after the agent started.
     Until(Duration),
@@ -214,7 +240,7 @@ enum Mode {
 
 /// Queued plan item; Think turns into an absolute `Until` when reached.
 enum Plan {
-    Burst(Vec<Fetch>, usize),
+    Burst(Vec<Fetch>, usize, StepMeta),
     Think(Duration),
 }
 
@@ -242,6 +268,11 @@ pub struct Agent {
     /// A cloud tool round left the provider's reply open: the next turn
     /// resumes it instead of sending a new request.
     in_call: bool,
+    /// Tasks started so far, and the foreground task with its last step
+    /// (background work, like mail in "mixed", is a task of its own).
+    tasks: u32,
+    task: u32,
+    step: u32,
 }
 
 impl Agent {
@@ -271,6 +302,36 @@ impl Agent {
             turns_left: 0,
             placement: Placement::Device,
             in_call: false,
+            tasks: 0,
+            task: 0,
+            step: 0,
+        }
+    }
+
+    /// Start a new foreground task.
+    fn new_task(&mut self) {
+        self.tasks += 1;
+        self.task = self.tasks;
+        self.step = 0;
+    }
+
+    /// The next step of the foreground task.
+    fn meta(&mut self, kind: &'static str) -> StepMeta {
+        self.step += 1;
+        StepMeta {
+            task: self.task,
+            step: self.step,
+            kind,
+        }
+    }
+
+    /// A one-step task beside the foreground one.
+    fn solo(&mut self, kind: &'static str) -> StepMeta {
+        self.tasks += 1;
+        StepMeta {
+            task: self.tasks,
+            step: 1,
+            kind,
         }
     }
 
@@ -302,10 +363,10 @@ impl Agent {
 
     pub fn next_step(&mut self, now: Duration) -> Step {
         if let Some(script) = self.script.as_mut() {
-            return match script.front() {
-                None => Step::Done,
+            let step = match script.front() {
+                None => Err(Step::Done),
                 Some(a) if now < Duration::from_millis(a.at_ms) => {
-                    Step::Until(Duration::from_millis(a.at_ms))
+                    Err(Step::Until(Duration::from_millis(a.at_ms)))
                 }
                 Some(_) => {
                     let a = script.pop_front().unwrap();
@@ -323,11 +384,16 @@ impl Agent {
                     };
                     let n = a.count.unwrap_or(1).max(1) as usize;
                     let parallel = (a.parallel.unwrap_or(1).max(1) as usize).min(MAX_PARALLEL);
-                    Step::Burst {
-                        fetches: vec![f; n],
-                        parallel,
-                    }
+                    Ok((f, n, parallel))
                 }
+            };
+            return match step {
+                Err(s) => s,
+                Ok((f, n, parallel)) => Step::Burst {
+                    fetches: vec![f; n],
+                    parallel,
+                    meta: self.solo("script_action"),
+                },
             };
         }
         // "mixed": mail syncs in the background whatever the user is doing
@@ -336,7 +402,11 @@ impl Agent {
         }
         if let Some(p) = self.queue.pop_front() {
             return match p {
-                Plan::Burst(fetches, parallel) => Step::Burst { fetches, parallel },
+                Plan::Burst(fetches, parallel, meta) => Step::Burst {
+                    fetches,
+                    parallel,
+                    meta,
+                },
                 Plan::Think(d) => Step::Until(now + d),
             };
         }
@@ -384,6 +454,7 @@ impl Agent {
                 return Step::Until(now + self.rng.secs(45.0, 0.7, 5.0, 300.0));
             }
             self.turns_left = self.rng.lognormal(6.0, 0.6).clamp(1.0, 30.0) as u32;
+            self.new_task();
             // system prompt, tool definitions and the user's request
             self.context = self.rng.lognormal(12e3, 0.4).clamp(4e3, 60e3) as u64;
             self.in_call = false;
@@ -414,6 +485,7 @@ impl Agent {
         };
         self.context += tokens as u64 * CONTEXT_BYTES_PER_TOKEN;
         self.in_call = false;
+        let meta = self.meta("llm_turn");
         if self.turns_left > 0 {
             let r = self.rng.unit();
             let n = if r < 0.6 {
@@ -443,18 +515,21 @@ impl Agent {
                             .sum(),
                     )
                 };
-                self.queue.push_back(Plan::Burst(vec![result], 1));
+                let m = self.meta("cloud_tools");
+                self.queue.push_back(Plan::Burst(vec![result], 1, m));
             }
             if here.is_empty() {
                 self.in_call = true;
             } else {
                 let n = here.len();
-                self.queue.push_back(Plan::Burst(here, n));
+                let m = self.meta("tools");
+                self.queue.push_back(Plan::Burst(here, n, m));
             }
         }
         Step::Burst {
             fetches: vec![llm],
             parallel: 1,
+            meta,
         }
     }
 
@@ -479,17 +554,21 @@ impl Agent {
     /// A page view: the HTML alone, then its objects over parallel
     /// connections, then the user reads.
     fn web_page(&mut self) -> Step {
+        self.new_task();
+        let meta = self.meta("page_html");
         let html = self.fetch(WEB_PAGE, false, 50e3, 0.6, 5e3, 500e3);
         let n = self.rng.lognormal(30.0, 0.5).clamp(5.0, 120.0) as usize;
         let objects = (0..n)
             .map(|_| self.fetch(WEB_OBJECT, false, 20e3, 1.2, 200.0, 3e6))
             .collect();
-        self.queue.push_back(Plan::Burst(objects, MAX_PARALLEL));
+        let m = self.meta("page_objects");
+        self.queue.push_back(Plan::Burst(objects, MAX_PARALLEL, m));
         let read = self.rng.secs(12.0, 0.7, 2.0, 90.0);
         self.queue.push_back(Plan::Think(read));
         Step::Burst {
             fetches: vec![html],
             parallel: 1,
+            meta,
         }
     }
 
@@ -506,6 +585,7 @@ impl Agent {
         Step::Burst {
             fetches,
             parallel: 1,
+            meta: self.solo("mail_sync"),
         }
     }
 
@@ -524,9 +604,11 @@ impl Agent {
             self.video_end = now + Duration::from_secs_f64(self.rng.uniform(60.0, 300.0));
             self.video_due = now + SEGMENT * 3;
             let f = Fetch::download(VIDEO_CHUNK, self.video_bytes);
+            self.new_task();
             return Step::Burst {
                 fetches: vec![f; 3],
                 parallel: 1,
+                meta: self.meta("video_start"),
             };
         }
         if now < self.video_due {
@@ -538,6 +620,7 @@ impl Agent {
         Step::Burst {
             fetches: vec![f],
             parallel: 1,
+            meta: self.meta("video_segment"),
         }
     }
 
@@ -552,9 +635,11 @@ impl Agent {
         }
         let pause = self.rng.secs(4.0, 0.6, 1.0, 20.0);
         self.queue.push_back(Plan::Think(pause));
+        self.new_task();
         Step::Burst {
             fetches,
             parallel: 4,
+            meta: self.meta("feed"),
         }
     }
 }
@@ -574,7 +659,9 @@ mod tests {
                     assert!(*t > now, "{profile}: idle step does not advance time");
                     now = *t;
                 }
-                Step::Burst { fetches, parallel } => {
+                Step::Burst {
+                    fetches, parallel, ..
+                } => {
                     assert!(!fetches.is_empty() && *parallel >= 1 && *parallel <= MAX_PARALLEL);
                     for f in fetches {
                         up += f.up;
@@ -607,13 +694,17 @@ mod tests {
         let Step::Burst {
             fetches,
             parallel: 1,
+            ..
         } = a.next_step(Duration::ZERO)
         else {
             panic!()
         };
         assert_eq!(fetches.len(), 1);
         assert_eq!(fetches[0].activity, WEB_PAGE);
-        let Step::Burst { fetches, parallel } = a.next_step(Duration::ZERO) else {
+        let Step::Burst {
+            fetches, parallel, ..
+        } = a.next_step(Duration::ZERO)
+        else {
             panic!()
         };
         assert!(
@@ -659,11 +750,18 @@ mod tests {
             },
         ];
         let mut a = Agent::new("script", 0, 1.0, &actions);
+        // each action is a task of its own
+        let action = |task| StepMeta {
+            task,
+            step: 1,
+            kind: "script_action",
+        };
         assert_eq!(
             a.next_step(Duration::ZERO),
             Step::Burst {
                 fetches: vec![Fetch::download(WEB_OBJECT, 1000); 3],
-                parallel: MAX_PARALLEL
+                parallel: MAX_PARALLEL,
+                meta: action(1),
             }
         );
         assert_eq!(
@@ -674,7 +772,8 @@ mod tests {
             a.next_step(Duration::from_secs(5)),
             Step::Burst {
                 fetches: vec![Fetch::upload(0, 2000)],
-                parallel: 1
+                parallel: 1,
+                meta: action(2),
             }
         );
         let llm = Fetch {
@@ -687,7 +786,8 @@ mod tests {
             a.next_step(Duration::from_secs(6)),
             Step::Burst {
                 fetches: vec![llm],
-                parallel: 1
+                parallel: 1,
+                meta: action(3),
             }
         );
         assert_eq!(a.next_step(Duration::from_secs(7)), Step::Done);
@@ -752,7 +852,9 @@ mod tests {
         let mut prev_llm = false;
         for _ in 0..2000 {
             match a.next_step(now) {
-                Step::Burst { fetches, parallel } if fetches[0].activity == LLM_CALL => {
+                Step::Burst {
+                    fetches, parallel, ..
+                } if fetches[0].activity == LLM_CALL => {
                     let f = fetches[0];
                     assert_eq!((fetches.len(), parallel), (1, 1));
                     assert!(f.delay_ms >= 250 && f.rate_bps > 0 && f.chunk == SSE_EVENT);
@@ -767,7 +869,9 @@ mod tests {
                     prev_llm = true;
                     now += f.server_time();
                 }
-                Step::Burst { fetches, parallel } => {
+                Step::Burst {
+                    fetches, parallel, ..
+                } => {
                     assert!(prev_llm, "tools follow an LLM call");
                     assert_eq!(parallel, fetches.len());
                     assert!(fetches
@@ -796,6 +900,83 @@ mod tests {
         );
         assert!((0.02..1.0).contains(&d), "agent down {d} Mbit/s");
         assert!((0.02..1.0).contains(&u), "agent up {u} Mbit/s");
+    }
+
+    /// (task, step, kind) of every burst over `secs` of simulated time.
+    fn metas(profile: &str, seed: u64, secs: u64) -> Vec<StepMeta> {
+        steps(profile, seed, secs)
+            .2
+            .into_iter()
+            .filter_map(|s| match s {
+                Step::Burst { meta, .. } => Some(meta),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Tasks and steps are reproducible, and attaching them changed nothing
+    /// the seed decides: the transfers are the same as without them.
+    #[test]
+    fn tasks_and_steps_are_reproducible() {
+        for p in ["web", "mail", "video", "social", "mixed", "agent"] {
+            let m = metas(p, 5, 900);
+            assert!(!m.is_empty(), "{p}");
+            assert_eq!(m, metas(p, 5, 900), "{p}");
+            for x in &m {
+                assert!(x.task >= 1 && x.step >= 1, "{p}: {x:?}");
+                assert!(STEP_KINDS.contains(&x.kind), "{p}: {}", x.kind);
+            }
+        }
+    }
+
+    /// An agent task: LLM turns with tool steps between them, steps counting
+    /// up; a new task starts at step 1 with an LLM turn.
+    #[test]
+    fn agent_tasks_are_llm_turns_and_tools() {
+        let m = metas("agent", 9, 1800);
+        assert!(
+            m.iter().map(|x| x.task).max().unwrap() >= 3,
+            "several tasks"
+        );
+        for w in m.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            if b.task == a.task {
+                assert_eq!(b.step, a.step + 1, "{a:?} -> {b:?}");
+            } else {
+                assert_eq!((b.task, b.step, b.kind), (a.task + 1, 1, "llm_turn"));
+            }
+        }
+        assert!(m.iter().any(|x| x.kind == "tools"));
+    }
+
+    /// A page view is one task: its HTML, then its objects.
+    #[test]
+    fn a_page_view_is_one_task() {
+        let m = metas("web", 3, 120);
+        assert_eq!((m[0].task, m[0].step, m[0].kind), (1, 1, "page_html"));
+        assert_eq!((m[1].task, m[1].step, m[1].kind), (1, 2, "page_objects"));
+        assert_eq!((m[2].task, m[2].step), (2, 1));
+    }
+
+    /// The burst kinds and outcomes logged are `enums.yaml`'s, in order.
+    #[test]
+    fn logged_kinds_and_outcomes_match_the_contract() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../contracts/enums/enums.yaml");
+        let doc: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let list = |k: &str| -> Vec<String> {
+            doc[k]
+                .as_sequence()
+                .unwrap_or_else(|| panic!("enums.yaml {k}"))
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(list("app_step_kinds"), STEP_KINDS);
+        assert_eq!(
+            list("app_outcomes"),
+            crate::app_traffic::Outcome::ALL.map(crate::app_traffic::Outcome::as_str)
+        );
     }
 
     #[test]

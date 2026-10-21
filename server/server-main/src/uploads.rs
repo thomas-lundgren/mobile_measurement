@@ -242,7 +242,8 @@ pub fn valid_upload_path(path: &str) -> bool {
     match path.split_once('/') {
         None => path == "header.json" || table(path, &["gps", "radio"]),
         Some(("mobile", name)) => {
-            name == "probe.jsonl.gz" || table(name, &["packets", "events", "clock", "pings"])
+            name == "probe.jsonl.gz"
+                || table(name, &["packets", "events", "clock", "pings", "app_events"])
         }
         Some(_) => false,
     }

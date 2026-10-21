@@ -828,6 +828,18 @@ and how the apps themselves fare (page load time, video segment time).
   (`sequence_number`), tagged `app_activity`, `app_object_bytes` and
   `app_up_bytes`: request → first byte → completion per object, the gaps
   inside a stream, and per episode (a page view, a sync, an agent task step).
+- Intent and observation stay apart. The packet rows are what the sockets
+  saw; the mobile's scheduler also writes what the model meant to do, one row
+  per object in `mobile/app_events_<flow>.parquet`
+  (`contracts/parquet/app_events.parquet.yaml`): its place in the work —
+  agent → task (one unit of user intent: an agent's task, a page view, a mail
+  sync, a video session) → step (the burst's position in the task, with its
+  kind) → object — the plan (bytes up and down, think time, pacing), when it
+  was planned, started, got its first byte and finished, the bytes moved,
+  the outcome (`ok`, `timeout`, `stopped`, `error`, `skipped`) and whether it
+  paid for a new connection. Workloads are layered: the model emits steps,
+  the scheduler turns them into operations, the executor runs them through
+  the request/response engine (`planning/app_workload_layering.md`).
 
 ---
 
@@ -1167,6 +1179,7 @@ session_2026_05_20/
       packets.parquet        # all flows, mobile's view
       events.parquet
       clock.parquet
+      app_events_NNNN.parquet  # app flows' intended operations, one per flow (NNNN = flow_id)
       probe.jsonl.gz         # mp-probe records for the test window, when it runs
     server/
       packets.parquet        # all flows, server's view

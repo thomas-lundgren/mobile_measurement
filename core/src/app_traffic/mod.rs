@@ -15,12 +15,19 @@
 //! RECEIVED acknowledgement. So analysis gets request → first byte →
 //! completion for every object, and the gaps inside a stream.
 //!
+//! Layers: `model` says what each user asks for and when (no sockets);
+//! `scheduler` turns its steps into operations and logs what was intended
+//! (`app_events`); `executor` runs a burst's operations through the
+//! request/response engine (`crate::exchange`).
+//!
 //! Agents are seeded: what they ask for is reproducible, when it completes is
 //! up to the network. `profile = "script"` runs an explicit action timeline
 //! instead — the hook for an AI agent that plays a user and writes the plan.
 
+mod executor;
 mod model;
-mod runner;
+mod scheduler;
 
+pub use executor::Outcome;
 pub use model::*;
-pub use runner::{run, AppTraffic};
+pub use scheduler::{run, AppLog, AppTraffic, Operation};

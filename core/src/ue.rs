@@ -130,6 +130,15 @@ impl UeEngine {
             test_id: cfg.test_id.clone(),
             node: crate::log_writer::NODE_MOBILE.to_string(),
         };
+        let app_log = crate::app_traffic::AppLog {
+            dir: std::path::PathBuf::from(&cfg.log_dir),
+            ctx: crate::aux_log::AuxContext {
+                device_id: cfg.device_id.clone(),
+                session_id: cfg.session_id.clone(),
+                test_id: cfg.test_id.clone(),
+                node: crate::log_writer::NODE_MOBILE.to_string(),
+            },
+        };
         let stop = Arc::new(AtomicBool::new(false));
         let mut rxs = Vec::with_capacity(cfg.flows.len());
         let mut flows = Vec::with_capacity(cfg.flows.len());
@@ -144,6 +153,7 @@ impl UeEngine {
                 sink,
                 counters.clone(),
                 stop.clone(),
+                &app_log,
             )?;
             flows.push(FlowHandle {
                 flow_id: flow.flow_id,
@@ -200,6 +210,7 @@ fn spawn_flow(
     mut sink: LogSink,
     counters: Arc<Counters>,
     stop: Arc<AtomicBool>,
+    app_log: &crate::app_traffic::AppLog,
 ) -> std::io::Result<JoinHandle<()>> {
     let dir = flow.direction.as_deref();
 
@@ -286,6 +297,7 @@ fn spawn_flow(
                         placement: crate::app_traffic::Placement::parse(
                             flow.placement.as_deref().unwrap_or("device"),
                         ),
+                        log: Some(app_log.clone()),
                     };
                     Ok(thread::spawn(move || {
                         crate::app_traffic::run(&app, sink, &counters, &stop)

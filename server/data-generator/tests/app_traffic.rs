@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
-use fieldtest_core::app_traffic::{self, AppAction, AppTraffic};
+use fieldtest_core::app_traffic::{self, AppAction, AppLog, AppTraffic};
+use fieldtest_core::aux_log::AuxContext;
 use fieldtest_core::endpoint::Counters;
 use fieldtest_core::log_writer::{packet_channel, Direction};
 use mp_data_generator::{build_router, AppState};
@@ -92,6 +93,7 @@ async fn scripted_user_downloads_and_uploads_objects() {
             llm,
         ],
         placement: app_traffic::Placement::Device,
+        log: Some(app_log(dir.path())),
     };
     let (sink, mut rx, _) = packet_channel(1 << 16);
     let stop = AtomicBool::new(false);
@@ -178,10 +180,179 @@ async fn scripted_user_downloads_and_uploads_objects() {
         }
     }
 
+    // the intended-operations log: one row per object, each script action a
+    // task of its own, every object ok with the bytes the plan asked for
+    let ev = app_events(&dir.path().join("app_events_0007.parquet"));
+    assert_eq!(ev.len(), 15);
+    let tasks: [(u64, &str, usize); 4] = [
+        (1, "web_page", 1),
+        (2, "web_object", 12),
+        (3, "photo_upload", 1),
+        (4, "llm_call", 1),
+    ];
+    for (task, act, n) in tasks {
+        let of: Vec<_> = ev.iter().filter(|r| r.u("task") == task).collect();
+        assert_eq!(of.len(), n, "task {task}");
+        for r in of {
+            assert_eq!(
+                (r.s("activity"), r.s("step_kind"), r.u("step")),
+                (act, "script_action", 1)
+            );
+            assert_eq!(r.s("outcome"), "ok", "{act}");
+            assert_eq!(r.u("bytes_up"), r.u("plan_up_bytes") + 44, "{act} up");
+            let down = if r.u("plan_down_bytes") == 0 {
+                44
+            } else {
+                r.u("plan_down_bytes")
+            };
+            assert_eq!(r.u("bytes_down"), down, "{act} down");
+            assert!(r.u("planned_mono_ns") <= r.u("start_mono_ns"));
+            assert!(r.u("start_mono_ns") <= r.u("first_byte_mono_ns"));
+            assert!(r.u("first_byte_mono_ns") <= r.u("done_mono_ns"));
+            if act == "llm_call" {
+                // the server's 300 ms think time sits between start and first byte
+                let ttfb = (r.u("first_byte_mono_ns") - r.u("start_mono_ns")) as f64 / 1e6;
+                assert!(ttfb >= 290.0, "ttfb {ttfb} ms");
+            }
+        }
+    }
+    // the bursts in order, each waiting for the one before (closed loop)
+    let mut eps: Vec<(u64, Option<u64>)> = ev
+        .iter()
+        .map(|r| (r.u("episode"), r.opt("after_episode")))
+        .collect();
+    eps.dedup();
+    assert_eq!(eps, [(1, None), (2, Some(1)), (3, Some(2)), (4, Some(3))]);
+    // 12 objects over 6 connections: the first burst opened one, the second more
+    assert!(ev.iter().filter(|r| r.b("new_connection")).count() >= 2);
+
     let st_body = send(&st, "GET", &format!("/internal/generators/{gid}"), None).await;
     assert_eq!(st_body["state"], "RUNNING");
     assert!(st_body["counters"]["bytes_sent"].as_u64().unwrap() >= 50_000 + 12 * 30_000);
     assert!(st_body["counters"]["bytes_received"].as_u64().unwrap() >= 400_000);
+    send(
+        &st,
+        "POST",
+        &format!("/internal/generators/{gid}/stop"),
+        None,
+    )
+    .await;
+}
+
+fn app_log(dir: &std::path::Path) -> AppLog {
+    AppLog {
+        dir: dir.to_path_buf(),
+        ctx: AuxContext {
+            device_id: "dev_x".into(),
+            session_id: "ses_x".into(),
+            test_id: "tst_x".into(),
+            node: "mobile".into(),
+        },
+    }
+}
+
+/// One app_events row, read back by column name.
+struct Ev(std::collections::HashMap<String, serde_json::Value>);
+
+impl Ev {
+    fn u(&self, k: &str) -> u64 {
+        self.0[k]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{k} = {}", self.0[k]))
+    }
+    fn opt(&self, k: &str) -> Option<u64> {
+        self.0[k].as_u64()
+    }
+    fn s(&self, k: &str) -> &str {
+        self.0[k].as_str().unwrap()
+    }
+    fn b(&self, k: &str) -> bool {
+        self.0[k].as_bool().unwrap_or(false)
+    }
+}
+
+fn app_events(path: &std::path::Path) -> Vec<Ev> {
+    use arrow::array::{Array, BooleanArray, StringArray, UInt32Array, UInt64Array};
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    let reader = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(path).unwrap())
+        .unwrap()
+        .build()
+        .unwrap();
+    let mut out = vec![];
+    for batch in reader {
+        let batch = batch.unwrap();
+        for i in 0..batch.num_rows() {
+            let mut m = std::collections::HashMap::new();
+            for (f, col) in batch.schema().fields().iter().zip(batch.columns()) {
+                let v = if col.is_null(i) {
+                    json!(null)
+                } else if let Some(a) = col.as_any().downcast_ref::<UInt64Array>() {
+                    json!(a.value(i))
+                } else if let Some(a) = col.as_any().downcast_ref::<UInt32Array>() {
+                    json!(a.value(i))
+                } else if let Some(a) = col.as_any().downcast_ref::<StringArray>() {
+                    json!(a.value(i))
+                } else if let Some(a) = col.as_any().downcast_ref::<BooleanArray>() {
+                    json!(a.value(i))
+                } else {
+                    json!(null)
+                };
+                m.insert(f.name().clone(), v);
+            }
+            out.push(Ev(m));
+        }
+    }
+    out
+}
+
+/// A test that ends mid-object logs it as `stopped`: started, never done.
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_mid_object_logs_stopped() {
+    let st = AppState::default();
+    let dir = tempfile::tempdir().unwrap();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let prep = send(&st, "POST", "/internal/generators", Some(json!({
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X7", "device_id": "dev_x", "session_id": "ses_x",
+        "flow": {"flow_id": 3, "type": "app_traffic", "profile": "script"},
+        "server_port": port, "node_log_dir": dir.path().to_str().unwrap()
+    }))).await;
+    let gid = prep["generator_id"].as_str().unwrap().to_string();
+    // 50 kB streamed at 8 kbit/s: 50 s, far longer than the test
+    let cfg = AppTraffic {
+        server: format!("127.0.0.1:{port}"),
+        flow_id: 3,
+        profile: "script".into(),
+        workers: 1,
+        seed: 1,
+        scale: 1.0,
+        actions: vec![AppAction {
+            kind: "down".into(),
+            bytes: 50_000,
+            rate_kbps: Some(8),
+            activity: Some("llm_call".into()),
+            ..AppAction::default()
+        }],
+        placement: app_traffic::Placement::Device,
+        log: Some(app_log(dir.path())),
+    };
+    let (sink, _rx, _) = packet_channel(1 << 16);
+    let stop = AtomicBool::new(false);
+    let tally = Counters::default();
+    std::thread::scope(|s| {
+        s.spawn(|| app_traffic::run(&cfg, sink, &tally, &stop));
+        std::thread::sleep(Duration::from_millis(1500));
+        stop.store(true, Ordering::Release);
+    });
+    let ev = app_events(&dir.path().join("app_events_0003.parquet"));
+    assert_eq!(ev.len(), 1);
+    let r = &ev[0];
+    assert_eq!(r.s("outcome"), "stopped");
+    assert!(r.opt("start_mono_ns").is_some() && r.opt("done_mono_ns").is_none());
+    assert!(r.u("bytes_down") > 0 && r.u("bytes_down") < 50_000);
     send(
         &st,
         "POST",

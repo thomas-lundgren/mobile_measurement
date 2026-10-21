@@ -21,6 +21,7 @@ session_<date>/test_NNN/
     packets.parquet
     events.parquet
     clock.parquet
+    app_events_NNNN.parquet  # app flows' intended operations, one per flow (NNNN = flow_id)
     probe.jsonl.gz       # mp-probe records, when it runs
 ```
 

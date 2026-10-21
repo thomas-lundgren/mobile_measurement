@@ -35,7 +35,7 @@ joinable once concatenated across files (the file path is lost in a
 dataframe), each table carries a small set of constant-per-file key columns,
 dictionary-encoded so they cost almost nothing:
 
-- Per-node tables (`packets`, `events`, `clock`): `device_id`, `session_id`,
+- Per-node tables (`packets`, `events`, `clock`, `app_events`): `device_id`, `session_id`,
   `test_id`, `node`.
 - Mobile-only test-root tables (`radio`, `gps`): `device_id`, `session_id`,
   `test_id` (node is always the mobile; omitted).

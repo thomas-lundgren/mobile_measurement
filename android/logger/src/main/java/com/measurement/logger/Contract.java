@@ -275,6 +275,33 @@ public final class Contract {
         public static final String LLM_RESUME = "llm_resume";
     }
 
+    /** enums.yaml app_step_kinds */
+    public static final class AppStepKinds {
+        private AppStepKinds() {}
+
+        public static final String LLM_TURN = "llm_turn";
+        public static final String TOOLS = "tools";
+        public static final String CLOUD_TOOLS = "cloud_tools";
+        public static final String PAGE_HTML = "page_html";
+        public static final String PAGE_OBJECTS = "page_objects";
+        public static final String MAIL_SYNC = "mail_sync";
+        public static final String VIDEO_START = "video_start";
+        public static final String VIDEO_SEGMENT = "video_segment";
+        public static final String FEED = "feed";
+        public static final String SCRIPT_ACTION = "script_action";
+    }
+
+    /** enums.yaml app_outcomes */
+    public static final class AppOutcomes {
+        private AppOutcomes() {}
+
+        public static final String OK = "ok";
+        public static final String TIMEOUT = "timeout";
+        public static final String STOPPED = "stopped";
+        public static final String ERROR = "error";
+        public static final String SKIPPED = "skipped";
+    }
+
     /** OpenAPI AppActionKind (a Rust enum on the server) */
     public static final class AppActionKind {
         private AppActionKind() {}

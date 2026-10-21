@@ -6,7 +6,7 @@ A test directory looks like::
       header.json            # optional
       gps.parquet            # mobile only, optional
       radio.parquet          # mobile only, optional
-      mobile/  { packets, events, clock }.parquet  (+ probe.jsonl.gz)
+      mobile/  { packets, events, clock, app_events }.parquet  (+ probe.jsonl.gz)
       server/  { packets, events, clock }.parquet
 
 Everything is optional: a mobile-only upload (no ``server/``, no ``clock``,
@@ -115,6 +115,8 @@ class TestData:
     packets: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=schema.PACKETS))
     clock: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=schema.CLOCK))
     events: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=schema.EVENTS))
+    #: the app workloads' intended operations (mobile/app_events_*.parquet)
+    app_events: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=schema.APP_EVENTS))
     gps: pd.DataFrame | None = None
     radio: pd.DataFrame | None = None
 
@@ -161,6 +163,8 @@ def load_test(test_dir: str | Path) -> TestData:
             ev["node"] = ev["node"].fillna(node)
             event_frames.append(ev)
 
+    app_events = _read_segmented(root / "mobile", "app_events", schema.APP_EVENTS)
+
     def _concat(frames, cols):
         if not frames:
             return pd.DataFrame(columns=cols)
@@ -172,6 +176,7 @@ def load_test(test_dir: str | Path) -> TestData:
         packets=_arrival_times(_concat(packet_frames, schema.PACKETS)),
         clock=_concat(clock_frames, schema.CLOCK),
         events=_concat(event_frames, schema.EVENTS),
+        app_events=app_events if app_events is not None else pd.DataFrame(columns=schema.APP_EVENTS),
         gps=read_one(root / "gps.parquet", schema.GPS),
         radio=read_one(root / "radio.parquet", schema.RADIO),
     )

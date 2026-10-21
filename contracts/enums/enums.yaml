@@ -276,3 +276,29 @@ app_activities:
   - web_fetch        # 11 page fetched by an agent's tool
   - cloud_tool       # 12 tool result in a cloud-tool reply (see app_request.md)
   - llm_resume       # 13 the reply's next turn after a cloud tool
+
+# ---------------------------------------------------------------------------
+# App workload steps (app_events.parquet step_kind): what a burst of a task
+# is. Additive; readers show unknown kinds as they are.
+# ---------------------------------------------------------------------------
+app_step_kinds:
+  - llm_turn         # an LLM call, or the resumed reply after cloud tools
+  - tools            # tool calls on the phone (MCP calls, web fetches)
+  - cloud_tools      # tool results inside a cloud-tool reply
+  - page_html        # a page view's HTML
+  - page_objects     # the page's objects
+  - mail_sync        # headers, attachments, a sent mail
+  - video_start      # the first segments filling the buffer
+  - video_segment    # one segment when due
+  - feed             # a feed scroll's images (and a photo upload)
+  - script_action    # one action of a scripted timeline
+
+# ---------------------------------------------------------------------------
+# How an app object ended (app_events.parquet outcome).
+# ---------------------------------------------------------------------------
+app_outcomes:
+  - ok               # every byte moved (or the upload was acknowledged)
+  - timeout          # no completion within the object timeout
+  - stopped          # the test ended first (started or not)
+  - error            # the connection failed mid-object
+  - skipped          # no connection could be opened for its burst

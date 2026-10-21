@@ -1,0 +1,47 @@
+table: app_events
+scope: per-node
+spec: "§8 App Traffic Flow"
+description: >
+  The app workload's intended operations and how each ended: one row per
+  object of an app_traffic flow (an exchange: request, bytes up, think time,
+  bytes down or an acknowledgement), written by the mobile's scheduler when
+  the flow stops. Intent and observation stay apart: packets.parquet holds
+  what the sockets saw, this table what the model meant to do (agent → task →
+  step → object) and the exchange's outcome. Join with packets on
+  (flow_id, object_id = sequence_number). One file per app flow:
+  mobile/app_events_<flow_id, 4 digits>.parquet. Mobile only for now.
+
+join_columns:
+  - { name: device_id,  type: utf8, nullable: false }
+  - { name: session_id, type: utf8, nullable: false }
+  - { name: test_id,    type: utf8, nullable: false }
+  - { name: node,       type: utf8, nullable: false, doc: "enums.yaml log_nodes (mobile)." }
+
+columns:
+  - { name: flow_id,   type: uint32, nullable: false }
+  - { name: object_id, type: uint64, nullable: false, doc: "packets.parquet sequence_number of the exchange's rows on both nodes (agent << 48 | episode << 20 | index)." }
+  - { name: agent,     type: uint32, nullable: false, doc: "Simulated user (worker) in the flow, from 0." }
+  - { name: task,      type: uint32, nullable: false, doc: "Unit of user intent, per agent, from 1: an AI agent's task (LLM calls until the answer), a page view, a mail sync, a video session, a feed scroll, a script action." }
+  - { name: step,      type: uint32, nullable: false, doc: "The burst's position in its task, from 1." }
+  - { name: step_kind, type: utf8,   nullable: false, doc: "enums.yaml app_step_kinds." }
+  - { name: activity,  type: utf8,   nullable: false, doc: "enums.yaml app_activities (as packets app_activity)." }
+  - { name: episode,   type: uint64, nullable: false, doc: "The burst, per agent, from 1 (object_id's middle bits)." }
+  - { name: after_episode, type: uint64, nullable: true, doc: "The burst this one waited for (closed loop: the agent's previous burst); null for the first." }
+  - { name: parallel,  type: uint32, nullable: false, doc: "Objects of the burst allowed in flight at once." }
+  - { name: plan_up_bytes,    type: uint64, nullable: false, doc: "As the model asked (after scale)." }
+  - { name: plan_down_bytes,  type: uint64, nullable: false, doc: "0: an upload, acknowledged by the server." }
+  - { name: plan_delay_ms,    type: uint32, nullable: false, doc: "Server think time before the first byte." }
+  - { name: plan_rate_bps,    type: uint32, nullable: false, doc: "Paced response rate; 0 = as fast as TCP takes it." }
+  - { name: plan_chunk_bytes, type: uint32, nullable: false, doc: "Bytes per paced write; 0 = the server's default." }
+  - { name: planned_mono_ns,  type: uint64, nullable: false, doc: "When the model emitted the burst." }
+  - { name: planned_utc_ns,   type: uint64, nullable: false }
+  - { name: start_mono_ns,    type: uint64, nullable: true,  doc: "Request write began (after any wait for a connection). Null when the object never started." }
+  - { name: start_utc_ns,     type: uint64, nullable: true }
+  - { name: first_byte_mono_ns, type: uint64, nullable: true, doc: "First response byte, or the acknowledgement." }
+  - { name: first_byte_utc_ns,  type: uint64, nullable: true }
+  - { name: done_mono_ns,     type: uint64, nullable: true,  doc: "Last byte, or the acknowledgement; null unless outcome = ok." }
+  - { name: done_utc_ns,      type: uint64, nullable: true }
+  - { name: bytes_up,   type: uint64, nullable: false, doc: "Bytes written, request header included." }
+  - { name: bytes_down, type: uint64, nullable: false, doc: "Bytes read, acknowledgement included." }
+  - { name: outcome,    type: utf8,   nullable: false, doc: "enums.yaml app_outcomes." }
+  - { name: new_connection, type: bool, nullable: true, doc: "The object ran on a connection opened for its burst (handshake and slow start); null when it never started." }

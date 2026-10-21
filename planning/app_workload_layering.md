@@ -2,7 +2,9 @@
 
 **Status:** accepted with adjustments, 2026-10-20; **A done** (2026-10-20:
 `core/src/exchange.rs`); **A′ done** (2026-10-21: engine without names or
-rows, `exchange::Pool`, `core/tests/layering.rs`). Next: B. Supersedes the step order in
+rows, `exchange::Pool`, `core/tests/layering.rs`); **B1 done** (2026-10-21: model
+`StepMeta`, `scheduler` / `executor`, `app_events` log). Next: B2 (analysis
+and page). Supersedes the step order in
 `ai_traffic_implementation_plan.md` (see its "Order" section).
 
 ## 1. The proposal (summary)
@@ -139,6 +141,16 @@ dictated by the request on the wire (bytes up, think time, bytes down,
 pacing). The planned `udp_burst` server (D) follows the same rule.
 
 ### B — Scheduler apart from execution
+
+Split in two. **B1 (done):** the models tag every burst with `StepMeta`
+(task, step, kind; no random draws, so the seeded transfers are unchanged —
+checked by hashing every fetch before and after); `app_traffic/scheduler.rs`
+turns bursts into `Operation`s and writes `mobile/app_events_<flow>.parquet`;
+`app_traffic/executor.rs` runs a burst through `exchange` and reports a
+`Done` (start, first byte, end, bytes, outcome, new connection) per
+operation. Contract: `parquet/app_events.parquet.yaml`, `enums.yaml`
+`app_step_kinds` / `app_outcomes`, the upload path. **B2:** analysis (tasks,
+planned vs observed) and the page.
 
 - `Operation { id, agent, task, step, kind, activity, engine, fetch,
   after: Vec<id>, parallel_group }` emitted by the models (today's `Step` +

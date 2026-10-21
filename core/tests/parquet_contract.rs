@@ -161,6 +161,35 @@ fn write_all(dir: &Path) -> Vec<(&'static str, PathBuf)> {
     w.flush().unwrap();
     drop(w);
     out.push(("packets", dir.join("packets_0000.parquet")));
+
+    let p = dir.join("app_events_0004.parquet");
+    let row = aux_log::AppEventRow {
+        flow_id: 4,
+        object_id: 1 << 20,
+        agent: 0,
+        task: 1,
+        step: 1,
+        step_kind: "llm_turn",
+        activity: "llm_call",
+        episode: 1,
+        after_episode: None,
+        parallel: 1,
+        plan_up_bytes: 12_000,
+        plan_down_bytes: 9_000,
+        plan_delay_ms: 900,
+        plan_rate_bps: 24_000,
+        plan_chunk_bytes: 140,
+        planned: ts,
+        start: Some(ts),
+        first_byte: None,
+        done: None,
+        bytes_up: 44,
+        bytes_down: 0,
+        outcome: "stopped",
+        new_connection: Some(true),
+    };
+    aux_log::write_app_events(&p, &ctx, &[row]).unwrap();
+    out.push(("app_events", p));
     out
 }
 

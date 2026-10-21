@@ -12,13 +12,16 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, ArrayRef, Float32Array, Float64Array, Int32Array, Int32Builder, Int64Array, ListBuilder,
-    RecordBatch, StringArray, StructBuilder, UInt32Array, UInt32Builder, UInt64Array,
+    Array, ArrayRef, BooleanArray, Float32Array, Float64Array, Int32Array, Int32Builder,
+    Int64Array, ListBuilder, RecordBatch, StringArray, StructBuilder, UInt32Array, UInt32Builder,
+    UInt64Array,
 };
 use arrow::datatypes::{DataType, Field, Fields, Schema};
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use serde::Deserialize;
+
+use crate::timestamp::Timestamp;
 
 /// Constant per-file join keys.
 #[derive(Debug, Clone)]
@@ -480,6 +483,137 @@ pub fn write_radio(path: &Path, ctx: &AuxContext, rows: &[RadioRow]) -> std::io:
             Arc::new(u32c(|r| r.link_dn_kbps)) as _,
             Arc::new(u32c(|r| r.link_up_kbps)) as _,
             neighbors,
+        ],
+    )
+    .map_err(std::io::Error::other)?;
+    write_batch(path, schema, batch)
+}
+
+// --- app_events (contracts/parquet/app_events.parquet.yaml) ---------------------
+
+/// One app operation as intended and as it ended (written by the app
+/// workload's scheduler when its flow stops).
+#[derive(Debug, Clone)]
+pub struct AppEventRow {
+    pub flow_id: u32,
+    pub object_id: u64,
+    pub agent: u32,
+    pub task: u32,
+    pub step: u32,
+    pub step_kind: &'static str,
+    pub activity: &'static str,
+    pub episode: u64,
+    pub after_episode: Option<u64>,
+    pub parallel: u32,
+    pub plan_up_bytes: u64,
+    pub plan_down_bytes: u64,
+    pub plan_delay_ms: u32,
+    pub plan_rate_bps: u32,
+    pub plan_chunk_bytes: u32,
+    pub planned: Timestamp,
+    pub start: Option<Timestamp>,
+    pub first_byte: Option<Timestamp>,
+    pub done: Option<Timestamp>,
+    pub bytes_up: u64,
+    pub bytes_down: u64,
+    pub outcome: &'static str,
+    pub new_connection: Option<bool>,
+}
+
+fn app_events_schema() -> Schema {
+    let u64n = |name: &str, null| Field::new(name, DataType::UInt64, null);
+    let u32n = |name: &str| Field::new(name, DataType::UInt32, false);
+    let utf8 = |name: &str| Field::new(name, DataType::Utf8, false);
+    Schema::new(vec![
+        utf8("device_id"),
+        utf8("session_id"),
+        utf8("test_id"),
+        utf8("node"),
+        u32n("flow_id"),
+        u64n("object_id", false),
+        u32n("agent"),
+        u32n("task"),
+        u32n("step"),
+        utf8("step_kind"),
+        utf8("activity"),
+        u64n("episode", false),
+        u64n("after_episode", true),
+        u32n("parallel"),
+        u64n("plan_up_bytes", false),
+        u64n("plan_down_bytes", false),
+        u32n("plan_delay_ms"),
+        u32n("plan_rate_bps"),
+        u32n("plan_chunk_bytes"),
+        u64n("planned_mono_ns", false),
+        u64n("planned_utc_ns", false),
+        u64n("start_mono_ns", true),
+        u64n("start_utc_ns", true),
+        u64n("first_byte_mono_ns", true),
+        u64n("first_byte_utc_ns", true),
+        u64n("done_mono_ns", true),
+        u64n("done_utc_ns", true),
+        u64n("bytes_up", false),
+        u64n("bytes_down", false),
+        utf8("outcome"),
+        Field::new("new_connection", DataType::Boolean, true),
+    ])
+}
+
+pub fn write_app_events(
+    path: &Path,
+    ctx: &AuxContext,
+    rows: &[AppEventRow],
+) -> std::io::Result<()> {
+    let n = rows.len();
+    let schema = Arc::new(app_events_schema());
+    let u64s = |f: &dyn Fn(&AppEventRow) -> u64| -> ArrayRef {
+        Arc::new(UInt64Array::from(rows.iter().map(f).collect::<Vec<_>>()))
+    };
+    let opt64 = |f: &dyn Fn(&AppEventRow) -> Option<u64>| -> ArrayRef {
+        Arc::new(UInt64Array::from(rows.iter().map(f).collect::<Vec<_>>()))
+    };
+    let u32s = |f: &dyn Fn(&AppEventRow) -> u32| -> ArrayRef {
+        Arc::new(UInt32Array::from(rows.iter().map(f).collect::<Vec<_>>()))
+    };
+    let strs = |f: &dyn Fn(&AppEventRow) -> &'static str| -> ArrayRef {
+        Arc::new(StringArray::from(rows.iter().map(f).collect::<Vec<_>>()))
+    };
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(rep(&ctx.device_id, n)) as _,
+            Arc::new(rep(&ctx.session_id, n)) as _,
+            Arc::new(rep(&ctx.test_id, n)) as _,
+            Arc::new(rep(&ctx.node, n)) as _,
+            u32s(&|r| r.flow_id),
+            u64s(&|r| r.object_id),
+            u32s(&|r| r.agent),
+            u32s(&|r| r.task),
+            u32s(&|r| r.step),
+            strs(&|r| r.step_kind),
+            strs(&|r| r.activity),
+            u64s(&|r| r.episode),
+            opt64(&|r| r.after_episode),
+            u32s(&|r| r.parallel),
+            u64s(&|r| r.plan_up_bytes),
+            u64s(&|r| r.plan_down_bytes),
+            u32s(&|r| r.plan_delay_ms),
+            u32s(&|r| r.plan_rate_bps),
+            u32s(&|r| r.plan_chunk_bytes),
+            u64s(&|r| r.planned.mono_ns),
+            u64s(&|r| r.planned.utc_ns),
+            opt64(&|r| r.start.map(|t| t.mono_ns)),
+            opt64(&|r| r.start.map(|t| t.utc_ns)),
+            opt64(&|r| r.first_byte.map(|t| t.mono_ns)),
+            opt64(&|r| r.first_byte.map(|t| t.utc_ns)),
+            opt64(&|r| r.done.map(|t| t.mono_ns)),
+            opt64(&|r| r.done.map(|t| t.utc_ns)),
+            u64s(&|r| r.bytes_up),
+            u64s(&|r| r.bytes_down),
+            strs(&|r| r.outcome),
+            Arc::new(BooleanArray::from(
+                rows.iter().map(|r| r.new_connection).collect::<Vec<_>>(),
+            )) as _,
         ],
     )
     .map_err(std::io::Error::other)?;

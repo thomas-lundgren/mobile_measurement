@@ -90,15 +90,17 @@ impl Pool {
 
     /// All pooled connections, topped up to at least `want` with new ones
     /// (fewer when the server can't be reached; empty when none can be
-    /// opened). Hand the ones still usable back with `put_back`.
-    pub fn take(&mut self, want: usize) -> Vec<TcpStream> {
-        while self.conns.len() < want {
+    /// opened), each with whether it was opened just now. Hand the ones
+    /// still usable back with `put_back`.
+    pub fn take(&mut self, want: usize) -> Vec<(TcpStream, bool)> {
+        let mut out: Vec<(TcpStream, bool)> = self.conns.drain(..).map(|c| (c, false)).collect();
+        while out.len() < want {
             match connect(&self.server) {
-                Ok(c) => self.conns.push(c),
+                Ok(c) => out.push((c, true)),
                 Err(_) => break,
             }
         }
-        std::mem::take(&mut self.conns)
+        out
     }
 
     pub fn put_back(&mut self, conns: Vec<TcpStream>) {

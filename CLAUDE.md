@@ -85,7 +85,7 @@ These are the design decisions that span components and are easy to violate piec
    | `packets/time_sync.md` + vectors | server-main `time_sync.rs`, Logger `ClockSampler` | golden tests on both sides |
    | `packets/reach.md` + `reach_v1.json` | server-main `reach.rs`, Logger `ReachabilityChecker` | golden tests on both sides |
    | `schemas/core_stop_summary.schema.json` | core `FlowSummary` → Logger (`Wire.testResult`) | `ue::flow_summary_matches_the_contract`; Logger JVM tests |
-   | logged value sets (`enums.yaml` log_nodes, packet_directions, packet_protocols, send_statuses, radio_network_types, …) | core writers, Logger `Contract`, analysis `schema.py` / `findings.py` | `log_writer::logged_values_match_the_contract`; `test_schema_contract.py` |
+   | logged value sets (`enums.yaml` log_nodes, packet_directions, packet_protocols, send_statuses, radio_network_types, app_step_kinds, app_outcomes, …) | core writers, Logger `Contract`, analysis `schema.py` / `findings.py` | `log_writer::logged_values_match_the_contract`; `app_traffic::model::logged_kinds_and_outcomes_match_the_contract`; `test_schema_contract.py` |
    | `internal/mp_probe.yaml` + `testvectors/mp_probe/` | `probe/` (Rust), Logger `MpProbe`, `analysis` `bench.py` | probe tests, Logger JVM tests, `test_bench.py` |
 
    In the Logger, wire values and the keys it reads come from the generated `Contract` (including `Contract.Fields.<Type>` for OpenAPI and schema-only types); every JSON body it sends is built in `Wire.java` — never inline a wire string elsewhere.
@@ -103,7 +103,7 @@ session_<date>/test_NNN/
   header.json
   gps.parquet            # mobile only, 1/test
   radio.parquet          # mobile only, 1/test
-  mobile/  { packets, events, clock .parquet; probe.jsonl.gz }
+  mobile/  { packets, events, clock .parquet; app_events_NNNN.parquet per app flow; probe.jsonl.gz }
   server/  { packets, events, clock .parquet }
 ```
 

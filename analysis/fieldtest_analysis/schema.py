@@ -129,6 +129,40 @@ EVENTS = [
     "event_metadata",
 ]
 
+APP_EVENTS = [
+    "device_id",
+    "session_id",
+    "test_id",
+    "node",
+    "flow_id",
+    "object_id",
+    "agent",
+    "task",
+    "step",
+    "step_kind",
+    "activity",
+    "episode",
+    "after_episode",
+    "parallel",
+    "plan_up_bytes",
+    "plan_down_bytes",
+    "plan_delay_ms",
+    "plan_rate_bps",
+    "plan_chunk_bytes",
+    "planned_mono_ns",
+    "planned_utc_ns",
+    "start_mono_ns",
+    "start_utc_ns",
+    "first_byte_mono_ns",
+    "first_byte_utc_ns",
+    "done_mono_ns",
+    "done_utc_ns",
+    "bytes_up",
+    "bytes_down",
+    "outcome",
+    "new_connection",
+]
+
 # Logged values (contracts/enums/enums.yaml; tests/test_schema_contract.py).
 NODE_MOBILE = "mobile"
 NODE_SERVER = "server"

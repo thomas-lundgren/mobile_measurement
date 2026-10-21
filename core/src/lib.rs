@@ -166,6 +166,7 @@ impl RustCore {
                 for e in rd.flatten() {
                     let name = e.file_name().to_string_lossy().to_string();
                     if (name.starts_with("packets")
+                        || name.starts_with("app_events")
                         || name == "clock.parquet"
                         || name == "events.parquet")
                         && name.ends_with(".parquet")
