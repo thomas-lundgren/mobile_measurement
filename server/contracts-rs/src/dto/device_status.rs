@@ -62,3 +62,13 @@ pub struct RadioSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sinr: Option<i32>,
 }
+
+/// Response of `GET /api/v1/time`: the server's clock, for the UE's
+/// HTTP clock-sync fallback (SNTP-over-HTTP; spec §11.3).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ServerTime {
+    /// Server UTC when the request was handled.
+    pub server_utc_ns: i64,
+    /// UDP time responder the UE should prefer (contracts/packets/time_sync.md).
+    pub time_udp_port: u16,
+}

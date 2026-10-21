@@ -967,7 +967,7 @@ at most the open one.
 Work that is not the measurement stays off the device and the link while a
 test runs: the upload manager pauses (§13), and the on-phone modem-queue
 collector (`mp-probe`) polls at its full rate only inside a test window the
-Logger announces.
+Logger announces (protocol and record format: `contracts/internal/mp_probe.yaml`).
 
 ---
 

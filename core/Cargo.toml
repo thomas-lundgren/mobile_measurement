@@ -36,5 +36,6 @@ base64 = "0.22"
 rtrb = "0.3"
 
 [dev-dependencies]
+serde_ignored = "0.1"
 serde_yaml = { workspace = true }
 tempfile = "3"

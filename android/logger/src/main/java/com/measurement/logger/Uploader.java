@@ -225,16 +225,9 @@ final class Uploader {
         for (int i = 0; i < relPaths.length(); i++) {
             String rel = relPaths.getString(i);
             byte[] bytes = Files.readAllBytes(new File(testRoot, rel).toPath());
-            files.put(new JSONObject()
-                    .put("path", rel)
-                    .put("size_bytes", bytes.length)
-                    .put("sha256", sha256Hex(bytes))
-                    .put("encoding", "identity"));
+            files.put(Wire.manifestFile(rel, bytes.length, sha256Hex(bytes)));
         }
-        JSONObject manifest = new JSONObject()
-                .put("test_result", "COMPLETED")
-                .put("node", "mobile")
-                .put("files", files);
+        JSONObject manifest = Wire.manifest(files);
         JSONObject init = client.uploadSummary(session, testId, manifest);
         String uploadId = init.getString("upload_id");
         JSONArray needed = init.getJSONArray("needed_paths");

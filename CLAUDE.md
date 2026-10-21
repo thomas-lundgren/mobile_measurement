@@ -79,15 +79,20 @@ These are the design decisions that span components and are easy to violate piec
    | `schemas/*.json` | Rust DTOs → generated `openapi.yaml` → generated Kotlin client | `ci/validate_contracts.py` (examples, plus schema vs Rust shape); `openapi_drift`; `ci/check_client_drift.sh` |
    | `parquet/*.parquet.yaml` | Rust writers; `analysis/fieldtest_analysis/schema.py` | `core/tests/parquet_contract.rs`; `analysis/tests/test_schema_contract.py` |
    | `db/schema.sql` | server migrations | migration test in `mp-server-main` |
+   | all of the above, for the Logger | `Contract.java`, **generated** by `contracts/codegen/java_contract.py`: versions, enums, REST paths, row keys, mp-probe | `java_contract.py --check`; Logger JVM tests (`android/logger/src/test`) validate every body it sends against the schemas |
+   | RUN_TEST flows → core | the Logger passes each flow whole (`Wire.ueConfig`) | `core/tests/test_plan_contract.rs`: the core reads every field of every example, and the examples use every flow property |
+   | `packets/time_sync.md` + vectors | server-main `time_sync.rs`, Logger `ClockSampler` | golden tests on both sides |
+   | `internal/mp_probe.yaml` + `testvectors/mp_probe/` | `probe/` (Rust), Logger `MpProbe`, `analysis` `bench.py` | probe tests, Logger JVM tests, `test_bench.py` |
+
+   The Logger builds every JSON body it sends in `Wire.java` from `Contract` constants — never inline a wire string or key elsewhere.
 
    New fields in a JSON body need an example in `contracts/testvectors/` that uses them, because the shape check compares names and enum values, not bounds.
 
    **Still unchecked: fix these, don't extend them.**
 
-   - The Java Logger hand-writes command and state strings, version constants, REST paths and `header.json`.
-   - The mp-probe control protocol and `probe.jsonl.gz` format have no contract.
-   - The reach protocol has no golden vectors.
-   - Radio, GPS and clock rows go from Java to Rust as JSON whose keys nothing checks.
+   - The reach protocol (`packets/reach.md`) has no golden vectors.
+   - The JSON *responses* the Logger reads (e.g. challenge, logging config) are read by hand-typed keys.
+   - Value sets documented only in YAML docs (radio `network_type`, `transport`, `cell_connection_status`) are not enums yet.
 
 ## Log layout (per test)
 

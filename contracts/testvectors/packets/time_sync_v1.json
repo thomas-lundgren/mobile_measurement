@@ -1,0 +1,35 @@
+{
+  "description": "UDP time sync (contracts/packets/time_sync.md): the request a UE sends and the 24-byte reply the server builds from it, given the server's receive (t2) and send (t3) UTC times. Hex is lowercase, no separators.",
+  "cases": [
+    {
+      "name": "eight_byte_nonce",
+      "request_hex": "0102030405060708",
+      "t2_recv_utc_ns": 1792556320539545262,
+      "t3_send_utc_ns": 1792556320539561000,
+      "reply_hex": "010203040506070818e07079e5a40eae18e07079e5a44c28"
+    },
+    {
+      "name": "short_request_zero_padded",
+      "request_hex": "a1b2c3",
+      "t2_recv_utc_ns": 1792556320539545262,
+      "t3_send_utc_ns": 1792556320539545262,
+      "reply_hex": "a1b2c3000000000018e07079e5a40eae18e07079e5a40eae",
+      "notes": "A request shorter than 8 bytes: the nonce is zero-padded."
+    },
+    {
+      "name": "long_request_first_eight_bytes",
+      "request_hex": "ffeeddccbbaa99887766",
+      "t2_recv_utc_ns": 1,
+      "t3_send_utc_ns": 2,
+      "reply_hex": "ffeeddccbbaa998800000000000000010000000000000002",
+      "notes": "Only the first 8 bytes are the nonce."
+    },
+    {
+      "name": "empty_request",
+      "request_hex": "",
+      "t2_recv_utc_ns": 0,
+      "t3_send_utc_ns": 0,
+      "reply_hex": "000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

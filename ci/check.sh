@@ -10,9 +10,12 @@
 #       * OpenAPI drift vs contracts/openapi/openapi.yaml (mp-server-main)
 #       * DB migration == contracts/db/schema.sql         (mp-server-main)
 #       * full probe end-to-end                           (mp-server-main)
-#   - contract examples + packet vectors validate
+#   - contract examples + packet vectors validate; JSON Schema vs Rust types
+#   - generated Logger constants (Contract.java) in sync with contracts/
 #   - the Python analysis test suite
 #   - generated Controller client in sync with the OpenAPI contract (needs Java)
+#   - Logger JVM unit tests: its wire bodies and protocols against contracts/
+#     (needs Java + the Android SDK)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -31,6 +34,9 @@ echo "==> contract examples + packet vectors"
 ./venv/bin/pip install -q jsonschema referencing pyyaml
 ./venv/bin/python ci/validate_contracts.py
 
+echo "==> generated Logger constants in sync with the contracts"
+./venv/bin/python contracts/codegen/java_contract.py --check
+
 echo "==> analysis: pytest"
 (
   cd analysis
@@ -46,4 +52,12 @@ else
   echo "   (skip: java not found — CI enforces this)"
 fi
 
-echo "OK: format, lint, tests, contracts, analysis, and client all pass."
+echo "==> Logger JVM unit tests (wire bodies + protocols vs contracts)"
+GRADLE="$(find "$HOME/.gradle/wrapper/dists" -name gradle -type f 2>/dev/null | head -1)"
+if command -v java >/dev/null 2>&1 && [ -n "$GRADLE" ]; then
+  (cd android && "$GRADLE" --no-daemon -q :logger:testDebugUnitTest)
+else
+  echo "   (skip: java or gradle not found — CI enforces this)"
+fi
+
+echo "OK: format, lint, tests, contracts, analysis, client and Logger tests all pass."

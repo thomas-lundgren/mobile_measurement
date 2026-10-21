@@ -32,23 +32,11 @@ public final class LoggerService extends Service {
     /** Start-service action: run a reachability check now (the app's button). */
     public static final String ACTION_REACH_CHECK = "com.measurement.logger.REACH_CHECK";
     private static final String CHANNEL = "logger";
-    private static final int MP_PROBE_PORT = 47600;
     /** contracts/versions/versions.yaml — carried in every header.json. */
-    private static final int PROTOCOL_VERSION = 1;
-    private static final int SCHEMA_VERSION = 1;
     static final String PREFS = "mp_logger";
 
     /** Coarse state surfaced to the UI. */
     public static volatile String STATE = "idle";
-
-    // Pixel 9 Pro baseline capability (extended fields false; out of MVP scope).
-    private static final String CAPABILITY =
-            "{\"radio\":{\"serving_cell\":[\"pci\",\"nci\",\"tac\",\"nrarfcn\",\"rsrp\",\"rsrq\",\"sinr\"],"
-            + "\"neighbor_cells\":true,\"lte_fallback\":true,\"cqi\":false,\"mcs\":false,\"bler\":false,"
-            + "\"harq\":false,\"drx\":false,\"bwp\":false,\"mimo_layers\":false,\"tx_power\":false},"
-            + "\"qos\":{\"5qi\":false,\"qfi\":false,\"slice_info\":false},"
-            + "\"mobility\":{\"explicit_ho_events\":false,\"rrc_state\":false,\"beam_switch\":false},"
-            + "\"timestamp_sources\":[\"mono\",\"utc\",\"gps\"]}";
 
     private volatile boolean running;
     private Thread worker;
@@ -113,7 +101,7 @@ public final class LoggerService extends Service {
                 ReachabilityChecker.SUMMARY = "reachability unavailable: " + e.getMessage();
             }
         } else if (intent != null && ACTION_REACH_CHECK.equals(intent.getAction())) {
-            reach.requestCheck("MANUAL");
+            reach.requestCheck(Contract.ReachTrigger.MANUAL);
         }
         final String s = server;
         final String t = token;
@@ -267,15 +255,15 @@ public final class LoggerService extends Service {
         long backoff = BACKOFF_MIN_MS;
         while (running) {
             try {
-                setState("REGISTERING");
+                setState(Contract.LoggerStates.REGISTERING);
                 KeystoreSigner.ensureKey();
                 String deviceId = enrollIfNeeded(client, prefs, token);
                 String session = authenticate(client, deviceId);
-                JSONObject cfg = client.register(session, new JSONObject(CAPABILITY));
+                JSONObject cfg = client.register(session, Wire.capability());
                 loggingConfigVersion = cfg.optInt("version", 1);
                 loggingConfig = cfg;
 
-                setState("IDLE");
+                setState(Contract.LoggerStates.IDLE);
                 backoff = BACKOFF_MIN_MS; // connected → reset backoff
                 uploads.setSession(session);
                 pollLoop(client, session, deviceId);
@@ -304,9 +292,9 @@ public final class LoggerService extends Service {
         while (running) {
             JSONObject cmd = client.pollCommand(session, deviceId);
             String command = cmd != null ? cmd.optString("command") : "";
-            if ("RUN_TEST".equals(command)) {
+            if (Contract.Commands.RUN_TEST.equals(command)) {
                 runTest(client, session, deviceId, cmd);
-            } else if ("SET_LOGGING_CONFIG".equals(command)) {
+            } else if (Contract.Commands.SET_LOGGING_CONFIG.equals(command)) {
                 applyLoggingConfig(client, session, deviceId, cmd);
             } else {
                 Thread.sleep(2000);
@@ -341,17 +329,8 @@ public final class LoggerService extends Service {
         if (existing != null) {
             return existing;
         }
-        JSONObject body = new JSONObject()
-                .put("device_pubkey", KeystoreSigner.publicKeySpkiB64())
-                .put("pubkey_format", "SPKI_DER")
-                .put("sig_alg", "ECDSA_P256_SHA256")
-                .put("sig_format", "ASN1_DER")
-                .put("platform", "android")
-                .put("hw_info", new JSONObject()
-                        .put("model", android.os.Build.MODEL)
-                        .put("manufacturer", android.os.Build.MANUFACTURER)
-                        .put("os_version", android.os.Build.VERSION.RELEASE))
-                .put("protocol_version", 1);
+        JSONObject body = Wire.enroll(KeystoreSigner.publicKeySpkiB64(),
+                android.os.Build.MODEL, android.os.Build.MANUFACTURER, android.os.Build.VERSION.RELEASE);
         JSONObject resp = client.enroll(token == null ? "" : token, body);
         String deviceId = resp.getString("device_id");
         prefs.edit().putString("device_id", deviceId).apply();
@@ -395,7 +374,7 @@ public final class LoggerService extends Service {
 
         setState("PREPARING " + testId);
         File header = writeHeader(testRoot, payload, deviceId);
-        String ueConfig = buildUeConfig(payload, deviceId, sessionId, mobileDir.getAbsolutePath());
+        String ueConfig = Wire.ueConfig(payload, deviceId, mobileDir.getAbsolutePath());
 
         uploads.setMeasuring(true);
         long h = RustCore.coreNew();
@@ -435,9 +414,9 @@ public final class LoggerService extends Service {
         radio.start();
         clock.start();
 
-        setState("RUNNING_TEST " + testId);
+        setState(Contract.LoggerStates.RUNNING_TEST + " " + testId);
         int durationSec = payload.getJSONObject("test_plan").optInt("duration_sec", 30);
-        probeFast(durationSec + 30);
+        MpProbe.fast(durationSec + 30);
         long startUtcNs = Clock.now()[1];
         PowerManager.WakeLock screen = screenOnDuringTest();
         try {
@@ -453,13 +432,14 @@ public final class LoggerService extends Service {
             gps.stop();
             radio.stop();
             clock.stop();
-            probeFast(0);
+            MpProbe.fast(0);
             RustCore.stopTest(h);
             JSONArray sealed = new JSONArray(RustCore.sealedFiles(h));
             if (header != null) {
                 sealed.put(header.getAbsolutePath());
             }
-            File probeLog = fetchProbeWindow(mobileDir, startUtcNs - 5_000_000_000L, Clock.now()[1] + 1_000_000_000L);
+            File probeLog = MpProbe.fetch(new File(mobileDir, "probe.jsonl.gz"),
+                    startUtcNs - 5_000_000_000L, Clock.now()[1] + 1_000_000_000L);
             if (probeLog != null) {
                 sealed.put(probeLog.getAbsolutePath());
             }
@@ -472,21 +452,7 @@ public final class LoggerService extends Service {
         // generators) and leave the upload to the uploader thread, so it never
         // blocks the next test.
         ack(client, session, deviceId, commandId);
-        setState("IDLE");
-    }
-
-    /** mp-probe (the adb-started collector, if running) polls the modem queues
-     *  at full rate only for this long; 0 = back to idle now. Best-effort. */
-    private static void probeFast(int seconds) {
-        try (java.net.Socket s = new java.net.Socket()) {
-            s.connect(new java.net.InetSocketAddress("127.0.0.1", MP_PROBE_PORT), 200);
-            s.setSoTimeout(500);
-            s.getOutputStream().write(("FAST " + seconds + "\n").getBytes(StandardCharsets.US_ASCII));
-            s.getInputStream().read(); // "OK": the window is set
-        } catch (Exception ignored) {
-            // not running (e.g. after a reboot), or anything else: the test
-            // never depends on mp-probe
-        }
+        setState(Contract.LoggerStates.IDLE);
     }
 
     /** header.json at the test root (contracts/schemas/header.schema.json):
@@ -502,67 +468,16 @@ public final class LoggerService extends Service {
             if (loggingCfg == null) {
                 loggingCfg = loggingConfig != null ? loggingConfig : new JSONObject();
             }
-            JSONObject header = new JSONObject()
-                    .put("schema_version", SCHEMA_VERSION)
-                    .put("protocol_version", PROTOCOL_VERSION)
-                    .put("app_version", getPackageManager().getPackageInfo(getPackageName(), 0).versionName)
-                    .put("session_id", payload.getString("session_id"))
-                    .put("test_id", payload.getString("test_id"))
-                    .put("test_start_utc_ns", t[1])
-                    .put("test_start_mono_ns", t[0])
-                    .put("device", new JSONObject()
-                            .put("device_id", deviceId)
-                            .put("node_id", "mobile")
-                            .put("platform", "android")
-                            .put("model", android.os.Build.MODEL)
-                            .put("manufacturer", android.os.Build.MANUFACTURER)
-                            .put("os_version", android.os.Build.VERSION.RELEASE))
-                    .put("server", new JSONObject()
-                            .put("node_id", "server")
-                            .put("host", payload.getString("server_host")))
-                    .put("test_plan", payload.getJSONObject("test_plan"))
-                    .put("flow_bindings", payload.getJSONArray("flow_bindings"))
-                    .put("logging_config", loggingCfg);
+            JSONObject header = Wire.header(payload, loggingCfg, deviceId,
+                    getPackageManager().getPackageInfo(getPackageName(), 0).versionName,
+                    android.os.Build.MODEL, android.os.Build.MANUFACTURER, android.os.Build.VERSION.RELEASE,
+                    t[0], t[1]);
             File f = new File(testRoot, "header.json");
             Files.write(f.toPath(), header.toString(2).getBytes(StandardCharsets.UTF_8));
             return f;
         } catch (Exception e) {
             return null;
         }
-    }
-
-    /** mp-probe's records (modem queue stats, UDP counters, radio-log events)
-     *  for the test window, gzipped to mobile/probe.jsonl.gz so they upload
-     *  with the test. Null if mp-probe isn't running or had nothing. */
-    @Nullable
-    private static File fetchProbeWindow(File mobileDir, long t0Ns, long t1Ns) {
-        File out = new File(mobileDir, "probe.jsonl.gz");
-        long lines = 0;
-        try (java.net.Socket s = new java.net.Socket()) {
-            s.connect(new java.net.InetSocketAddress("127.0.0.1", MP_PROBE_PORT), 200);
-            s.setSoTimeout(10_000);
-            s.getOutputStream().write(("RANGE " + t0Ns + " " + t1Ns + "\n").getBytes(StandardCharsets.US_ASCII));
-            try (java.io.InputStream in = s.getInputStream();
-                 java.io.OutputStream gz = new java.util.zip.GZIPOutputStream(new java.io.FileOutputStream(out))) {
-                byte[] buf = new byte[64 * 1024];
-                for (int n; (n = in.read(buf)) > 0; ) {
-                    gz.write(buf, 0, n);
-                    for (int i = 0; i < n; i++) {
-                        if (buf[i] == '\n') {
-                            lines++;
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            // not running, or cut off: keep what arrived (whole lines are
-            // valid); the test never depends on mp-probe
-        }
-        if (lines == 0) {
-            out.delete();
-            return null;
-        }
-        return out;
     }
 
     /** Ack a command; a 404 means it was already acked (our earlier ack landed
@@ -603,84 +518,12 @@ public final class LoggerService extends Service {
         prefs.edit().putString(KEY_HANDLED, String.join("\n", ids)).commit();
     }
 
-    /** Merge RUN_TEST payload (port-less plan + bindings) into the engine's lean
-     *  UeTestConfig — the JNI-seam job. */
-    private static String buildUeConfig(JSONObject payload, String deviceId, String sessionId, String mobileDir)
-            throws Exception {
-        JSONObject bindings = new JSONObject();
-        JSONArray fb = payload.getJSONArray("flow_bindings");
-        for (int i = 0; i < fb.length(); i++) {
-            JSONObject b = fb.getJSONObject(i);
-            bindings.put(String.valueOf(b.getInt("flow_id")), b.getInt("server_port"));
-        }
-        JSONArray planFlows = payload.getJSONObject("test_plan").getJSONArray("flows");
-        JSONArray flows = new JSONArray();
-        for (int i = 0; i < planFlows.length(); i++) {
-            JSONObject f = planFlows.getJSONObject(i);
-            JSONObject uf = new JSONObject();
-            int flowId = f.getInt("flow_id");
-            uf.put("flow_id", flowId);
-            uf.put("type", f.getString("type"));
-            uf.put("server_port", bindings.getInt(String.valueOf(flowId)));
-            if (f.has("direction")) {
-                uf.put("direction", f.getString("direction"));
-            }
-            if (f.has("rate_pps")) {
-                uf.put("rate_pps", f.getInt("rate_pps"));
-            }
-            if (f.has("packet_size_bytes")) {
-                uf.put("packet_size_bytes", f.getInt("packet_size_bytes"));
-            }
-            if (f.has("target_bytes")) {
-                uf.put("target_bytes", f.getLong("target_bytes"));
-            }
-            if (f.has("sndbuf_bytes")) {
-                uf.put("sndbuf_bytes", f.getInt("sndbuf_bytes"));
-            }
-            if (f.has("rate_kbps")) {
-                uf.put("rate_kbps", f.getInt("rate_kbps"));
-            }
-            // app_traffic: user model, passed through as the core reads it
-            for (String k : new String[] {"profile", "workers", "seed", "scale", "actions", "placement"}) {
-                if (f.has(k)) {
-                    uf.put(k, f.get(k));
-                }
-            }
-            flows.put(uf);
-        }
-        return new JSONObject()
-                .put("test_id", payload.getString("test_id"))
-                .put("device_id", deviceId)
-                .put("session_id", sessionId)
-                .put("server_host", payload.getString("server_host"))
-                .put("log_dir", mobileDir)
-                .put("flows", flows)
-                .toString();
-    }
-
     private void postStatus(ServerClient client, String session, String deviceId, @Nullable String currentTestId) {
         try {
             long[] t = Clock.now();
-            JSONObject status = new JSONObject()
-                    .put("logger_state", STATE.startsWith("RUNNING_TEST") ? "RUNNING_TEST" : "IDLE")
-                    .put("logging_config_version", loggingConfigVersion)
-                    .put("sampled_at", new JSONObject().put("mono_ns", t[0]).put("utc_ns", t[1]));
-            JSONObject batt = battery();
-            if (batt != null) {
-                status.put("battery", batt);
-            }
-            JSONObject stor = storage();
-            if (stor != null) {
-                status.put("storage", stor);
-            }
-            status.put("pending_uploads", uploads.pending());
-            JSONObject cell = RadioSampler.serving(this);
-            if (cell != null && cell.length() > 0) {
-                status.put("radio", cell);
-            }
-            if (currentTestId != null) {
-                status.put("current_test_id", currentTestId);
-            }
+            JSONObject status = Wire.status(STATE.startsWith(Contract.LoggerStates.RUNNING_TEST),
+                    loggingConfigVersion, t[0], t[1], battery(), storage(), uploads.pending(),
+                    RadioSampler.serving(this), currentTestId);
             client.postStatus(session, deviceId, status);
         } catch (Exception ignored) {
         }
@@ -695,7 +538,7 @@ public final class LoggerService extends Service {
             if (level < 0 || level > 100) {
                 return null;
             }
-            return new JSONObject().put("level_pct", level).put("charging", bm.isCharging());
+            return Wire.battery(level, bm.isCharging());
         } catch (Exception e) {
             return null;
         }
@@ -705,9 +548,7 @@ public final class LoggerService extends Service {
     private JSONObject storage() {
         try {
             android.os.StatFs sf = new android.os.StatFs(getFilesDir().getAbsolutePath());
-            return new JSONObject()
-                    .put("free_bytes", sf.getAvailableBytes())
-                    .put("total_bytes", sf.getTotalBytes());
+            return Wire.storage(sf.getAvailableBytes(), sf.getTotalBytes());
         } catch (Exception e) {
             return null;
         }

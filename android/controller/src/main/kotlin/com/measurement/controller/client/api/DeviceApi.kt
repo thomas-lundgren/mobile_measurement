@@ -24,6 +24,7 @@ import com.measurement.controller.client.model.DeviceCommand
 import com.measurement.controller.client.model.DeviceStatus
 import com.measurement.controller.client.model.LoggingConfig
 import com.measurement.controller.client.model.ReachabilityReport
+import com.measurement.controller.client.model.ServerTime
 
 import com.google.gson.annotations.SerializedName
 
@@ -400,6 +401,74 @@ class DeviceApi(basePath: kotlin.String = defaultBasePath, client: Call.Factory 
         return RequestConfig(
             method = RequestMethod.POST,
             path = "/api/v1/devices/register",
+            query = localVariableQuery,
+            headers = localVariableHeaders,
+            requiresAuthentication = false,
+            body = localVariableBody
+        )
+    }
+
+    /**
+     * Unauthenticated server-clock reading for device-side time sync. The UE pairs its own send/recv timestamps around this call (SNTP-over-HTTP) to estimate its offset from the server clock, which it records in &#x60;clock.parquet&#x60; so OWD can be offset-corrected (invariant 2; spec §11.3). &#x60;time_udp_port&#x60; advertises the lower-overhead UDP responder, which the UE prefers for a tighter bound.
+     * 
+     * @return ServerTime
+     * @throws IllegalStateException If the request is not correctly configured
+     * @throws IOException Rethrows the OkHttp execute method exception
+     * @throws UnsupportedOperationException If the API returns an informational or redirection response
+     * @throws ClientException If the API returns a client error response
+     * @throws ServerException If the API returns a server error response
+     */
+    @Suppress("UNCHECKED_CAST")
+    @Throws(IllegalStateException::class, IOException::class, UnsupportedOperationException::class, ClientException::class, ServerException::class)
+    fun serverTime() : ServerTime {
+        val localVarResponse = serverTimeWithHttpInfo()
+
+        return when (localVarResponse.responseType) {
+            ResponseType.Success -> (localVarResponse as Success<*>).data as ServerTime
+            ResponseType.Informational -> throw UnsupportedOperationException("Client does not support Informational responses.")
+            ResponseType.Redirection -> throw UnsupportedOperationException("Client does not support Redirection responses.")
+            ResponseType.ClientError -> {
+                val localVarError = localVarResponse as ClientError<*>
+                throw ClientException("Client error : ${localVarError.statusCode} ${localVarError.message.orEmpty()}", localVarError.statusCode, localVarResponse)
+            }
+            ResponseType.ServerError -> {
+                val localVarError = localVarResponse as ServerError<*>
+                throw ServerException("Server error : ${localVarError.statusCode} ${localVarError.message.orEmpty()} ${localVarError.body}", localVarError.statusCode, localVarResponse)
+            }
+        }
+    }
+
+    /**
+     * Unauthenticated server-clock reading for device-side time sync. The UE pairs its own send/recv timestamps around this call (SNTP-over-HTTP) to estimate its offset from the server clock, which it records in &#x60;clock.parquet&#x60; so OWD can be offset-corrected (invariant 2; spec §11.3). &#x60;time_udp_port&#x60; advertises the lower-overhead UDP responder, which the UE prefers for a tighter bound.
+     * 
+     * @return ApiResponse<ServerTime?>
+     * @throws IllegalStateException If the request is not correctly configured
+     * @throws IOException Rethrows the OkHttp execute method exception
+     */
+    @Suppress("UNCHECKED_CAST")
+    @Throws(IllegalStateException::class, IOException::class)
+    fun serverTimeWithHttpInfo() : ApiResponse<ServerTime?> {
+        val localVariableConfig = serverTimeRequestConfig()
+
+        return request<Unit, ServerTime>(
+            localVariableConfig
+        )
+    }
+
+    /**
+     * To obtain the request config of the operation serverTime
+     *
+     * @return RequestConfig
+     */
+    fun serverTimeRequestConfig() : RequestConfig<Unit> {
+        val localVariableBody = null
+        val localVariableQuery: MultiValueMap = mutableMapOf()
+        val localVariableHeaders: MutableMap<String, String> = mutableMapOf()
+        localVariableHeaders["Accept"] = "application/json"
+
+        return RequestConfig(
+            method = RequestMethod.GET,
+            path = "/api/v1/time",
             query = localVariableQuery,
             headers = localVariableHeaders,
             requiresAuthentication = false,

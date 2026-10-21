@@ -427,6 +427,24 @@ paths:
           description: ''
         '422':
           description: ''
+  /api/v1/time:
+    get:
+      tags:
+      - device
+      summary: |-
+        Unauthenticated server-clock reading for device-side time sync. The UE pairs
+        its own send/recv timestamps around this call (SNTP-over-HTTP) to estimate
+        its offset from the server clock, which it records in `clock.parquet` so OWD
+        can be offset-corrected (invariant 2; spec §11.3). `time_udp_port` advertises
+        the lower-overhead UDP responder, which the UE prefers for a tighter bound.
+      operationId: server_time
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerTime'
 components:
   schemas:
     AppAction:
@@ -1604,6 +1622,24 @@ components:
           type: string
         test_plan:
           $ref: '#/components/schemas/TestPlan'
+    ServerTime:
+      type: object
+      description: |-
+        Response of `GET /api/v1/time`: the server's clock, for the UE's
+        HTTP clock-sync fallback (SNTP-over-HTTP; spec §11.3).
+      required:
+      - server_utc_ns
+      - time_udp_port
+      properties:
+        server_utc_ns:
+          type: integer
+          format: int64
+          description: Server UTC when the request was handled.
+        time_udp_port:
+          type: integer
+          format: int32
+          description: UDP time responder the UE should prefer (contracts/packets/time_sync.md).
+          minimum: 0
     ServingCellField:
       type: string
       description: Per-sample serving-cell fields a device can report.

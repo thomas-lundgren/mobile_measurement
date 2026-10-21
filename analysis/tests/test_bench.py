@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import gzip
 import json
+from pathlib import Path
+
+import yaml
 
 from fieldtest_analysis import bench
 
@@ -54,3 +57,25 @@ def test_probe_log_gives_qdisc_and_radio_rows_and_test_file_wins(tmp_path):
     # no file: falls back to the (absent) bench dir -> empty frames
     q, r = bench.load_for_test(tmp_path / "other", None, 0, 1)
     assert q.empty and r.empty
+
+
+# --- against the mp-probe contract (contracts/internal/mp_probe.yaml) ---------
+
+CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
+
+
+def test_qdisc_keys_are_the_contracts():
+    spec = yaml.safe_load((CONTRACTS / "internal" / "mp_probe.yaml").read_text())
+    assert set(bench._Q_KEYS) == set(spec["records"]["q"]["keys"]) - {"k"}
+
+
+def test_contract_sample_records_load(tmp_path):
+    sample = (CONTRACTS / "testvectors" / "mp_probe" / "records.jsonl").read_text()
+    path = tmp_path / bench.PROBE_LOG
+    with gzip.open(path, "wt") as f:
+        f.write(sample)
+    q, r = bench.read_probe_log(path)
+    assert q["dev"].tolist() == ["rmnet_data1", "wlan0"]
+    assert q.iloc[0]["requeues"] == 12 and q.iloc[0]["backlog_pkts"] == 15
+    assert r["kind"].tolist() == ["channel_config"]
+    assert r.iloc[0]["summary"] == "LTE B3 PCI 264 20/20 MHz"

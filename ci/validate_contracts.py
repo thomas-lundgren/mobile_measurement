@@ -185,12 +185,25 @@ def check_schema_parity():
         failures.extend(f"{name}: {d}" for d in out)
 
 
+def check_time_sync_vectors():
+    """contracts/packets/time_sync.md: reply = nonce (8, zero-padded) ++ t2 ++ t3 (i64 BE)."""
+    doc = json.load(open(CONTRACTS / "testvectors" / "packets" / "time_sync_v1.json"))
+    for c in doc["cases"]:
+        nonce = (bytes.fromhex(c["request_hex"])[:8] + b"\x00" * 8)[:8]
+        reply = nonce + struct.pack(">qq", c["t2_recv_utc_ns"], c["t3_send_utc_ns"])
+        ok = reply.hex() == c["reply_hex"]
+        print(f"  time_sync_v1.json:{c['name']:38s} {'OK' if ok else 'FAIL'}")
+        if not ok:
+            failures.append(f"time_sync_v1.json:{c['name']}: hex mismatch")
+
+
 def main():
     schemas, reg = load_registry()
     print("JSON Schema examples:")
     check_json_examples(reg, schemas)
     print("Packet golden vectors:")
     check_packet_vectors()
+    check_time_sync_vectors()
     print("JSON Schema vs Rust types (generated OpenAPI):")
     check_schema_parity()
     if failures:

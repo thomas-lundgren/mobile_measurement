@@ -21,7 +21,6 @@ import java.util.Base64;
 public final class KeystoreSigner {
     private static final String ALIAS = "mp_device_key";
     private static final String STORE = "AndroidKeyStore";
-    private static final String AUTH_DOMAIN = "mp-auth-v1";
     private static final byte SEP = 0x1F;
 
     private KeystoreSigner() {}
@@ -61,10 +60,11 @@ public final class KeystoreSigner {
         return Base64.getEncoder().encodeToString(s.sign());
     }
 
-    // "mp-auth-v1" 0x1F server_id 0x1F challenge_id 0x1F nonce  (UTF-8)
-    private static byte[] blob(String serverId, String challengeId, String nonce) {
+    // AUTH_DOMAIN 0x1F server_id 0x1F challenge_id 0x1F nonce  (UTF-8;
+    // contracts/testvectors/auth_signing/vector.json)
+    static byte[] blob(String serverId, String challengeId, String nonce) {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
-        String[] parts = {AUTH_DOMAIN, serverId, challengeId, nonce};
+        String[] parts = {Contract.AUTH_DOMAIN, serverId, challengeId, nonce};
         for (int i = 0; i < parts.length; i++) {
             if (i > 0) {
                 b.write(SEP);

@@ -1,0 +1,14 @@
+{
+  "description": "mp-probe line protocol (contracts/internal/mp_probe.yaml). Each case: the request line a client sends (with its newline) and how the probe answers. reply_pattern is a regular expression for the one reply line; null means no reply (the connection closes).",
+  "cases": [
+    { "name": "ping", "request": "PING\n", "reply_pattern": "^PONG \\S+ \\d+$" },
+    { "name": "fast_test_window", "request": "FAST 95\n", "fast_s": 95, "reply_pattern": "^OK$" },
+    { "name": "fast_end", "request": "FAST 0\n", "fast_s": 0, "reply_pattern": "^OK$" },
+    { "name": "fast_capped", "request": "FAST 99999\n", "fast_s": 3600, "reply_pattern": "^OK$" },
+    { "name": "range", "request": "RANGE 1792556315539545262 1792556381539545262\n", "range": [1792556315539545262, 1792556381539545262], "reply_pattern": "records" },
+    { "name": "fast_not_a_number", "request": "FAST soon\n", "reply_pattern": null },
+    { "name": "range_one_bound", "request": "RANGE 1792556315539545262\n", "reply_pattern": null },
+    { "name": "unknown", "request": "HELLO\n", "reply_pattern": null },
+    { "name": "lowercase", "request": "ping\n", "reply_pattern": null }
+  ]
+}

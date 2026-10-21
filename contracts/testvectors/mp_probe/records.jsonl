@@ -1,0 +1,6 @@
+{"t":1792556310000000000,"k":"start","version":"0.2.0","hz":100,"idle_hz":2}
+{"t":1792556320539545262,"k":"fast","s":95}
+{"t":1792556320600000000,"k":"q","dev":"rmnet_data1","qdisc":"pfifo_fast","b":1843200,"p":9216,"d":0,"o":0,"r":12,"bb":3000,"bp":15}
+{"t":1792556320700000000,"k":"u","InDatagrams":10,"NoPorts":2,"InErrors":3,"OutDatagrams":40,"RcvbufErrors":5,"SndbufErrors":11434611}
+{"t":1792556321068000000,"k":"l","line":"1792556321.068  2830  3415 D RILJ    : [UNSL]< UNSOL_PHYSICAL_CHANNEL_CONFIG [{mConnectionStatus=PrimaryServing, mCellBandwidthDownlinkKhz=20000, mCellBandwidthUplinkKhz=20000, mNetworkType=LTE, mBand=3, mPhysicalCellId=264}] [PHONE0]"}
+{"t":1792556321100000000,"k":"q","dev":"wlan0","qdisc":"mq","b":51200,"p":80,"d":1,"o":0,"r":0,"bb":0,"bp":0}

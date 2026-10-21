@@ -18,6 +18,6 @@ join_columns:
 columns:
   - { name: mono_ns, type: uint64, nullable: false }
   - { name: utc_ns,  type: uint64, nullable: false }
-  - { name: source,  type: utf8,   nullable: true, doc: "Reference used: gps | ntp | chrony | system." }
+  - { name: source,  type: utf8,   nullable: true, doc: "Reference the offset was measured against: enums.yaml clock_sources." }
   - { name: uncertainty_ns,      type: uint64, nullable: true, doc: "Estimated bound on this UTC sample. Feeds OWD uncertainty." }
   - { name: estimated_offset_ns, type: int64,  nullable: true, doc: "Estimated offset of the local clock from the reference (signed)." }

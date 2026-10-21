@@ -59,14 +59,14 @@ final class ReachabilityChecker {
     /** Public ports dialled on the server. The router maps them onto the
      *  server's reach responders (MP_REACH_LISTEN); 8080 is the control port. */
     static final Target[] TARGETS = {
-        new Target("tcp", 8080, "http"),
-        new Target("tcp", 443, "reach"),
-        new Target("udp", 443, "reach"),
-        new Target("tcp", 80, "reach"),
-        new Target("tcp", 3478, "reach"),
-        new Target("udp", 3478, "reach"),
-        new Target("tcp", 41100, "reach"),
-        new Target("udp", 41100, "reach"),
+        new Target(Contract.ReachProtocol.TCP, 8080, Contract.ReachKind.HTTP),
+        new Target(Contract.ReachProtocol.TCP, 443, Contract.ReachKind.REACH),
+        new Target(Contract.ReachProtocol.UDP, 443, Contract.ReachKind.REACH),
+        new Target(Contract.ReachProtocol.TCP, 80, Contract.ReachKind.REACH),
+        new Target(Contract.ReachProtocol.TCP, 3478, Contract.ReachKind.REACH),
+        new Target(Contract.ReachProtocol.UDP, 3478, Contract.ReachKind.REACH),
+        new Target(Contract.ReachProtocol.TCP, 41100, Contract.ReachKind.REACH),
+        new Target(Contract.ReachProtocol.UDP, 41100, Contract.ReachKind.REACH),
     };
 
     private static final int TIMEOUT_MS = 3000;
@@ -115,7 +115,7 @@ final class ReachabilityChecker {
                 if (!key.equals(lastNetworkKey)) {
                     lastNetworkKey = key;
                     handler.removeCallbacksAndMessages(null);
-                    handler.postDelayed(() -> check("NETWORK_CHANGE"), SETTLE_MS);
+                    handler.postDelayed(() -> check(Contract.ReachTrigger.NETWORK_CHANGE), SETTLE_MS);
                 }
             }
         };
@@ -124,7 +124,7 @@ final class ReachabilityChecker {
         } catch (RuntimeException ignored) {
             callback = null; // no ACCESS_NETWORK_STATE: manual/start checks only
         }
-        handler.post(() -> check("SERVICE_START"));
+        handler.post(() -> check(Contract.ReachTrigger.SERVICE_START));
     }
 
     void stop() {
@@ -151,10 +151,7 @@ final class ReachabilityChecker {
         Network net = cm.getActiveNetwork();
         try {
             long[] t = Clock.now();
-            JSONObject report = new JSONObject()
-                    .put("checked_at", new JSONObject().put("mono_ns", t[0]).put("utc_ns", t[1]))
-                    .put("trigger", trigger)
-                    .put("network", networkContext(net));
+            JSONObject network = networkContext(net);
             JSONArray checks = new JSONArray();
             StringBuilder line = new StringBuilder();
             for (Target target : TARGETS) {
@@ -163,7 +160,7 @@ final class ReachabilityChecker {
                 line.append(' ').append(target.protocol).append(target.port)
                         .append(c.getBoolean("ok") ? "✓" : "✗");
             }
-            report.put("checks", checks);
+            JSONObject report = Wire.reachReport(t[0], t[1], trigger, network, checks);
             save(report);
             SUMMARY = "reach " + report.getJSONObject("network").getString("transport") + ":" + line;
         } catch (Exception e) {
@@ -173,17 +170,17 @@ final class ReachabilityChecker {
 
     private JSONObject probe(Network net, Target target) throws Exception {
         try {
-            if ("http".equals(target.kind)) {
+            if (Contract.ReachKind.HTTP.equals(target.kind)) {
                 return httpProbe(net, target);
             }
-            return "udp".equals(target.protocol) ? udpProbe(net, target) : tcpProbe(net, target);
+            return Contract.ReachProtocol.UDP.equals(target.protocol) ? udpProbe(net, target) : tcpProbe(net, target);
         } catch (Exception e) {
             return failed(target, errorName(e));
         }
     }
 
     private JSONObject httpProbe(Network net, Target target) throws Exception {
-        URL url = new URL("http://" + host + ":" + target.port + "/api/v1/time");
+        URL url = new URL("http://" + host + ":" + target.port + Contract.Api.SERVER_TIME);
         long t0 = System.nanoTime();
         HttpURLConnection conn = (HttpURLConnection) net.openConnection(url);
         try {
@@ -255,11 +252,7 @@ final class ReachabilityChecker {
     }
 
     private static JSONObject result(Target target, boolean ok) throws Exception {
-        return new JSONObject()
-                .put("protocol", target.protocol)
-                .put("port", target.port)
-                .put("kind", target.kind)
-                .put("ok", ok);
+        return Wire.reachCheck(target.protocol, target.port, target.kind, ok);
     }
 
     private static JSONObject failed(Target target, String error) throws Exception {
@@ -293,41 +286,39 @@ final class ReachabilityChecker {
     }
 
     private static String transport(NetworkCapabilities caps) {
-        if (caps == null) return "NONE";
-        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return "WIFI";
-        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return "CELLULAR";
-        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return "ETHERNET";
-        return "OTHER";
+        if (caps == null) return Contract.NetworkTransport.NONE;
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return Contract.NetworkTransport.WIFI;
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return Contract.NetworkTransport.CELLULAR;
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return Contract.NetworkTransport.ETHERNET;
+        return Contract.NetworkTransport.OTHER;
     }
 
     @SuppressWarnings({"MissingPermission", "deprecation"})
     private JSONObject networkContext(Network net) throws Exception {
         NetworkCapabilities caps = net == null ? null : cm.getNetworkCapabilities(net);
         String transport = transport(caps);
-        JSONObject n = new JSONObject().put("transport", transport);
-        if (caps != null) {
-            n.put("validated", caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
-        }
-        if ("WIFI".equals(transport)) {
+        Boolean validated = caps == null ? null : caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+        String ssid = null;
+        int freq = 0;
+        String operator = null;
+        if (Contract.NetworkTransport.WIFI.equals(transport)) {
             WifiManager wm = (WifiManager) ctx.getSystemService(Context.WIFI_SERVICE);
             WifiInfo info = wm.getConnectionInfo();
             if (info != null) {
-                String ssid = info.getSSID();
-                if (ssid != null && !ssid.contains("unknown ssid")) {
-                    n.put("wifi_ssid", ssid.replaceAll("^\"|\"$", ""));
+                String s = info.getSSID();
+                if (s != null && !s.contains("unknown ssid")) {
+                    ssid = s.replaceAll("^\"|\"$", "");
                 }
-                if (info.getFrequency() > 0) {
-                    n.put("wifi_freq_mhz", info.getFrequency());
-                }
+                freq = info.getFrequency();
             }
-        } else if ("CELLULAR".equals(transport)) {
+        } else if (Contract.NetworkTransport.CELLULAR.equals(transport)) {
             TelephonyManager tm = (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
             String op = tm.getNetworkOperatorName();
             if (op != null && !op.isEmpty()) {
-                n.put("operator", op);
+                operator = op;
             }
         }
-        return n;
+        return Wire.network(transport, validated, ssid, freq, operator);
     }
 
     private void save(JSONObject report) throws Exception {

@@ -8,6 +8,7 @@ reachable by the Controller, the Logger app, or anything outside the host.
 |---|---|---|---|
 | Control API | server-main → test-control → data-generator | local HTTP + JSON | [`control_api.md`](control_api.md) |
 | Logger sink | generator thread → logger/writer thread (in-process) | lock-free ring buffer | [`logger_sink.md`](logger_sink.md) |
+| mp-probe | Logger app → on-phone collector (127.0.0.1), and its records → analysis | line protocol + JSON lines | [`mp_probe.yaml`](mp_probe.yaml) (vectors: `testvectors/mp_probe/`) |
 
 ## Why these two are different in kind
 

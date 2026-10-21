@@ -199,17 +199,17 @@ public final class RadioSampler {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ci instanceof CellInfoNr) {
                     CellIdentityNr id = (CellIdentityNr) ci.getCellIdentity();
                     JSONObject row = new JSONObject();
-                    putIfValid(row, "pci", id.getPci());
-                    putIfValid(row, "nci", id.getNci());
+                    putIfValid(row, Contract.RadioRow.PCI, id.getPci());
+                    putIfValid(row, Contract.RadioRow.NCI, id.getNci());
                     putNrSignal(row, (CellSignalStrengthNr) ci.getCellSignalStrength());
                     return row;
                 } else if (ci instanceof CellInfoLte && lte == null) {
                     CellIdentityLte id = ((CellInfoLte) ci).getCellIdentity();
                     CellSignalStrengthLte ss = ((CellInfoLte) ci).getCellSignalStrength();
                     lte = new JSONObject();
-                    putIfValid(lte, "pci", id.getPci());
-                    putIfValid(lte, "rsrp", ss.getRsrp());
-                    putIfValid(lte, "rsrq", ss.getRsrq());
+                    putIfValid(lte, Contract.RadioRow.PCI, id.getPci());
+                    putIfValid(lte, Contract.RadioRow.RSRP, ss.getRsrp());
+                    putIfValid(lte, Contract.RadioRow.RSRQ, ss.getRsrq());
                 }
             }
             return lte;
@@ -227,15 +227,15 @@ public final class RadioSampler {
         JSONObject row = new JSONObject();
         JSONArray neighbors = new JSONArray();
         try {
-            row.put("mono_ns", t[0]);
-            row.put("utc_ns", t[1]);
+            row.put(Contract.RadioRow.MONO_NS, t[0]);
+            row.put(Contract.RadioRow.UTC_NS, t[1]);
             boolean haveNr = false;
             boolean haveLte = false;
             // Unknown mode (no callback yet / old API): trust CellInfo as before.
             String mode = networkType;
             boolean nrActive = mode == null || mode.startsWith("NR");
             if (mode != null) {
-                row.put("network_type", mode);
+                row.put(Contract.RadioRow.NETWORK_TYPE, mode);
             }
 
             for (CellInfo ci : cells) {
@@ -251,12 +251,12 @@ public final class RadioSampler {
                     boolean secondary = status == CellInfo.CONNECTION_SECONDARY_SERVING;
                     if ((primary || secondary) && nrActive && !haveNr) {
                         haveNr = true;
-                        putIfValid(row, "pci", id.getPci());
-                        putIfValid(row, "nci", id.getNci());
-                        putIfValid(row, "tac", id.getTac());
-                        putIfValid(row, "nrarfcn", id.getNrarfcn());
+                        putIfValid(row, Contract.RadioRow.PCI, id.getPci());
+                        putIfValid(row, Contract.RadioRow.NCI, id.getNci());
+                        putIfValid(row, Contract.RadioRow.TAC, id.getTac());
+                        putIfValid(row, Contract.RadioRow.NRARFCN, id.getNrarfcn());
                         putNrSignal(row, ss);
-                        row.put("cell_connection_status", primary ? "PRIMARY" : "SECONDARY");
+                        row.put(Contract.RadioRow.CELL_CONNECTION_STATUS, primary ? "PRIMARY" : "SECONDARY");
                     } else {
                         neighbors.put(neighbor(id.getPci(), ss.getSsRsrp()));
                     }
@@ -266,11 +266,11 @@ public final class RadioSampler {
                     CellSignalStrengthLte ss = (CellSignalStrengthLte) lte.getCellSignalStrength();
                     if (ci.isRegistered() && !haveLte) {
                         haveLte = true;
-                        putIfValid(row, "lte_pci", id.getPci());
-                        putIfValid(row, "earfcn", id.getEarfcn());
-                        putIfValid(row, "lte_rsrp", ss.getRsrp());
+                        putIfValid(row, Contract.RadioRow.LTE_PCI, id.getPci());
+                        putIfValid(row, Contract.RadioRow.EARFCN, id.getEarfcn());
+                        putIfValid(row, Contract.RadioRow.LTE_RSRP, ss.getRsrp());
                         if (valid(id.getBandwidth())) {
-                            row.put("bandwidth_mhz", id.getBandwidth() / 1000);
+                            row.put(Contract.RadioRow.BANDWIDTH_MHZ, id.getBandwidth() / 1000);
                         }
                         putLteExtras(row, ss);
                     } else {
@@ -288,12 +288,12 @@ public final class RadioSampler {
                 if (sig != null) {
                     for (CellSignalStrengthNr ss : sig.getCellSignalStrengths(CellSignalStrengthNr.class)) {
                         if (valid(ss.getSsRsrp())) {
-                            row.remove("rsrp");
-                            row.remove("rsrq");
-                            row.remove("sinr");
+                            row.remove(Contract.RadioRow.RSRP);
+                            row.remove(Contract.RadioRow.RSRQ);
+                            row.remove(Contract.RadioRow.SINR);
                             putNrSignal(row, ss);
-                            if (!row.has("cell_connection_status")) {
-                                row.put("cell_connection_status", haveLte ? "SECONDARY" : "PRIMARY");
+                            if (!row.has(Contract.RadioRow.CELL_CONNECTION_STATUS)) {
+                                row.put(Contract.RadioRow.CELL_CONNECTION_STATUS, haveLte ? "SECONDARY" : "PRIMARY");
                             }
                             break;
                         }
@@ -320,7 +320,7 @@ public final class RadioSampler {
             }
             putCarrierAggregation(row, tm);
             if (neighbors.length() > 0) {
-                row.put("neighbor_cells", neighbors);
+                row.put(Contract.RadioRow.NEIGHBOR_CELLS, neighbors);
             }
             putTransport(row);
             RustCore.pushRadio(handle, row.toString());
@@ -329,17 +329,17 @@ public final class RadioSampler {
     }
 
     private static void putLteExtrasIfMissing(JSONObject row, CellSignalStrengthLte ss) throws Exception {
-        if (!row.has("lte_rsrq")) putIfValid(row, "lte_rsrq", ss.getRsrq());
-        if (!row.has("lte_rssnr")) putIfValid(row, "lte_rssnr", ss.getRssnr());
-        if (!row.has("lte_cqi")) putIfValid(row, "lte_cqi", ss.getCqi());
-        if (!row.has("lte_ta")) putIfValid(row, "lte_ta", ss.getTimingAdvance());
+        if (!row.has(Contract.RadioRow.LTE_RSRQ)) putIfValid(row, Contract.RadioRow.LTE_RSRQ, ss.getRsrq());
+        if (!row.has(Contract.RadioRow.LTE_RSSNR)) putIfValid(row, Contract.RadioRow.LTE_RSSNR, ss.getRssnr());
+        if (!row.has(Contract.RadioRow.LTE_CQI)) putIfValid(row, Contract.RadioRow.LTE_CQI, ss.getCqi());
+        if (!row.has(Contract.RadioRow.LTE_TA)) putIfValid(row, Contract.RadioRow.LTE_TA, ss.getTimingAdvance());
     }
 
     private static void putLteExtras(JSONObject row, CellSignalStrengthLte ss) throws Exception {
-        putIfValid(row, "lte_rsrq", ss.getRsrq());
-        putIfValid(row, "lte_rssnr", ss.getRssnr());
-        putIfValid(row, "lte_cqi", ss.getCqi());
-        putIfValid(row, "lte_ta", ss.getTimingAdvance());
+        putIfValid(row, Contract.RadioRow.LTE_RSRQ, ss.getRsrq());
+        putIfValid(row, Contract.RadioRow.LTE_RSSNR, ss.getRssnr());
+        putIfValid(row, Contract.RadioRow.LTE_CQI, ss.getCqi());
+        putIfValid(row, Contract.RadioRow.LTE_TA, ss.getTimingAdvance());
     }
 
     /** Bandwidth of every aggregated carrier (ServiceState, primary first),
@@ -360,7 +360,7 @@ public final class RadioSampler {
                         }
                         b.append(bw);
                     }
-                    row.put("ca_bandwidths_khz", b.toString());
+                    row.put(Contract.RadioRow.CA_BANDWIDTHS_KHZ, b.toString());
                 }
             }
         } catch (SecurityException ignored) {
@@ -371,10 +371,10 @@ public final class RadioSampler {
             if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
                     && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
                 if (caps.getLinkDownstreamBandwidthKbps() > 0) {
-                    row.put("link_dn_kbps", caps.getLinkDownstreamBandwidthKbps());
+                    row.put(Contract.RadioRow.LINK_DN_KBPS, caps.getLinkDownstreamBandwidthKbps());
                 }
                 if (caps.getLinkUpstreamBandwidthKbps() > 0) {
-                    row.put("link_up_kbps", caps.getLinkUpstreamBandwidthKbps());
+                    row.put(Contract.RadioRow.LINK_UP_KBPS, caps.getLinkUpstreamBandwidthKbps());
                 }
                 break;
             }
@@ -392,7 +392,7 @@ public final class RadioSampler {
         Network active = cm.getActiveNetwork();
         NetworkCapabilities caps = active == null ? null : cm.getNetworkCapabilities(active);
         if (caps == null) {
-            row.put("transport", "NONE");
+            row.put(Contract.RadioRow.TRANSPORT, "NONE");
             return;
         }
         boolean wifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
@@ -400,7 +400,7 @@ public final class RadioSampler {
                 : caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ? "CELLULAR"
                 : caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ? "ETHERNET"
                 : "OTHER";
-        row.put("transport", transport);
+        row.put(Contract.RadioRow.TRANSPORT, transport);
         if (!wifi) {
             return;
         }
@@ -410,24 +410,24 @@ public final class RadioSampler {
             return;
         }
         int freq = info.getFrequency();
-        row.put("wifi_freq_mhz", freq);
+        row.put(Contract.RadioRow.WIFI_FREQ_MHZ, freq);
         int channel = wifiChannel(freq);
         if (channel > 0) {
-            row.put("wifi_channel", channel);
+            row.put(Contract.RadioRow.WIFI_CHANNEL, channel);
         }
         if (info.getRssi() > -127) {
-            row.put("wifi_rssi", info.getRssi());
+            row.put(Contract.RadioRow.WIFI_RSSI, info.getRssi());
         }
         if (info.getTxLinkSpeedMbps() > 0) {
-            row.put("wifi_tx_mbps", info.getTxLinkSpeedMbps());
+            row.put(Contract.RadioRow.WIFI_TX_MBPS, info.getTxLinkSpeedMbps());
         }
         if (info.getRxLinkSpeedMbps() > 0) {
-            row.put("wifi_rx_mbps", info.getRxLinkSpeedMbps());
+            row.put(Contract.RadioRow.WIFI_RX_MBPS, info.getRxLinkSpeedMbps());
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             String std = wifiStandard(info.getWifiStandard());
             if (std != null) {
-                row.put("wifi_standard", std);
+                row.put(Contract.RadioRow.WIFI_STANDARD, std);
             }
         }
         String bssid = info.getBSSID();
@@ -436,7 +436,7 @@ public final class RadioSampler {
                 if (bssid != null && bssid.equalsIgnoreCase(sr.BSSID)) {
                     int bw = channelWidthMhz(sr.channelWidth);
                     if (bw > 0) {
-                        row.put("wifi_bw_mhz", bw);
+                        row.put(Contract.RadioRow.WIFI_BW_MHZ, bw);
                     }
                     break;
                 }
@@ -490,9 +490,9 @@ public final class RadioSampler {
         if (!valid(ss.getSsRsrp())) {
             return;
         }
-        row.put("rsrp", ss.getSsRsrp());
-        putIfValid(row, "rsrq", ss.getSsRsrq());
-        putIfValid(row, "sinr", ss.getSsSinr());
+        row.put(Contract.RadioRow.RSRP, ss.getSsRsrp());
+        putIfValid(row, Contract.RadioRow.RSRQ, ss.getSsRsrq());
+        putIfValid(row, Contract.RadioRow.SINR, ss.getSsSinr());
     }
 
     private static void putIfValid(JSONObject row, String key, long v) throws Exception {
@@ -503,8 +503,8 @@ public final class RadioSampler {
 
     private static JSONObject neighbor(int pci, int rsrp) throws Exception {
         JSONObject n = new JSONObject();
-        n.put("pci", pci);
-        putIfValid(n, "rsrp", rsrp);
+        n.put(Contract.RadioRow.NeighborCells.PCI, pci);
+        putIfValid(n, Contract.RadioRow.NeighborCells.RSRP, rsrp);
         return n;
     }
 }

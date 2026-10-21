@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use mp_contracts::{
-    Capability, Command, DeviceCommand, DeviceStatus, LoggingConfig, ReachabilityReport,
+    Capability, Command, DeviceCommand, DeviceStatus, LoggingConfig, ReachabilityReport, ServerTime,
 };
 
 use crate::auth::authed_device;
@@ -40,11 +40,15 @@ pub fn routes() -> Router<AppState> {
 /// its offset from the server clock, which it records in `clock.parquet` so OWD
 /// can be offset-corrected (invariant 2; spec §11.3). `time_udp_port` advertises
 /// the lower-overhead UDP responder, which the UE prefers for a tighter bound.
-pub async fn server_time(State(st): State<AppState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "server_utc_ns": now_utc_ns(),
-        "time_udp_port": st.time_udp_port,
-    }))
+#[utoipa::path(
+    get, path = "/api/v1/time", tag = "device",
+    responses((status = 200, body = ServerTime))
+)]
+pub async fn server_time(State(st): State<AppState>) -> Json<ServerTime> {
+    Json(ServerTime {
+        server_utc_ns: now_utc_ns(),
+        time_udp_port: st.time_udp_port,
+    })
 }
 
 /// Authenticate, and if the route carries a `{device_id}`, require it to match.

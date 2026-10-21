@@ -55,21 +55,19 @@ public final class ServerClient {
     // --- device onboarding ---
 
     public JSONObject enroll(String enrollToken, JSONObject body) throws Exception {
-        return json(post("/api/v1/devices/enroll", body, "Bearer " + enrollToken));
+        return json(post(Contract.Api.ENROLL, body, "Bearer " + enrollToken));
     }
 
     public JSONObject challenge(String deviceId) throws Exception {
-        JSONObject b = new JSONObject().put("device_id", deviceId);
-        return json(post("/api/v1/auth/challenge", b, null));
+        return json(post(Contract.Api.CHALLENGE, Wire.challenge(deviceId), null));
     }
 
     public JSONObject verify(String challengeId, String signatureB64) throws Exception {
-        JSONObject b = new JSONObject().put("challenge_id", challengeId).put("signature", signatureB64);
-        return json(post("/api/v1/auth/verify", b, null));
+        return json(post(Contract.Api.VERIFY, Wire.verify(challengeId, signatureB64), null));
     }
 
     public JSONObject register(String session, JSONObject capability) throws Exception {
-        return json(post("/api/v1/devices/register", capability, "Bearer " + session));
+        return json(post(Contract.Api.REGISTER, capability, "Bearer " + session));
     }
 
     // --- command queue + status ---
@@ -78,7 +76,7 @@ public final class ServerClient {
     @Nullable
     public JSONObject pollCommand(String session, String deviceId) throws Exception {
         Request req = new Request.Builder()
-                .url(base + "/api/v1/devices/" + deviceId + "/command")
+                .url(base + Contract.Api.path(Contract.Api.POLL_COMMAND, deviceId))
                 .header("Authorization", "Bearer " + session)
                 .get()
                 .build();
@@ -93,7 +91,7 @@ public final class ServerClient {
     /** Server UTC (ns) for clock sync. Unauthenticated; the caller brackets this
      *  with its own send/recv timestamps to estimate offset + RTT. */
     public long serverTimeNs() throws Exception {
-        Request req = new Request.Builder().url(base + "/api/v1/time").get().build();
+        Request req = new Request.Builder().url(base + Contract.Api.SERVER_TIME).get().build();
         try (Response r = http.newCall(req).execute()) {
             return new JSONObject(bodyString(r)).getLong("server_utc_ns");
         }
@@ -106,7 +104,7 @@ public final class ServerClient {
 
     /** UDP port of the low-overhead time responder (0 if not advertised). */
     public int timeUdpPort() throws Exception {
-        Request req = new Request.Builder().url(base + "/api/v1/time").get().build();
+        Request req = new Request.Builder().url(base + Contract.Api.SERVER_TIME).get().build();
         try (Response r = http.newCall(req).execute()) {
             return new JSONObject(bodyString(r)).optInt("time_udp_port", 0);
         }
@@ -114,7 +112,7 @@ public final class ServerClient {
 
     public void ackCommand(String session, String deviceId, long commandId) throws Exception {
         Request req = new Request.Builder()
-                .url(base + "/api/v1/devices/" + deviceId + "/command/" + commandId + "/ack")
+                .url(base + Contract.Api.path(Contract.Api.ACK_COMMAND, deviceId, commandId))
                 .header("Authorization", "Bearer " + session)
                 .post(RequestBody.create(new byte[0], null))
                 .build();
@@ -122,12 +120,12 @@ public final class ServerClient {
     }
 
     public void postStatus(String session, String deviceId, JSONObject status) throws Exception {
-        close(post("/api/v1/devices/" + deviceId + "/status", status, "Bearer " + session));
+        close(post(Contract.Api.path(Contract.Api.POST_STATUS, deviceId), status, "Bearer " + session));
     }
 
     /** Returns the HTTP status; the caller decides whether to keep the report. */
     public int postReachability(String session, String deviceId, JSONObject report) throws Exception {
-        try (Response r = post("/api/v1/devices/" + deviceId + "/reachability", report, "Bearer " + session)) {
+        try (Response r = post(Contract.Api.path(Contract.Api.POST_REACHABILITY, deviceId), report, "Bearer " + session)) {
             return r.code();
         }
     }
@@ -135,12 +133,12 @@ public final class ServerClient {
     // --- 3-phase upload ---
 
     public JSONObject uploadSummary(String session, String testId, JSONObject manifest) throws Exception {
-        return json(post("/api/v1/tests/" + testId + "/summary", manifest, "Bearer " + session));
+        return json(post(Contract.Api.path(Contract.Api.SUMMARY, testId), manifest, "Bearer " + session));
     }
 
     public void putFile(String session, String testId, String uploadId, String relPath, byte[] bytes) throws Exception {
         Request req = new Request.Builder()
-                .url(base + "/api/v1/tests/" + testId + "/upload/" + uploadId + "/files/" + relPath)
+                .url(base + Contract.Api.path(Contract.Api.PUT_FILE, testId, uploadId, relPath))
                 .header("Authorization", "Bearer " + session)
                 .put(RequestBody.create(bytes, OCTET))
                 .build();
@@ -153,7 +151,7 @@ public final class ServerClient {
 
     public void uploadComplete(String session, String testId, String uploadId) throws Exception {
         Request req = new Request.Builder()
-                .url(base + "/api/v1/tests/" + testId + "/upload/" + uploadId + "/complete")
+                .url(base + Contract.Api.path(Contract.Api.COMPLETE, testId, uploadId))
                 .header("Authorization", "Bearer " + session)
                 .post(RequestBody.create(new byte[0], null))
                 .build();

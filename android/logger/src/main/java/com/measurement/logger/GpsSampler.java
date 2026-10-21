@@ -65,21 +65,21 @@ public final class GpsSampler {
         long[] t = Clock.now();
         try {
             JSONObject o = new JSONObject();
-            o.put("mono_ns", t[0]);
-            o.put("utc_ns", t[1]);
-            o.put("latitude", loc.getLatitude());
-            o.put("longitude", loc.getLongitude());
+            o.put(Contract.GpsRow.MONO_NS, t[0]);
+            o.put(Contract.GpsRow.UTC_NS, t[1]);
+            o.put(Contract.GpsRow.LATITUDE, loc.getLatitude());
+            o.put(Contract.GpsRow.LONGITUDE, loc.getLongitude());
             if (loc.hasAltitude()) {
-                o.put("altitude_m", loc.getAltitude());
+                o.put(Contract.GpsRow.ALTITUDE_M, loc.getAltitude());
             }
             if (loc.hasSpeed()) {
-                o.put("speed_mps", loc.getSpeed());
+                o.put(Contract.GpsRow.SPEED_MPS, loc.getSpeed());
             }
             if (loc.hasBearing()) {
-                o.put("heading_deg", loc.getBearing());
+                o.put(Contract.GpsRow.HEADING_DEG, loc.getBearing());
             }
             if (loc.hasAccuracy()) {
-                o.put("accuracy_m", loc.getAccuracy());
+                o.put(Contract.GpsRow.ACCURACY_M, loc.getAccuracy());
             }
             RustCore.pushGps(handle, o.toString());
         } catch (Exception ignored) {

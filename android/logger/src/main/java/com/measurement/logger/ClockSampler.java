@@ -98,11 +98,12 @@ public final class ClockSampler {
                     continue;
                 }
                 long[] t4 = Clock.now();
-                if (reply.getLength() != 24 || !matches(nonce, rx)) {
+                long[] server = parseTimeReply(nonce, rx, reply.getLength());
+                if (server == null) {
                     continue;
                 }
-                long t2 = beLong(rx, 8);   // server recv (utc ns)
-                long t3 = beLong(rx, 16);  // server send (utc ns)
+                long t2 = server[0];  // server recv (utc ns)
+                long t3 = server[1];  // server send (utc ns)
                 long delay = (t4[0] - t1[0]) - (t3 - t2);  // RTT minus server turnaround
                 if (delay < 0) {
                     continue;
@@ -121,7 +122,7 @@ public final class ClockSampler {
         if (bestDelay == Long.MAX_VALUE) {
             return false;
         }
-        push(bestMono, bestUtc, "server_udp", bestDelay / 2, bestOffset);
+        push(bestMono, bestUtc, Contract.ClockSources.SERVER_UDP, bestDelay / 2, bestOffset);
         return true;
     }
 
@@ -136,7 +137,7 @@ public final class ClockSampler {
                 return;
             }
             long offset = (t1[1] + (t4[1] - t1[1]) / 2) - serverUtc;
-            push(t4[0], t4[1], "server_http", rtt / 2, offset);
+            push(t4[0], t4[1], Contract.ClockSources.SERVER_HTTP, rtt / 2, offset);
         } catch (Exception ignored) {
         }
     }
@@ -144,14 +145,23 @@ public final class ClockSampler {
     private void push(long monoNs, long utcNs, String source, long uncNs, long offsetNs) {
         try {
             JSONObject o = new JSONObject();
-            o.put("mono_ns", monoNs);
-            o.put("utc_ns", utcNs);
-            o.put("source", source);
-            o.put("uncertainty_ns", uncNs);
-            o.put("estimated_offset_ns", offsetNs);
+            o.put(Contract.ClockRow.MONO_NS, monoNs);
+            o.put(Contract.ClockRow.UTC_NS, utcNs);
+            o.put(Contract.ClockRow.SOURCE, source);
+            o.put(Contract.ClockRow.UNCERTAINTY_NS, uncNs);
+            o.put(Contract.ClockRow.ESTIMATED_OFFSET_NS, offsetNs);
             RustCore.pushClock(handle, o.toString());
         } catch (Exception ignored) {
         }
+    }
+
+    /** A time-sync reply (contracts/packets/time_sync.md): {t2_recv_utc_ns,
+     *  t3_send_utc_ns}, or null unless it is 24 bytes echoing our 8-byte nonce. */
+    static long[] parseTimeReply(byte[] nonce, byte[] rx, int length) {
+        if (length != 24 || !matches(nonce, rx)) {
+            return null;
+        }
+        return new long[] {beLong(rx, 8), beLong(rx, 16)};
     }
 
     private static boolean matches(byte[] nonce, byte[] rx) {

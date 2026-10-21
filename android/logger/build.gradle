@@ -25,12 +25,23 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    // JVM unit tests (src/test): the Logger's wire bodies against contracts/.
+    testOptions {
+        unitTests.all {
+            systemProperty 'contracts.dir', file('../../contracts').absolutePath
+        }
+    }
 }
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.core:core:1.12.0'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    // the real org.json (android.jar's is a stub on the JVM)
+    testImplementation 'org.json:json:20240303'
+    testImplementation 'com.networknt:json-schema-validator:1.5.6'
 }
 
 // The shared Rust core (libfieldtest_core.so) is built by ../build_apk.sh via

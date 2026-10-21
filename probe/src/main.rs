@@ -22,6 +22,10 @@
 //! when it ends), so the 100 Hz wake-ups never run outside a measurement;
 //! `RANGE <t0_ns> <t1_ns>\n` → the matching lines;
 //! `PING\n` → `PONG <version> <started_utc_ns>`.
+//!
+//! Both interfaces are specified in `contracts/internal/mp_probe.yaml`
+//! (vectors in `contracts/testvectors/mp_probe/`); the tests below hold this
+//! file to it.
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -41,6 +45,8 @@ const HEARTBEAT: Duration = Duration::from_secs(1);
 const SNMP_EVERY: Duration = Duration::from_millis(100);
 /// Longest fast-polling window one FAST command can ask for.
 const FAST_MAX_S: u64 = 3600;
+/// Control port unless --port says otherwise.
+const DEFAULT_PORT: u16 = 47600;
 
 fn utc_ns() -> u64 {
     SystemTime::now()
@@ -183,14 +189,7 @@ fn poll_loop(store: Shared, hz: u32, idle_hz: u32, fast_until: Arc<AtomicU64>) {
                         None => true,
                     };
                     if fresh {
-                        emit(
-                            &store,
-                            t,
-                            serde_json::json!({
-                                "t": t, "k": "q", "dev": q.dev, "qdisc": q.kind, "b": q.bytes, "p": q.packets,
-                                "d": q.drops, "o": q.overlimits, "r": q.requeues, "bb": q.backlog, "bp": q.qlen,
-                            }),
-                        );
+                        emit(&store, t, qdisc_record(t, &q));
                         last_q.insert(q.dev.clone(), (key, Instant::now()));
                     }
                 }
@@ -205,11 +204,7 @@ fn poll_loop(store: Shared, hz: u32, idle_hz: u32, fast_until: Arc<AtomicU64>) {
                     None => true,
                 };
                 if fresh {
-                    let mut obj = serde_json::json!({"t": t, "k": "u"});
-                    for (k, v) in &u {
-                        obj[k.as_str()] = serde_json::json!(v);
-                    }
-                    emit(&store, t, obj);
+                    emit(&store, t, udp_record(t, &u));
                     last_u = Some((vals, Instant::now()));
                 }
             }
@@ -279,11 +274,7 @@ fn logcat_loop(store: Shared) {
                 for line in BufReader::new(out).lines().map_while(Result::ok) {
                     if keep_log_line(&line) {
                         let t = log_time(&line).unwrap_or_else(utc_ns);
-                        emit(
-                            &store,
-                            t,
-                            serde_json::json!({"t": t, "k": "l", "line": line.trim()}),
-                        );
+                        emit(&store, t, log_record(t, &line));
                     }
                 }
             }
@@ -313,6 +304,56 @@ fn range(dir: &Path, t0: u64, t1: u64, out: &mut impl Write) -> io::Result<()> {
     Ok(())
 }
 
+/// A request on the control port (`contracts/internal/mp_probe.yaml`).
+#[derive(Debug, PartialEq)]
+enum Cmd {
+    Ping,
+    /// Fast-polling window in seconds, capped at `FAST_MAX_S`.
+    Fast(u64),
+    /// Records with t0 <= t <= t1 (UTC ns).
+    Range(u64, u64),
+}
+
+/// One request line; None for anything malformed (no reply).
+fn parse_command(line: &str) -> Option<Cmd> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    match parts.as_slice() {
+        ["PING"] => Some(Cmd::Ping),
+        ["FAST", secs] => Some(Cmd::Fast(secs.parse::<u64>().ok()?.min(FAST_MAX_S))),
+        ["RANGE", a, b] => Some(Cmd::Range(a.parse().ok()?, b.parse().ok()?)),
+        _ => None,
+    }
+}
+
+// --- records (contracts/internal/mp_probe.yaml `records`) --------------------
+
+fn start_record(t: u64, hz: u32, idle_hz: u32) -> serde_json::Value {
+    serde_json::json!({"t": t, "k": "start", "version": VERSION, "hz": hz, "idle_hz": idle_hz})
+}
+
+fn fast_record(t: u64, secs: u64) -> serde_json::Value {
+    serde_json::json!({"t": t, "k": "fast", "s": secs})
+}
+
+fn qdisc_record(t: u64, q: &netlink::Qdisc) -> serde_json::Value {
+    serde_json::json!({
+        "t": t, "k": "q", "dev": q.dev, "qdisc": q.kind, "b": q.bytes, "p": q.packets,
+        "d": q.drops, "o": q.overlimits, "r": q.requeues, "bb": q.backlog, "bp": q.qlen,
+    })
+}
+
+fn udp_record(t: u64, counters: &std::collections::BTreeMap<String, u64>) -> serde_json::Value {
+    let mut obj = serde_json::json!({"t": t, "k": "u"});
+    for (k, v) in counters {
+        obj[k.as_str()] = serde_json::json!(v);
+    }
+    obj
+}
+
+fn log_record(t: u64, line: &str) -> serde_json::Value {
+    serde_json::json!({"t": t, "k": "l", "line": line.trim()})
+}
+
 fn serve(store: Shared, port: u16, started: u64, fast_until: Arc<AtomicU64>) {
     let listener = match TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
@@ -332,28 +373,17 @@ fn serve(store: Shared, port: u16, started: u64, fast_until: Arc<AtomicU64>) {
                 return;
             }
             let mut w = BufWriter::new(&stream);
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            match parts.as_slice() {
-                ["PING"] => {
+            match parse_command(&line) {
+                Some(Cmd::Ping) => {
                     let _ = writeln!(w, "PONG {VERSION} {started}");
                 }
-                ["FAST", secs] => {
-                    let Ok(secs) = secs.parse::<u64>() else {
-                        return;
-                    };
+                Some(Cmd::Fast(secs)) => {
                     let t = utc_ns();
-                    fast_until.store(t + secs.min(FAST_MAX_S) * 1_000_000_000, Ordering::Relaxed);
-                    emit(
-                        &store,
-                        t,
-                        serde_json::json!({"t": t, "k": "fast", "s": secs.min(FAST_MAX_S)}),
-                    );
+                    fast_until.store(t + secs * 1_000_000_000, Ordering::Relaxed);
+                    emit(&store, t, fast_record(t, secs));
                     let _ = writeln!(w, "OK");
                 }
-                ["RANGE", a, b] => {
-                    let (Ok(t0), Ok(t1)) = (a.parse(), b.parse()) else {
-                        return;
-                    };
+                Some(Cmd::Range(t0, t1)) => {
                     let dir = {
                         let mut s = store.lock().unwrap();
                         s.flush();
@@ -361,7 +391,7 @@ fn serve(store: Shared, port: u16, started: u64, fast_until: Arc<AtomicU64>) {
                     };
                     let _ = range(&dir, t0, t1, &mut w);
                 }
-                _ => {}
+                None => {}
             }
             let _ = w.flush();
         });
@@ -394,7 +424,9 @@ fn main() {
         return;
     }
     let dir = PathBuf::from(arg(&args, "--dir", "/data/local/tmp/mp/probe"));
-    let port: u16 = arg(&args, "--port", "47600").parse().unwrap_or(47600);
+    let port: u16 = arg(&args, "--port", &DEFAULT_PORT.to_string())
+        .parse()
+        .unwrap_or(DEFAULT_PORT);
     let hz: u32 = arg(&args, "--hz", "100").parse().unwrap_or(100);
     let idle_hz: u32 = arg(&args, "--idle-hz", "2").parse().unwrap_or(2);
     let keep_hours: u64 = arg(&args, "--keep-hours", "48").parse().unwrap_or(48);
@@ -406,11 +438,7 @@ fn main() {
         out: None,
         keep_hours,
     }));
-    emit(
-        &store,
-        started,
-        serde_json::json!({"t": started, "k": "start", "version": VERSION, "hz": hz, "idle_hz": idle_hz}),
-    );
+    emit(&store, started, start_record(started, hz, idle_hz));
 
     let fast_until = Arc::new(AtomicU64::new(0));
     let (s, f) = (store.clone(), fast_until.clone());
@@ -428,6 +456,137 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
+
+    fn contracts() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../contracts")
+    }
+
+    fn contract() -> serde_yaml::Value {
+        let text = fs::read_to_string(contracts().join("internal/mp_probe.yaml")).unwrap();
+        serde_yaml::from_str(&text).unwrap()
+    }
+
+    /// A record against the contract's `records`: known kind, every listed
+    /// key present with its type, no other key unless the kind is open.
+    fn check_record(rec: &Value, contract: &serde_yaml::Value) -> Result<(), String> {
+        let kind = rec["k"].as_str().ok_or("no k")?;
+        let spec = &contract["records"][kind];
+        let keys = spec["keys"]
+            .as_mapping()
+            .ok_or(format!("unknown kind {kind}"))?;
+        let obj = rec.as_object().ok_or("not an object")?;
+        for (key, ty) in keys {
+            let (key, ty) = (key.as_str().unwrap(), ty.as_str().unwrap());
+            let v = obj.get(key).ok_or(format!("{kind}: missing {key}"))?;
+            let ok = match ty {
+                "str" => v.is_string(),
+                "u64" | "u32" => v.is_u64(),
+                other => return Err(format!("{kind}: unknown type {other} in the contract")),
+            };
+            if !ok {
+                return Err(format!("{kind}.{key}: not {ty}: {v}"));
+            }
+        }
+        for (key, v) in obj {
+            if keys.contains_key(key.as_str()) {
+                continue;
+            }
+            match spec["open_keys"].as_str() {
+                Some("u64") if v.is_u64() => {}
+                _ => return Err(format!("{kind}: key {key} not in the contract")),
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn port_and_commands_match_the_contract() {
+        let c = contract();
+        assert_eq!(c["port"].as_u64(), Some(DEFAULT_PORT as u64));
+        assert_eq!(c["fast_max_s"].as_u64(), Some(FAST_MAX_S));
+        let mut names = Vec::new();
+        for cmd in c["commands"].as_sequence().unwrap() {
+            let name = cmd["name"].as_str().unwrap();
+            let args = cmd["args"].as_sequence().unwrap().len();
+            names.push(name);
+            let line = |n: usize| {
+                std::iter::once(name.to_string())
+                    .chain((0..n).map(|i| (i + 1).to_string()))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            assert!(
+                parse_command(&line(args)).is_some(),
+                "{name} with {args} args"
+            );
+            assert!(
+                parse_command(&line(args + 1)).is_none(),
+                "{name} with too many args"
+            );
+        }
+        assert_eq!(names, ["PING", "FAST", "RANGE"]);
+    }
+
+    #[test]
+    fn exchanges_parse_as_the_vectors_say() {
+        let text =
+            fs::read_to_string(contracts().join("testvectors/mp_probe/exchanges.json")).unwrap();
+        let doc: Value = serde_json::from_str(&text).unwrap();
+        for case in doc["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let got = parse_command(case["request"].as_str().unwrap());
+            let want = if case["reply_pattern"].is_null() {
+                None
+            } else if let Some(s) = case["fast_s"].as_u64() {
+                Some(Cmd::Fast(s))
+            } else if let Some(r) = case["range"].as_array() {
+                Some(Cmd::Range(r[0].as_u64().unwrap(), r[1].as_u64().unwrap()))
+            } else {
+                Some(Cmd::Ping)
+            };
+            assert_eq!(got, want, "case {name}");
+        }
+    }
+
+    #[test]
+    fn records_follow_the_contract() {
+        let c = contract();
+        let q = netlink::Qdisc {
+            dev: "rmnet_data1".into(),
+            kind: "pfifo_fast".into(),
+            ..Default::default()
+        };
+        let udp = parse_udp_snmp("Udp: InDatagrams SndbufErrors\nUdp: 10 3\n").unwrap();
+        let t = 1_792_556_320_000_000_000;
+        let built = [
+            start_record(t, 100, 2),
+            fast_record(t, 95),
+            qdisc_record(t, &q),
+            udp_record(t, &udp),
+            log_record(
+                t,
+                " 1792556321.068 2830 3415 D RILJ : [UNSL]< UNSOL_SIGNAL_STRENGTH ",
+            ),
+        ];
+        let kinds: Vec<&str> = built.iter().map(|r| r["k"].as_str().unwrap()).collect();
+        let contract_kinds: Vec<&str> = c["records"]
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, contract_kinds, "one builder per contract kind");
+        for r in &built {
+            check_record(r, &c).unwrap();
+        }
+        // the vectors' sample records too (what the analysis is tested on)
+        let sample =
+            fs::read_to_string(contracts().join("testvectors/mp_probe/records.jsonl")).unwrap();
+        for line in sample.lines() {
+            check_record(&serde_json::from_str(line).unwrap(), &c).unwrap();
+        }
+    }
 
     #[test]
     fn udp_counters_parse() {

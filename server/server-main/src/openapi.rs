@@ -18,6 +18,7 @@ use utoipa::OpenApi;
         crate::device::ack_command,
         crate::device::post_status,
         crate::device::post_reachability,
+        crate::device::server_time,
         crate::uploads::summary,
         crate::uploads::put_file,
         crate::uploads::complete,
@@ -39,7 +40,7 @@ use utoipa::OpenApi;
         TestPlan, Flow, AppProfile, AppAction, AppActionKind, AppToolPlacement, FlowBinding, CreateTestRequest, RunTestPayload, TestStatus,
         DeviceSummary, TestSummary, LoggingConfigAck,
         // device status / command
-        DeviceStatus, DualClock, Battery, Storage, RadioSnapshot, DeviceCommand,
+        DeviceStatus, ServerTime, DualClock, Battery, Storage, RadioSnapshot, DeviceCommand,
         // reachability
         ReachabilityReport, ReachTrigger, NetworkContext, NetworkTransport, ReachCheck,
         ReachProtocol, ReachKind,

@@ -1,0 +1,71 @@
+# mp-probe — the on-phone collector (probe/) and its two interfaces:
+#   1. a line protocol on 127.0.0.1:<port> that the Logger uses, and
+#   2. the JSON-lines records it writes, which the Logger fetches per test
+#      into mobile/probe.jsonl.gz and the analysis reads (bench.py).
+#
+# Single source for both. Generated/checked copies:
+#   - Java constants (Contract.MpProbe)       contracts/codegen/java_contract.py
+#   - Rust probe: commands + record keys      probe/src/main.rs tests
+#   - Python reader: qdisc keys               analysis/tests/test_bench.py
+#   - vectors: contracts/testvectors/mp_probe/ (validated by ci/validate_contracts.py)
+#
+# Versioning: additive changes (a new record kind or key) need no bump —
+# readers skip unknown kinds and keys. A changed meaning bumps the probe's
+# version (reported by PING).
+
+port: 47600          # default --port; loopback only
+
+# One request line per connection (ASCII, "\n"-terminated, fields separated
+# by single spaces). Malformed or unknown requests get no reply and a closed
+# connection. Read timeout 5 s.
+commands:
+  - name: PING
+    args: []
+    reply: "PONG <version> <started_utc_ns>"     # one line
+  - name: FAST
+    args: [seconds]                              # decimal, capped at fast_max_s
+    reply: "OK"                                  # one line, after the window is set
+    doc: Poll at --hz for this long (a test starts); FAST 0 ends the window.
+  - name: RANGE
+    args: [t0_utc_ns, t1_utc_ns]                 # inclusive, phone UTC ns
+    reply: "<records>"                           # zero or more record lines, then close
+    doc: The stored records with t0 <= t <= t1, oldest first.
+
+fast_max_s: 3600
+
+# Record lines: one JSON object per line. Every record has t (phone UTC ns,
+# the Logger's clock) and k (kind). Keys listed per kind; all are always
+# present unless marked optional.
+records:
+  start:
+    doc: The probe started.
+    keys: { t: u64, k: str, version: str, hz: u32, idle_hz: u32 }
+  fast:
+    doc: A FAST command set the fast-polling window.
+    keys: { t: u64, k: str, s: u64 }
+  q:
+    doc: >
+      Root qdisc of one modem (rmnet*) or Wi-Fi (wlan*) link that has sent
+      packets; written on change or every second.
+    keys:
+      t: u64
+      k: str
+      dev: str        # network device
+      qdisc: str      # qdisc kind
+      b: u64          # bytes sent
+      p: u64          # packets sent
+      d: u64          # drops
+      o: u64          # overlimits
+      r: u64          # requeues: the driver refused a packet (modem flow control)
+      bb: u64         # backlog bytes
+      bp: u64         # backlog packets
+  u:
+    doc: >
+      UDP counters from /proc/net/snmp on change (every 10 s at least). The
+      counter names are the kernel's (InDatagrams, SndbufErrors, …), so the
+      set varies by kernel.
+    keys: { t: u64, k: str }
+    open_keys: u64    # any further key is a kernel counter
+  l:
+    doc: A kept radio-log line (logcat -b radio -v epoch), t from its timestamp.
+    keys: { t: u64, k: str, line: str }

@@ -198,6 +198,18 @@ probe_kinds:
   - unreachable  # all probe types failed within budget; target marked inactive
 
 # ---------------------------------------------------------------------------
+# Clock reference — clock.parquet `source`: what the node's offset was
+# measured against.
+# ---------------------------------------------------------------------------
+clock_sources:
+  - server_udp   # UDP time exchange with server-main (contracts/packets/time_sync.md)
+  - server_http  # GET /api/v1/time fallback (looser bound: RTT/2)
+  - gps          # GNSS time
+  - ntp          # an NTP server
+  - chrony       # the host's chrony estimate (server node)
+  - system       # the OS clock, unverified
+
+# ---------------------------------------------------------------------------
 # App-traffic activity — what an app_traffic object is for. Carried as a u8
 # in the request (contracts/packets/app_request.md): the code is the position
 # in this list, so entries are only ever appended. Logged by name in
