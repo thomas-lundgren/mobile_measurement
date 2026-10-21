@@ -11,7 +11,7 @@ dependencies = [
 
 [project.optional-dependencies]
 plots = ["matplotlib>=3.7"]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "pyyaml>=6"]
 
 [project.scripts]
 fieldtest-analyze = "fieldtest_analysis.cli:main"

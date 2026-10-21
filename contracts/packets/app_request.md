@@ -65,17 +65,8 @@ Core size: **22 bytes**. On-wire size: **24 bytes** (2-byte header + core).
 
 ## Activities
 
-| Code | Name | Code | Name |
-|------|------|------|------|
-| 0 | `other` | 5 | `mail_send` |
-| 1 | `web_page` | 6 | `video_chunk` |
-| 2 | `web_object` | 7 | `feed_image` |
-| 3 | `mail_sync` | 8 | `photo_upload` |
-| 4 | `mail_attachment` | 9 | `llm_call` |
-| | | 10 | `mcp_call` |
-| | | 11 | `web_fetch` |
-| | | 12 | `cloud_tool` |
-| | | 13 | `llm_resume` |
+The codes are the list `app_activities` in `contracts/enums/enums.yaml`
+(code = position; entries are only appended).
 
 `cloud_tool` and `llm_resume` (agent with tools in the cloud): the provider's
 reply to one LLM call, continued after a tool ran on its side — the tool

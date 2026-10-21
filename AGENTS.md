@@ -179,6 +179,35 @@ The server and the mobile (UE) are symmetric peers: each can act as **generator/
 
 ---
 
+### 6. Single-Source Contracts
+
+Every value that crosses a component or language boundary is defined **once** in `contracts/`: packet layouts, REST/JSON bodies, enum and state strings, log columns, version constants, and side protocols (reach, mp-probe). Every other copy is either **generated** from that source or **compared** to it by a check that fails CI. A copy that only a comment or a Markdown table keeps in step is drift waiting to happen.
+
+When you add or change such a value:
+
+- Edit the contract first, then the code.
+- Adding a copy (a new language, writer, reader, flow type or side protocol)? Add its generator or parity check **in the same commit**.
+- Run `ci/check.sh`. It runs every gate below.
+
+| Source in `contracts/` | Copies | Gate |
+|---|---|---|
+| `enums/enums.yaml`, `versions/versions.yaml` | Rust `mp-contracts`; `exchange::ACTIVITIES` (`app_activities`) | `server/contracts-rs/tests/parity.rs`; `exchange::activities_match_the_contract` |
+| `packets/*.md` + `testvectors/packets/` | `core/src/packet.rs` (one codec, both nodes via JNI) | golden-vector tests in `packet.rs` |
+| `schemas/*.json` | Rust DTOs → generated `openapi.yaml` → generated Kotlin client | `ci/validate_contracts.py` (examples, plus schema vs Rust shape); `openapi_drift`; `ci/check_client_drift.sh` |
+| `parquet/*.parquet.yaml` | Rust writers; `analysis/fieldtest_analysis/schema.py` | `core/tests/parquet_contract.rs`; `analysis/tests/test_schema_contract.py` |
+| `db/schema.sql` | server migrations | migration test in `mp-server-main` |
+
+New fields in a JSON body need an example in `contracts/testvectors/` that uses them, because the shape check compares names and enum values, not bounds.
+
+**Still unchecked: fix these, don't extend them.**
+
+- The Java Logger hand-writes command and state strings, version constants, REST paths and `header.json`.
+- The mp-probe control protocol and `probe.jsonl.gz` format have no contract.
+- The reach protocol has no golden vectors.
+- Radio, GPS and clock rows go from Java to Rust as JSON whose keys nothing checks.
+
+---
+
 ## Planned Log Structure
 
 A test aggregates both nodes' recordings under one `test_id`. Each node writes its per-node files into a `mobile/` or `server/` subfolder; the mobile-only GPS and radio traces (one each per test, regardless of flow count) sit at the test root.

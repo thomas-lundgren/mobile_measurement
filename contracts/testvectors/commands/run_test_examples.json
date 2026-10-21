@@ -171,14 +171,206 @@
             {
               "flow_id": 2,
               "type": "dscp_probe",
-              "dscp_values": [0, 8, 16, 34, 46],
+              "dscp_values": [
+                0,
+                8,
+                16,
+                34,
+                46
+              ],
               "rate_pps": 10
             }
           ]
         },
         "flow_bindings": [
-          { "flow_id": 1, "server_port": 41000 },
-          { "flow_id": 2, "server_port": 41001 }
+          {
+            "flow_id": 1,
+            "server_port": 41000
+          },
+          {
+            "flow_id": 2,
+            "server_port": 41001
+          }
+        ]
+      }
+    },
+    {
+      "name": "hol_capped_bulk_with_back_pressure",
+      "notes": "Head-of-line cycle: a 1 ms uplink stream sent with a small socket buffer (back-pressure shows as EAGAIN) beside bulk TCP capped at 2 Mbit/s that stops after 20 MB.",
+      "payload": {
+        "test_id": "tst_01M5EFW4QCZRCSAW7PTHF1STH8",
+        "session_id": "ses_2026_10_21_001",
+        "server_host": "10.0.0.1",
+        "test_plan": {
+          "name": "hol-up-2000",
+          "version": 1,
+          "duration_sec": 90,
+          "flows": [
+            {
+              "flow_id": 1,
+              "type": "realtime_udp",
+              "direction": "ToServer",
+              "rate_pps": 1000,
+              "packet_size_bytes": 200,
+              "sndbuf_bytes": 8192
+            },
+            {
+              "flow_id": 2,
+              "type": "probe",
+              "rate_pps": 50
+            },
+            {
+              "flow_id": 3,
+              "type": "bulk_tcp",
+              "direction": "ToServer",
+              "rate_kbps": 2000,
+              "target_bytes": 20000000
+            }
+          ]
+        },
+        "flow_bindings": [
+          {
+            "flow_id": 1,
+            "server_port": 41000
+          },
+          {
+            "flow_id": 2,
+            "server_port": 41001
+          },
+          {
+            "flow_id": 3,
+            "server_port": 41002
+          }
+        ]
+      }
+    },
+    {
+      "name": "app_agents_hybrid",
+      "notes": "Realtime streams beside two simulated AI agents with MCP tools on the phone and web fetches in the cloud (profile agent, placement hybrid), seeded and scaled.",
+      "payload": {
+        "test_id": "tst_01M5EGDJS75Y2K0T0PFTV1YZBH",
+        "session_id": "ses_2026_10_21_001",
+        "server_host": "10.0.0.1",
+        "test_plan": {
+          "name": "app-agent-hybrid",
+          "version": 1,
+          "duration_sec": 90,
+          "flows": [
+            {
+              "flow_id": 1,
+              "type": "realtime_udp",
+              "direction": "ToServer",
+              "rate_pps": 1000,
+              "packet_size_bytes": 200
+            },
+            {
+              "flow_id": 2,
+              "type": "probe",
+              "rate_pps": 50
+            },
+            {
+              "flow_id": 3,
+              "type": "realtime_udp",
+              "direction": "FromServer",
+              "rate_pps": 1000,
+              "packet_size_bytes": 200
+            },
+            {
+              "flow_id": 4,
+              "type": "app_traffic",
+              "profile": "agent",
+              "workers": 2,
+              "placement": "hybrid",
+              "seed": 20261021,
+              "scale": 1.0
+            }
+          ]
+        },
+        "flow_bindings": [
+          {
+            "flow_id": 1,
+            "server_port": 41000
+          },
+          {
+            "flow_id": 2,
+            "server_port": 41001
+          },
+          {
+            "flow_id": 3,
+            "server_port": 41002
+          },
+          {
+            "flow_id": 4,
+            "server_port": 41003
+          }
+        ]
+      }
+    },
+    {
+      "name": "app_script_timeline",
+      "notes": "Scripted app_traffic: a page with parallel objects, an LLM call (context up, think time, paced token stream) and a photo upload.",
+      "payload": {
+        "test_id": "tst_01M5EGDJS75Y2K0T0PFTV1YZBJ",
+        "session_id": "ses_2026_10_21_001",
+        "server_host": "10.0.0.1",
+        "test_plan": {
+          "name": "app-script",
+          "version": 1,
+          "duration_sec": 90,
+          "flows": [
+            {
+              "flow_id": 1,
+              "type": "probe",
+              "rate_pps": 50
+            },
+            {
+              "flow_id": 2,
+              "type": "app_traffic",
+              "profile": "script",
+              "actions": [
+                {
+                  "at_ms": 0,
+                  "kind": "down",
+                  "bytes": 60000,
+                  "activity": "web_page"
+                },
+                {
+                  "at_ms": 200,
+                  "kind": "down",
+                  "bytes": 25000,
+                  "count": 30,
+                  "parallel": 6,
+                  "activity": "web_object"
+                },
+                {
+                  "at_ms": 5000,
+                  "kind": "down",
+                  "bytes": 6000,
+                  "up_bytes": 40000,
+                  "delay_ms": 800,
+                  "rate_kbps": 48,
+                  "chunk_bytes": 140,
+                  "activity": "llm_call"
+                },
+                {
+                  "at_ms": 20000,
+                  "kind": "up",
+                  "bytes": 3000000,
+                  "activity": "photo_upload"
+                }
+              ]
+            }
+          ]
+        },
+        "flow_bindings": [
+          {
+            "flow_id": 1,
+            "server_port": 41000
+          },
+          {
+            "flow_id": 2,
+            "server_port": 41001
+          }
         ]
       }
     }

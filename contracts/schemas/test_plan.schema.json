@@ -141,7 +141,7 @@
               "bytes":    { "type": "integer", "minimum": 1, "description": "Size of each object." },
               "count":    { "type": "integer", "minimum": 1, "description": "Number of objects (default 1)." },
               "parallel": { "type": "integer", "minimum": 1, "maximum": 6, "description": "Objects in flight at once (default 1)." },
-              "activity": { "type": "string", "description": "Activity name for the logs (contracts/packets/app_request.md)." },
+              "activity": { "type": "string", "description": "Activity name for the logs (contracts/enums/enums.yaml app_activities)." },
               "up_bytes":    { "type": "integer", "minimum": 0, "description": "kind down: bytes sent up first (request body, LLM context)." },
               "delay_ms":    { "type": "integer", "minimum": 0, "description": "kind down: server think time before the first byte (LLM time to first token, tool latency)." },
               "rate_kbps":   { "type": "integer", "minimum": 1, "description": "kind down: pace the response at this rate, like a token stream; what a stall holds back follows in one burst." },

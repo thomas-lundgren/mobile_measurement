@@ -143,7 +143,7 @@ pub struct AppAction {
     /// Objects in flight at once (default 1, at most 6).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub parallel: Option<u32>,
-    /// Activity name for the logs (contracts/packets/app_request.md).
+    /// Activity name for the logs (contracts/enums/enums.yaml app_activities).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub activity: Option<String>,
     /// kind "down": bytes sent up first (request body, LLM context).

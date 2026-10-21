@@ -441,7 +441,7 @@ components:
           type:
           - string
           - 'null'
-          description: Activity name for the logs (contracts/packets/app_request.md).
+          description: Activity name for the logs (contracts/enums/enums.yaml app_activities).
         at_ms:
           type: integer
           format: int64
@@ -854,6 +854,12 @@ components:
         server_time_utc_ns:
           type: integer
           format: int64
+    FileEncoding:
+      type: string
+      description: How a file's bytes are encoded in the upload.
+      enum:
+      - identity
+      - zstd
     Flow:
       oneOf:
       - type: object
@@ -1225,7 +1231,7 @@ components:
       - encoding
       properties:
         encoding:
-          type: string
+          $ref: '#/components/schemas/FileEncoding'
         path:
           type: string
         sha256:
@@ -1781,14 +1787,18 @@ components:
           items:
             $ref: '#/components/schemas/ManifestFile'
         node:
-          type: string
-          description: Only the mobile uploads.
+          $ref: '#/components/schemas/UploadNode'
         result_reason:
           type:
           - string
           - 'null'
         test_result:
           $ref: '#/components/schemas/TestResult'
+    UploadNode:
+      type: string
+      description: 'The uploading node: only the mobile uploads (the server writes in place).'
+      enum:
+      - mobile
     VerifyRequest:
       type: object
       required:

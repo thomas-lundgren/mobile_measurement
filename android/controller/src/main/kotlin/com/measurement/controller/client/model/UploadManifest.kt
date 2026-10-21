@@ -17,6 +17,7 @@ package com.measurement.controller.client.model
 
 import com.measurement.controller.client.model.ManifestFile
 import com.measurement.controller.client.model.TestResult
+import com.measurement.controller.client.model.UploadNode
 
 import com.google.gson.annotations.SerializedName
 
@@ -24,7 +25,7 @@ import com.google.gson.annotations.SerializedName
  * Body of `POST /tests/{id}/summary` (upload phase 1).
  *
  * @param files 
- * @param node Only the mobile uploads.
+ * @param node 
  * @param testResult 
  * @param resultReason 
  */
@@ -35,9 +36,8 @@ data class UploadManifest (
     @SerializedName("files")
     val files: kotlin.collections.List<ManifestFile>,
 
-    /* Only the mobile uploads. */
     @SerializedName("node")
-    val node: kotlin.String,
+    val node: UploadNode,
 
     @SerializedName("test_result")
     val testResult: TestResult,

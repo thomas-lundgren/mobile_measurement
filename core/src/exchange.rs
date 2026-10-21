@@ -382,6 +382,21 @@ mod tests {
         assert_eq!(activity_code("nonsense"), 0);
     }
 
+    /// The wire table is `enums.yaml` app_activities, in order (code = index).
+    #[test]
+    fn activities_match_the_contract() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../contracts/enums/enums.yaml");
+        let doc: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let want: Vec<&str> = doc["app_activities"]
+            .as_sequence()
+            .expect("enums.yaml app_activities")
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(ACTIVITIES.as_slice(), want.as_slice());
+    }
+
     fn exchange(
         object_id: u64,
         up: u64,

@@ -149,9 +149,6 @@ pub async fn summary(
     if let Some(why) = upload_held(&st, &device_id, peer).await? {
         return Err(AppError::Unavailable(why));
     }
-    if manifest.node != "mobile" {
-        return Err(AppError::BadRequest("node must be 'mobile'".into()));
-    }
     let manifest_json = serde_json::to_string(&manifest).map_err(|_| AppError::Internal)?;
 
     // Idempotent initiate: keep the same upload_id across re-posts.
@@ -281,7 +278,7 @@ pub async fn put_file(
     .bind(&path)
     .bind(&file.sha256)
     .bind(file.size_bytes as i64)
-    .bind(&file.encoding)
+    .bind(file.encoding.as_str())
     .bind(now_utc_ns())
     .execute(&st.pool)
     .await?;

@@ -44,7 +44,7 @@ use utoipa::OpenApi;
         ReachabilityReport, ReachTrigger, NetworkContext, NetworkTransport, ReachCheck,
         ReachProtocol, ReachKind,
         // upload
-        UploadManifest, ManifestFile, UploadInitResponse,
+        UploadManifest, ManifestFile, UploadNode, FileEncoding, UploadInitResponse,
         // enums referenced above
         Command, Platform, OperatorRole, Direction, TestControlState, TestResult, LoggerState,
     ))

@@ -31,6 +31,20 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
   features; old vectors are never deleted (forward-compat invariant).
 - **Schemas are additive-only**: a CI rule rejects PRs that remove or
   rename a column / field without bumping `schema_version`.
+- **JSON Schema vs Rust types**: `ci/validate_contracts.py` compares every
+  schema that has a Rust DTO (same title in the generated OpenAPI): property
+  names, required fields, enum values and flow variants.
+- **Parquet**: `core/tests/parquet_contract.rs` writes every table and
+  compares its schema (names, order, types, nullability) with
+  `parquet/*.yaml`; `analysis/tests/test_schema_contract.py` does the same
+  for the analysis column lists.
+- **App activities**: `exchange::activities_match_the_contract` compares the
+  wire table with `enums.yaml` `app_activities`.
+
+**Not generated or checked yet** (see CLAUDE.md invariant 7): the Java
+Logger writes command/state strings, version constants and `header.json` by
+hand (no Java codegen exists despite the table above); the mp-probe protocol
+and the reach protocol have no vectors.
 
 ## Authoring rules
 

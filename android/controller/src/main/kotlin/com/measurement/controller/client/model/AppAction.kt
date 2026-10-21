@@ -25,7 +25,7 @@ import com.google.gson.annotations.SerializedName
  * @param atMs Start this long after the test starts; actions run in order.
  * @param bytes Size of each object.
  * @param kind 
- * @param activity Activity name for the logs (contracts/packets/app_request.md).
+ * @param activity Activity name for the logs (contracts/enums/enums.yaml app_activities).
  * @param chunkBytes kind \"down\" with rate_kbps: bytes per paced write.
  * @param count Number of objects (default 1).
  * @param delayMs kind \"down\": server think time before the first byte (ms).
@@ -48,7 +48,7 @@ data class AppAction (
     @SerializedName("kind")
     val kind: AppActionKind,
 
-    /* Activity name for the logs (contracts/packets/app_request.md). */
+    /* Activity name for the logs (contracts/enums/enums.yaml app_activities). */
     @SerializedName("activity")
     val activity: kotlin.String? = null,
 

@@ -15,6 +15,7 @@
 
 package com.measurement.controller.client.model
 
+import com.measurement.controller.client.model.FileEncoding
 
 import com.google.gson.annotations.SerializedName
 
@@ -31,7 +32,7 @@ import com.google.gson.annotations.SerializedName
 data class ManifestFile (
 
     @SerializedName("encoding")
-    val encoding: kotlin.String,
+    val encoding: FileEncoding,
 
     @SerializedName("path")
     val path: kotlin.String,

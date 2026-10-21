@@ -3,6 +3,10 @@
 
 - Every testvector example validates against its JSON Schema (cross-$ref aware).
 - Packet golden vectors re-encode to the committed hex.
+- Every JSON Schema the server also has as a Rust type (same title in the
+  generated OpenAPI) has the same shape there: properties, required fields,
+  enum values and flow variants. The schema is hand-written and the OpenAPI
+  generated from the Rust DTOs, so this keeps the two from drifting.
 Exits non-zero on any failure. Mirrors the checks the Rust test suite also runs,
 but at the contract layer (language-independent).
 """
@@ -12,6 +16,7 @@ import struct
 import sys
 from pathlib import Path
 
+import yaml
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
@@ -105,12 +110,89 @@ def check_packet_vectors():
                 failures.append(f"{fname}:{c['name']}: hex mismatch")
 
 
+def _resolve(node, doc, files):
+    while isinstance(node, dict) and "$ref" in node:
+        file, _, frag = node["$ref"].partition("#")
+        if file:
+            doc = files[file.rsplit("/", 1)[-1]]
+        node = doc
+        for p in [p for p in frag.strip("/").split("/") if p]:
+            node = node[p]
+    return node, doc
+
+
+def _shape(node, doc, files):
+    """What both sides must agree on: property names, required fields, enum
+    values and the variants of a `type`-discriminated union. Types, bounds
+    and docs are left out (OpenAPI spells them differently)."""
+    node, doc = _resolve(node, doc, files)
+    alts = node.get("oneOf") or node.get("anyOf")
+    if alts:
+        alts = [v for v in alts if _resolve(v, doc, files)[0] != {"type": "null"}]
+        if len(alts) == 1:  # Option<T> is "null or T" in OpenAPI
+            return _shape(alts[0], doc, files)
+        out = {}
+        for v in alts:
+            v, vdoc = _resolve(v, doc, files)
+            t, _ = _resolve(v.get("properties", {}).get("type", {}), vdoc, files)
+            out[t.get("const") or (t.get("enum") or [None])[0]] = _shape(v, vdoc, files)
+        return {"oneOf": out}
+    if "allOf" in node and len(node["allOf"]) == 1:
+        return _shape(node["allOf"][0], doc, files)
+    if "properties" in node:
+        return {
+            "props": {k: _shape(v, doc, files) for k, v in node["properties"].items()},
+            "required": sorted(node.get("required", [])),
+        }
+    if "const" in node:
+        return {"enum": [node["const"]]}
+    if "enum" in node:
+        return {"enum": sorted(x for x in node["enum"] if x is not None)}
+    t = node.get("type")
+    types = t if isinstance(t, list) else [t]
+    if "array" in types:
+        return {"items": _shape(node.get("items", {}), doc, files)}
+    if "object" in types and isinstance(node.get("additionalProperties"), dict):
+        return {"map": _shape(node["additionalProperties"], doc, files)}
+    return "scalar"
+
+
+def _diff(a, b, path, out):
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in sorted(set(a) | set(b), key=str):
+            if k not in a:
+                out.append(f"{path}.{k}: only in the Rust type")
+            elif k not in b:
+                out.append(f"{path}.{k}: only in the JSON Schema")
+            else:
+                _diff(a[k], b[k], f"{path}.{k}", out)
+    elif a != b:
+        out.append(f"{path}: JSON Schema {a} vs Rust type {b}")
+
+
+def check_schema_parity():
+    files = {Path(f).name: json.load(open(f)) for f in glob.glob(str(CONTRACTS / "schemas" / "*.json"))}
+    openapi = yaml.safe_load(open(CONTRACTS / "openapi" / "openapi.yaml"))
+    components = openapi["components"]["schemas"]
+    for name, schema in sorted(files.items()):
+        title = schema.get("title")
+        if title not in components:
+            print(f"  {name:48s} (no Rust type in the OpenAPI)")
+            continue
+        out = []
+        _diff(_shape(schema, schema, files), _shape(components[title], openapi, files), title, out)
+        print(f"  {name:48s} {'OK' if not out else 'FAIL'}")
+        failures.extend(f"{name}: {d}" for d in out)
+
+
 def main():
     schemas, reg = load_registry()
     print("JSON Schema examples:")
     check_json_examples(reg, schemas)
     print("Packet golden vectors:")
     check_packet_vectors()
+    print("JSON Schema vs Rust types (generated OpenAPI):")
+    check_schema_parity()
     if failures:
         print(f"\nFAILED ({len(failures)}):")
         for f in failures:

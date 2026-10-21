@@ -50,6 +50,8 @@ PACKETS = [
     "app_activity",
     "app_object_bytes",
     "app_up_bytes",
+    "dscp_sent",
+    "dscp_recv",
 ]
 
 CLOCK = [
@@ -122,8 +124,9 @@ EVENTS = [
     "node",
     "mono_ns",
     "utc_ns",
-    "type",
-    "detail",
+    "event_type",
+    "flow_id",
+    "event_metadata",
 ]
 
 # Sent/received discriminator and protocol/connection wire values.
