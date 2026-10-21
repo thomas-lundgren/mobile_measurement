@@ -105,7 +105,6 @@ logger-app
   ├── server connection client
   ├── command poller
   ├── test runner
-  ├── traffic generator client
   ├── traffic generator / receiver  (Realtime UDP / Bulk TCP, active role depends on flow direction)
   ├── packet logger
   ├── radio logger
@@ -374,13 +373,13 @@ INITIALIZING → REGISTERING → IDLE → WAITING_FOR_TEST → PREPARING → RUN
    - Client sends to server, server echoes back.
 
 2. **Realtime UDP Flow** — RTP-like traffic with embedded timing metadata for one-way latency and inter-packet gap analysis (initially fixed-rate UDP stream)
-   - Configurable direction: `FromServer`, `ToServer`, or `Bidirectional`
+   - Configurable direction: `FromServer` or `ToServer`; traffic both ways is two flows (for bulk TCP on separate connections)
    - Both endpoints implement generator and receiver; direction determines which sends payload
    - UE always sends to the server port; for `FromServer` sends keepalive packets (~1 Hz) until first downlink packet received
    - **UE forced to RRC_CONNECTED active state** — DRX effects are out of scope
 
 3. **Bulk TCP Flow** — TCP upload/download for congestion and queue buildup analysis
-   - Configurable direction: `FromServer`, `ToServer`, or `Bidirectional`
+   - Configurable direction: `FromServer` or `ToServer`; traffic both ways is two flows (for bulk TCP on separate connections)
    - Both endpoints implement generator and receiver; direction determines which sends payload
    - UE always opens the TCP connection to the server port
    - Optional `rate_kbps` cap (paced writes) for head-of-line tests

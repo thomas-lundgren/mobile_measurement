@@ -165,7 +165,7 @@ Bidirectional:
 
 This is asymmetric — the UE sends "payload + keepalive" while the server sends only "payload." But bidirectional should mean both sides send payload at their configured rate.
 
-**Question:** Is there one `flow_id` or two? The earlier text said "separate flow_id" but the diagram doesn't show two.
+**Question:** Is there one `flow_id` or two? The diagram shows one flow carrying both directions. *(Corrected, remediation C1: an earlier version cited spec text, "separate flow_id", that does not exist.)*
 
 **Fix:** Define Bidirectional Realtime UDP as **two separate unidirectional flows** with distinct `flow_id`s, each with its own rate and packet size:
 - Flow A (`direction: FromServer`): server → UE
@@ -210,7 +210,7 @@ Or simply merge them into one component that handles all directions.
 
 ### 2.6 How Is `SIGNAL_LOSS` Detected?
 
-**Problem:** §12.7 lists `SIGNAL_LOSS_START/END` as explicitly logged events but never defines the detection criteria.
+**Problem:** §12.7 lists `SIGNAL_LOSS_START/END` as explicitly logged events with only a partial criterion ("no serving cell for >N seconds"): N and the detection mechanism are undefined. *(Corrected, remediation C2: an earlier version said the criterion was never defined.)*
 
 **Questions:**
 - Is it when `getAllCellInfo()` returns empty?
@@ -223,7 +223,7 @@ Or simply merge them into one component that handles all directions.
 
 ### 2.7 Clock Calibration Protocol Is Mentioned But Not Defined
 
-**Problem:** §3.2 mentions the dual timestamp model. §11.3 mentions OWD estimation. The 3GPP review recommended GPS-time calibration. But the spec itself **never defines a clock calibration protocol**.
+**Problem:** §3.2 mentions the dual timestamp model. §11.3 mentions OWD estimation. *(Corrected, remediation C3: a dangling reference to a GPS-time recommendation in a review not in the repo was removed.)* But the spec itself **never defines a clock calibration protocol**.
 
 The `clock.parquet` file has fields for `estimated_offset` and `uncertainty`, but there's no protocol explaining how these are computed.
 

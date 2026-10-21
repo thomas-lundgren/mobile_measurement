@@ -339,12 +339,7 @@ pages (map, series, findings, app traffic, timing) rebuilt by cron.
 
 - `internal_*` schemas are not shape-compared with their Rust types
   (CLAUDE.md invariant 7, "Still unchecked").
-- Spec text lags the contracts: §8 diagrams and the §8.3 direction table
-  still list `Bidirectional` (the contracts model it as two flows), §3.3
-  says every file carries the version fields (they live in `header.json`),
-  invariant 5 in CLAUDE.md/AGENTS.md names `Bidirectional`, "traffic
-  generator client" naming (remediation 2.4). Per-item status:
-  `planning/review_remediation_plan.md` "Status tracking".
+- Per-item review status: `planning/review_remediation_plan.md` "Status tracking".
 
 ---
 

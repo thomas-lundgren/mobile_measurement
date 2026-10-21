@@ -103,14 +103,11 @@ UTC timestamps are used for:
 
 ## 3.3 Forward-Compatible Logging
 
-Every file contains:
-
-- `schema_version`
-- `protocol_version`
-- `app_version`
-- `device_id`
-- `session_id`
-- `test_id`
+Every test carries its metadata once, in `header.json` (§12):
+`schema_version`, `protocol_version`, `app_version`, the device, the test plan
+and the logging config. Every Parquet row carries only the join columns
+`device_id`, `session_id` and `test_id`, so files stay small and any file can
+still be joined back to its test.
 
 Rules:
 
@@ -656,9 +653,8 @@ Every non-probe flow declares a direction:
 |---|---|---|---|
 | `FromServer` | Server | Mobile | Mobile |
 | `ToServer` | Mobile | Server | Mobile |
-| `Bidirectional` | Both | Both | Mobile |
 
-Both nodes always run generator + receiver + logger (see §3.5); the direction only selects which side emits payload. Both nodes record their own packet log for the flow.
+There is no bidirectional direction: traffic both ways is two flows, one `ToServer` and one `FromServer`, each with its own `flow_id`, rate and (for bulk TCP) connection, so the two directions never share a connection or bias each other's numbers. Both nodes always run generator + receiver + logger (see §3.5); the direction only selects which side emits payload. Both nodes record their own packet log for the flow.
 
 **Connection initiation rule:** The UE (mobile) always initiates the connection by connecting to the configured server port:
 
@@ -708,7 +704,7 @@ RTP-like traffic with embedded timing metadata for one-way latency and inter-pac
 Initial version:
 
 - fixed-rate UDP stream
-- configurable direction: `FromServer`, `ToServer`, or `Bidirectional`
+- configurable direction: `FromServer` or `ToServer` (both ways = two flows)
 - one-way latency measurement (uplink and downlink)
 - inter-packet send/receive gap analysis
 - burst and jitter characterization
@@ -736,10 +732,6 @@ FromServer:
 
 ToServer:
     UE → server  (payload, uplink)
-
-Bidirectional:
-    UE → server  (payload + keepalive, uplink)
-    server → UE  (payload, downlink)
 ```
 
 Both sender and receiver log:
@@ -782,10 +774,11 @@ Purpose:
 
 Initial implementation:
 
-- configurable direction: `FromServer`, `ToServer`, or `Bidirectional`
+- configurable direction: `FromServer` or `ToServer`
 - TCP upload (`ToServer`)
 - TCP download (`FromServer`)
-- simultaneous upload + download (`Bidirectional`)
+- simultaneous upload + download: two flows on separate connections, so the
+  ACKs of one direction don't share a connection with the other's payload
 - optional `rate_kbps` caps the sending rate: the sender writes 5 ms worth of bytes (at most 64 KiB) per paced write, so a low or medium bulk load can run beside realtime flows (head-of-line blocking tests) without saturating the link
 
 Connection initiation and behavior by direction:
@@ -800,11 +793,6 @@ FromServer:
 ToServer:
     UE connects → server
     UE → server  (payload, upload)
-
-Bidirectional:
-    UE connects → server
-    UE → server  (payload, upload)
-    server → UE  (payload, download, same connection)
 ```
 
 ### App Traffic Flow (`app_traffic`)
@@ -921,7 +909,6 @@ logger-app
   ├── server connection client
   ├── command poller
   ├── test runner
-  ├── traffic generator client
   ├── traffic generator / receiver  (Realtime UDP / Bulk TCP, active role depends on flow direction)
   ├── app traffic agents  (simulated users requesting objects; app_traffic flows)
   ├── packet logger
@@ -977,8 +964,8 @@ The client:
 
 - opens TCP/UDP sockets
 - initiates connection to the configured server port (all directions)
-- sends payload traffic when configured as sender (`ToServer` / `Bidirectional`)
-- receives and logs payload traffic when configured as receiver (`FromServer` / `Bidirectional`)
+- sends payload traffic when configured as sender (`ToServer`)
+- receives and logs payload traffic when configured as receiver (`FromServer`)
 - timestamps packets
 - measures RTT/jitter/loss
 - logs received traffic (all directions)
