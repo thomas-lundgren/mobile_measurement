@@ -172,15 +172,16 @@ def _diff(a, b, path, out):
 
 def check_schema_parity():
     files = {Path(f).name: json.load(open(f)) for f in glob.glob(str(CONTRACTS / "schemas" / "*.json"))}
-    openapi = yaml.safe_load(open(CONTRACTS / "openapi" / "openapi.yaml"))
-    components = openapi["components"]["schemas"]
+    # The public API, and the internal control API (internal_* schemas).
+    docs = [yaml.safe_load(open(CONTRACTS / "openapi" / f)) for f in ("openapi.yaml", "internal.yaml")]
     for name, schema in sorted(files.items()):
         title = schema.get("title")
-        if title not in components:
+        doc = next((d for d in docs if title in d["components"]["schemas"]), None)
+        if doc is None:
             print(f"  {name:48s} (no Rust type in the OpenAPI)")
             continue
         out = []
-        _diff(_shape(schema, schema, files), _shape(components[title], openapi, files), title, out)
+        _diff(_shape(schema, schema, files), _shape(doc["components"]["schemas"][title], doc, files), title, out)
         print(f"  {name:48s} {'OK' if not out else 'FAIL'}")
         failures.extend(f"{name}: {d}" for d in out)
 
@@ -224,7 +225,7 @@ def main():
     check_time_sync_vectors()
     print("Upload paths:")
     check_upload_paths()
-    print("JSON Schema vs Rust types (generated OpenAPI):")
+    print("JSON Schema vs Rust types (generated openapi.yaml, internal.yaml):")
     check_schema_parity()
     if failures:
         print(f"\nFAILED ({len(failures)}):")

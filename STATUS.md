@@ -337,8 +337,6 @@ pages (map, series, findings, app traffic, timing) rebuilt by cron.
 
 ### Contracts and docs (open)
 
-- `internal_*` schemas are not shape-compared with their Rust types
-  (CLAUDE.md invariant 7, "Still unchecked").
 - Per-item review status: `planning/review_remediation_plan.md` "Status tracking".
 
 ---

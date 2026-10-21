@@ -84,3 +84,20 @@ pub struct GeneratorCounters {
     /// Logger-sink rows dropped to ring overflow; >0 marks the test PARTIAL.
     pub dropped_rows: u64,
 }
+
+/// The internal control API's types as an OpenAPI document (components only:
+/// the routes are loopback-only and not part of the public API). The
+/// committed `contracts/openapi/internal.yaml` is generated from it
+/// (`tests/internal_openapi_drift.rs`), and `ci/validate_contracts.py`
+/// compares the `internal_*` JSON Schemas with it.
+#[derive(utoipa::OpenApi)]
+#[openapi(
+    info(title = "Measurement Platform internal control API", version = "0.1.0"),
+    components(schemas(
+        InternalStartTest,
+        InternalTestStatus,
+        InternalGeneratorPrepare,
+        InternalGeneratorStatus
+    ))
+)]
+pub struct InternalApiDoc;

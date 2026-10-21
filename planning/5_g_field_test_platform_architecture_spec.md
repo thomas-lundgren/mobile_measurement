@@ -37,7 +37,7 @@ test-control
     ↓
 data-generator(s)  (server-side)
 
-Android Logger Clients
+Android Logger Apps (UEs)
     ↕
 server-main
     ↕
@@ -52,7 +52,7 @@ Main components:
    - data-generator(s) (server-side)
 
 2. Android Logger App
-   - autonomous measurement client
+   - autonomous measurement app on the UE
    - traffic generator / receiver / loopback (all flow types and directions)
 
 3. Android Controller App
@@ -114,11 +114,11 @@ Rules:
 - New fields may be added
 - Existing fields must not change meaning
 - Missing fields are interpreted as `null`
-- Clients must tolerate unknown fields
+- Readers must tolerate unknown fields
 
 ---
 
-## 3.4 Capability-Tolerant Clients & Extensible Log Format
+## 3.4 Capability-Tolerant Logger & Extensible Log Format
 
 Different Android devices expose different radio APIs. This platform targets the **Google Pixel 9 Pro** as the reference device, but the log format is **extensible** — more capable devices may log additional fields.
 
@@ -237,7 +237,7 @@ It is responsible for:
 - Authentication — operator (Controller) and device (Logger); see §5.3
 - Controller app integration
 
-The logger clients communicate only with `server-main`.
+Logger apps communicate only with `server-main`.
 
 ---
 
@@ -424,10 +424,10 @@ Two principal types, one validation pipeline on `server-main`:
   no control chars; the exact bytes are pinned in `contracts/testvectors/auth_signing/`.
   `POST /auth/verify` returns a short-lived opaque **session token** used as
   `Authorization: Bearer …` on all subsequent calls. Identity is derived **from the verified
-  signature, never from a client-claimed `device_id`**. Revocation = delete the pubkey row.
+  signature, never from a device-claimed `device_id`**. Revocation = delete the pubkey row.
 
 **Cross-platform by contract.** The wire format is platform-neutral so iOS (and future
-clients) work with the same server code path; only the per-platform key-gen/sign glue
+device platforms) work with the same server code path; only the per-platform key-gen/sign glue
 differs. Pinned constants (versioned in `contracts/`):
 
 | Constant | Value |
@@ -474,7 +474,7 @@ POST /api/v1/auth/verify      # body: { challenge_id, signature (ASN.1 DER, base
 ```
 
 `/auth/verify` returns a short-lived opaque `session_token` plus the current
-`logging_config_version` (so the client can detect drift and trigger `SET_LOGGING_CONFIG`).
+`logging_config_version` (so the Logger can detect drift and trigger `SET_LOGGING_CONFIG`).
 
 #### Device Registration
 
@@ -575,13 +575,13 @@ FAILED
 
 ### Prepare Tests
 
-Before a client receives a RUN_TEST command:
+Before a Logger receives a RUN_TEST command:
 
 1. Allocate ports
 2. Start generators
 3. Wait until generators are listening
 4. Transition generators to READY state
-5. Send test information to client
+5. Send test information to the Logger
 
 ---
 
@@ -691,7 +691,7 @@ struct ProbePacket {
 Behavior:
 
 ```text
-client → server
+UE → server
 server → echo
 ```
 
@@ -811,8 +811,8 @@ and how the apps themselves fare (page load time, video segment time).
   an LLM token stream. Nothing back = an upload, acknowledged by an echo.
 - Layering: the workload (the simulated users) decides what to transfer and
   when; the transfer itself is the shared request/response traffic engine
-  (`core/src/exchange.rs`), whose client side the UE uses and whose server
-  side the data-generator runs — one implementation for both nodes, as for the
+  (`core/src/exchange.rs`), whose requesting side the UE uses and whose
+  serving side the data-generator runs — one implementation for both nodes, as for the
   realtime UDP and bulk TCP engines. See `planning/app_workload_layering.md`.
 - Profiles: `web`, `mail`, `video`, `social`, `mixed` (switches among web,
   social and video every 2–5 min with mail in the background), `agent` (an AI
@@ -925,7 +925,7 @@ logger-app
 
 ### Command Polling
 
-The client polls for commands.
+The Logger polls for commands.
 
 Example:
 
@@ -960,7 +960,7 @@ Logger announces (protocol and record format: `contracts/internal/mp_probe.yaml`
 
 ### Traffic Execution
 
-The client:
+The Logger:
 
 - opens TCP/UDP sockets
 - initiates connection to the configured server port (all directions)
@@ -1100,7 +1100,7 @@ Android devices maintain:
 - UTC time
 - GPS-derived timing calibration
 
-The client periodically logs clock calibration snapshots.
+The Logger periodically logs clock calibration snapshots.
 
 ---
 
@@ -1340,7 +1340,7 @@ mobile then uploads the test as `PARTIAL`.
 
 # 13. Upload Architecture
 
-Uploads are client-initiated.
+Uploads are Logger-initiated.
 
 Both nodes record locally during a test. The server already holds its own `server/` recordings on disk; when the UE uploads, the server **collects the UE's files under the same `test_id`**, placing them in that test's `mobile/` subfolder (with the mobile-only `gps.parquet`/`radio.parquet` at the test root). The result is the single aggregated test tree shown in §12.1.
 
@@ -1391,7 +1391,7 @@ data is never left stranded on the device.
 
 If server connectivity is lost:
 
-- client continues logging
+- the Logger continues logging
 - test continues if possible
 - upload deferred
 - reconnect attempted later

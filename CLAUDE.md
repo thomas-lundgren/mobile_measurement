@@ -77,6 +77,7 @@ These are the design decisions that span components and are easy to violate piec
    | `enums/enums.yaml`, `versions/versions.yaml` | Rust `mp-contracts`; `exchange::ACTIVITIES` (`app_activities`) | `server/contracts-rs/tests/parity.rs`; `exchange::activities_match_the_contract` |
    | `packets/*.md` + `testvectors/packets/` | `core/src/packet.rs` (one codec, both nodes via JNI) | golden-vector tests in `packet.rs` |
    | `schemas/*.json` | Rust DTOs → generated `openapi.yaml` → generated Kotlin client | `ci/validate_contracts.py` (examples, plus schema vs Rust shape); `openapi_drift`; `ci/check_client_drift.sh` |
+   | `schemas/internal_*.json` (server-main ↔ test-control ↔ data-generator) | Rust DTOs (`dto/internal.rs`) → generated `openapi/internal.yaml` | `ci/validate_contracts.py` (schema vs Rust shape); `internal_openapi_drift` |
    | `parquet/*.parquet.yaml` | Rust writers; `analysis/fieldtest_analysis/schema.py` | `core/tests/parquet_contract.rs`; `analysis/tests/test_schema_contract.py` |
    | `db/schema.sql` | server migrations | migration test in `mp-server-main` |
    | all of the above, for the Logger | `Contract.java`, **generated** by `contracts/codegen/java_contract.py`: versions, enums, REST paths, row keys, mp-probe | `java_contract.py --check`; Logger JVM tests (`android/logger/src/test`) validate every body it sends against the schemas |
@@ -91,9 +92,7 @@ These are the design decisions that span components and are easy to violate piec
 
    New fields in a JSON body need an example in `contracts/testvectors/` that uses them, because the shape check compares names and enum values, not bounds.
 
-   **Still unchecked: fix these, don't extend them.**
-
-   - The `internal_*` schemas (server-main ↔ test-control ↔ data-generator) are checked only through examples, not shape-compared with their Rust types.
+   **Still unchecked:** nothing known. A copy found without a gate gets one; don't add copies that rely on a comment to stay in step.
 
 ## Log layout (per test)
 

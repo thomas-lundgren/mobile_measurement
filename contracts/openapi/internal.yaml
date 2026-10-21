@@ -1,0 +1,716 @@
+openapi: 3.1.0
+info:
+  title: Measurement Platform internal control API
+  description: 'Rust face of contracts/: enums, version/auth constants, and DTOs (utoipa ToSchema).'
+  license:
+    name: ''
+  version: 0.1.0
+paths: {}
+components:
+  schemas:
+    AppAction:
+      type: object
+      description: One step of a scripted app_traffic timeline.
+      required:
+      - at_ms
+      - kind
+      - bytes
+      properties:
+        activity:
+          type:
+          - string
+          - 'null'
+          description: Activity name for the logs (contracts/enums/enums.yaml app_activities).
+        at_ms:
+          type: integer
+          format: int64
+          description: Start this long after the test starts; actions run in order.
+          minimum: 0
+        bytes:
+          type: integer
+          format: int64
+          description: Size of each object.
+          minimum: 0
+        chunk_bytes:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: 'kind "down" with rate_kbps: bytes per paced write.'
+          minimum: 0
+        count:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Number of objects (default 1).
+          minimum: 0
+        delay_ms:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: 'kind "down": server think time before the first byte (ms).'
+          minimum: 0
+        kind:
+          $ref: '#/components/schemas/AppActionKind'
+        parallel:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Objects in flight at once (default 1, at most 6).
+          minimum: 0
+        rate_kbps:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: 'kind "down": pace the response at this rate, like a token stream.'
+          minimum: 0
+        up_bytes:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: 'kind "down": bytes sent up first (request body, LLM context).'
+          minimum: 0
+    AppActionKind:
+      type: string
+      enum:
+      - down
+      - up
+    AppProfile:
+      type: string
+      description: Built-in user models of an app_traffic flow.
+      enum:
+      - web
+      - mail
+      - video
+      - social
+      - mixed
+      - agent
+      - script
+    AppToolPlacement:
+      type: string
+      description: Where an AI agent's tools run (app_traffic profile "agent").
+      enum:
+      - device
+      - cloud
+      - hybrid
+    CaptureConfig:
+      type: object
+      description: VPN-based passive traffic capture config (Monitor only).
+      required:
+      - enabled
+      properties:
+        apps:
+          type: array
+          items:
+            type: string
+          description: Package names to capture when scope = Allowlist.
+        enabled:
+          type: boolean
+        quota_mb_per_day:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        scope:
+          $ref: '#/components/schemas/VpnScope'
+    Direction:
+      type: string
+      enum:
+      - FromServer
+      - ToServer
+    Flow:
+      oneOf:
+      - type: object
+        required:
+        - flow_id
+        - rate_pps
+        - type
+        properties:
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          packet_size_bytes:
+            type: integer
+            format: int32
+            minimum: 0
+          rate_pps:
+            type: integer
+            format: int32
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - probe
+      - type: object
+        required:
+        - flow_id
+        - direction
+        - rate_pps
+        - packet_size_bytes
+        - type
+        properties:
+          direction:
+            $ref: '#/components/schemas/Direction'
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          packet_size_bytes:
+            type: integer
+            format: int32
+            minimum: 0
+          rate_pps:
+            type: integer
+            format: int32
+            minimum: 0
+          sndbuf_bytes:
+            type:
+            - integer
+            - 'null'
+            format: int32
+            description: |-
+              Sender only: limit SO_SNDBUF to this many bytes and send
+              non-blocking (back-pressure test; full buffer → EAGAIN, logged).
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - realtime_udp
+      - type: object
+        required:
+        - flow_id
+        - direction
+        - type
+        properties:
+          direction:
+            $ref: '#/components/schemas/Direction'
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          rate_kbps:
+            type:
+            - integer
+            - 'null'
+            format: int32
+            description: |-
+              Sender only: pace writes to this rate (kbit/s, application bytes)
+              instead of sending as fast as TCP allows. Omit for uncapped bulk.
+            minimum: 0
+          target_bytes:
+            type:
+            - integer
+            - 'null'
+            format: int32
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - bulk_tcp
+      - type: object
+        description: |-
+          Logger-only: ICMP/UDP/TCP-SYN probes to auto-discovered first-hop gateways.
+          No server endpoint — FlowBinding.server_port is None for this type.
+        required:
+        - flow_id
+        - type
+        properties:
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          ping_interval_ms:
+            type: integer
+            format: int32
+            description: Probe cadence in ms. Default 1000.
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - gateway_ping
+      - type: object
+        description: |-
+          DSCP transparency probe. UE cycles through dscp_values marking each outgoing
+          packet; server echoes with observed + intended DSCP filled into the payload.
+          See contracts/packets/dscp_probe.md.
+        required:
+        - flow_id
+        - dscp_values
+        - type
+        properties:
+          dscp_values:
+            type: array
+            items:
+              type: integer
+              format: int32
+              minimum: 0
+            description: DSCP values (0–63) to cycle through, one per packet (seq % len).
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          rate_pps:
+            type: integer
+            format: int32
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - dscp_probe
+      - type: object
+        description: |-
+          App-like background load: simulated users on the UE request objects
+          over TCP from the server (contracts/packets/app_request.md).
+        required:
+        - flow_id
+        - profile
+        - type
+        properties:
+          actions:
+            type:
+            - array
+            - 'null'
+            items:
+              $ref: '#/components/schemas/AppAction'
+            description: 'profile "script" only: the timeline to run.'
+          flow_id:
+            type: integer
+            format: int32
+            minimum: 0
+          placement:
+            oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/AppToolPlacement'
+              description: 'profile "agent" only: where the tools run (default device).'
+          profile:
+            $ref: '#/components/schemas/AppProfile'
+            description: 'User model: web | mail | video | social | mixed | script.'
+          scale:
+            type:
+            - number
+            - 'null'
+            format: double
+            description: Multiplies every object size (default 1.0); < 1 saves data.
+          seed:
+            type:
+            - integer
+            - 'null'
+            format: int64
+            description: 'Seed of the users'' choices (default 1): same seed, same requests.'
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - app_traffic
+          workers:
+            type:
+            - integer
+            - 'null'
+            format: int32
+            description: Concurrent users (1–16, default 1). A script runs on one.
+            minimum: 0
+      description: A flow, discriminated by `type`. Port-less — `Flow` carries no server_port.
+    FlowBinding:
+      type: object
+      description: |-
+        Server-allocated binding for one flow, keyed by flow_id. Lives in
+        RunTestPayload / header, not in the plan. `server_port` is absent for
+        gateway_ping flows (no server endpoint).
+      required:
+      - flow_id
+      properties:
+        flow_id:
+          type: integer
+          format: int32
+          minimum: 0
+        server_port:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+    GateableEvent:
+      type: string
+      description: |-
+        The config-gateable subset of event types (operational events are always
+        logged regardless of config — see enums.yaml event_type_provenance).
+      enum:
+      - TEST_START
+      - TEST_STOP
+      - SIGNAL_LOSS_START
+      - SIGNAL_LOSS_END
+    GeneratorCounters:
+      type: object
+      required:
+      - packets_sent
+      - packets_received
+      - dropped_rows
+      properties:
+        bytes_received:
+          type: integer
+          format: int64
+          minimum: 0
+        bytes_sent:
+          type: integer
+          format: int64
+          minimum: 0
+        dropped_rows:
+          type: integer
+          format: int64
+          description: Logger-sink rows dropped to ring overflow; >0 marks the test PARTIAL.
+          minimum: 0
+        packets_received:
+          type: integer
+          format: int64
+          minimum: 0
+        packets_sent:
+          type: integer
+          format: int64
+          minimum: 0
+    GeneratorRef:
+      type: object
+      description: Per-flow generator coordination state.
+      required:
+      - flow_id
+      - generator_id
+      - state
+      properties:
+        flow_id:
+          type: integer
+          format: int32
+          minimum: 0
+        generator_id:
+          type: string
+        state:
+          $ref: '#/components/schemas/GeneratorState'
+    GeneratorState:
+      type: string
+      enum:
+      - INITIALIZING
+      - READY
+      - WAITING_FOR_CLIENT
+      - RUNNING
+      - STOPPING
+      - STOPPED
+      - FAILED
+    InternalGeneratorPrepare:
+      type: object
+      description: |-
+        `POST /internal/generators` (test-control → data-generator). Configures one
+        generator for one flow. device_id/session_id are carried so the server-side
+        packets.parquet gets the same join columns as the mobile's.
+      required:
+      - test_id
+      - device_id
+      - session_id
+      - flow
+      - server_port
+      - node_log_dir
+      properties:
+        device_id:
+          type: string
+        flow:
+          $ref: '#/components/schemas/Flow'
+        node_log_dir:
+          type: string
+          description: Filesystem path for this node's `server/` log subtree for the test.
+        server_port:
+          type: integer
+          format: int32
+          minimum: 0
+        session_id:
+          type: string
+        test_id:
+          type: string
+    InternalGeneratorStatus:
+      type: object
+      description: '`GET /internal/generators/{id}` and the `.../stop` response.'
+      required:
+      - generator_id
+      - test_id
+      - flow_id
+      - state
+      - counters
+      properties:
+        bound_port:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        counters:
+          $ref: '#/components/schemas/GeneratorCounters'
+        error:
+          type:
+          - string
+          - 'null'
+        flow_id:
+          type: integer
+          format: int32
+          minimum: 0
+        generator_id:
+          type: string
+        state:
+          $ref: '#/components/schemas/GeneratorState'
+        test_id:
+          type: string
+    InternalStartTest:
+      type: object
+      description: |-
+        `POST /internal/tests` (server-main → test-control). server-main has
+        assigned the ids and created the session/test rows; test-control allocates
+        ports and coordinates generators.
+      required:
+      - test_id
+      - device_id
+      - session_id
+      - server_host
+      - plan
+      properties:
+        device_id:
+          type: string
+        logging_config_override:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/LoggingConfig'
+        plan:
+          $ref: '#/components/schemas/TestPlan'
+        server_host:
+          type: string
+        session_id:
+          type: string
+        test_id:
+          type: string
+    InternalTestStatus:
+      type: object
+      description: '`GET /internal/tests/{id}` (test-control → server-main).'
+      required:
+      - test_id
+      - device_id
+      - state
+      - generators
+      properties:
+        device_id:
+          type: string
+        error:
+          type:
+          - string
+          - 'null'
+        flow_bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/FlowBinding'
+        generators:
+          type: array
+          items:
+            $ref: '#/components/schemas/GeneratorRef'
+        result:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TestResult'
+        state:
+          $ref: '#/components/schemas/TestControlState'
+        test_id:
+          type: string
+    LoggingConfig:
+      type: object
+      description: What a device WILL log. Server enforces `effective ⊆ capability`.
+      required:
+      - version
+      - radio
+      - qos
+      - mobility
+      - events
+      - gps
+      - clock_calibration_interval_sec
+      properties:
+        capture:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/CaptureConfig'
+            description: 'Monitor only: VPN-based passive capture. Absent/null = disabled.'
+        clock_calibration_interval_sec:
+          type: integer
+          format: int32
+          minimum: 0
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/GateableEvent'
+          description: Gateable measurement events to log live (subset of EventType).
+        gps:
+          type: boolean
+        mobility:
+          $ref: '#/components/schemas/MobilityLogging'
+        ping:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/PingConfig'
+            description: 'Monitor only: background latency probing. Absent/null = disabled.'
+        qos:
+          $ref: '#/components/schemas/QosLogging'
+        radio:
+          $ref: '#/components/schemas/RadioLogging'
+        version:
+          type: integer
+          format: int32
+          description: Monotonic config version; drives SET_LOGGING_CONFIG drift detection.
+          minimum: 0
+    MobilityLogging:
+      type: object
+      properties:
+        beam_switch:
+          type: boolean
+        explicit_ho_events:
+          type: boolean
+        rrc_state:
+          type: boolean
+    PingConfig:
+      type: object
+      description: Background latency-probing config (Monitor only).
+      required:
+      - enabled
+      properties:
+        auto_target_count:
+          type: integer
+          format: int32
+          minimum: 0
+        default_interval_ms:
+          type: integer
+          format: int32
+          description: Default probe cadence in ms.
+          minimum: 0
+        enabled:
+          type: boolean
+        follow_apps:
+          type: array
+          items:
+            type: string
+          description: Package names whose observed peers feed the auto ping-target pool.
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/PingTarget'
+          description: Operator-pinned targets. First-hop and auto-derived targets are added device-side.
+    PingTarget:
+      type: object
+      description: A single operator-pinned latency target.
+      required:
+      - label
+      - host
+      properties:
+        host:
+          type: string
+          description: IPv4, IPv6, or hostname. Resolved once on config apply.
+        interval_ms:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        label:
+          type: string
+    QosLogging:
+      type: object
+      properties:
+        5qi:
+          type: boolean
+        qfi:
+          type: boolean
+        slice_info:
+          type: boolean
+    RadioLogging:
+      type: object
+      required:
+      - serving_cell
+      properties:
+        bler:
+          type: boolean
+        bwp:
+          type: boolean
+        cqi:
+          type: boolean
+        drx:
+          type: boolean
+        harq:
+          type: boolean
+        lte_fallback:
+          type: boolean
+        mcs:
+          type: boolean
+        mimo_layers:
+          type: boolean
+        neighbor_cells:
+          type: boolean
+        serving_cell:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServingCellField'
+        tx_power:
+          type: boolean
+    ServingCellField:
+      type: string
+      description: Per-sample serving-cell fields a device can report.
+      enum:
+      - pci
+      - nci
+      - tac
+      - nrarfcn
+      - rsrp
+      - rsrq
+      - sinr
+    TestControlState:
+      type: string
+      enum:
+      - IDLE
+      - PREPARE
+      - WAITING_FOR_GENERATOR
+      - WAITING_FOR_CLIENT
+      - RUNNING
+      - STOPPING
+      - DONE
+      - FAILED
+    TestPlan:
+      type: object
+      description: |-
+        The port-less recipe for one test. Server-allocated ports travel separately
+        as `FlowBinding`s (see RunTestPayload / header).
+      required:
+      - name
+      - version
+      - duration_sec
+      - flows
+      properties:
+        duration_sec:
+          type: integer
+          format: int32
+          minimum: 0
+        flows:
+          type: array
+          items:
+            $ref: '#/components/schemas/Flow'
+        name:
+          type: string
+        version:
+          type: integer
+          format: int32
+          minimum: 0
+    TestResult:
+      type: string
+      enum:
+      - COMPLETED
+      - PARTIAL
+      - FAILED
+      - CANCELLED
+    VpnScope:
+      type: string
+      enum:
+      - all
+      - allowlist
