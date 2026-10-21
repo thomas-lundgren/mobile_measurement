@@ -14,10 +14,11 @@ use std::time::{Duration, Instant};
 use super::graph::{State, Tracker};
 use super::scheduler::Operation;
 use super::MAX_PARALLEL;
+use crate::burst;
 use crate::endpoint::Counters;
 use crate::exchange::{self, Pool};
 use crate::log_writer::{Direction, LogSink, PacketRow};
-use crate::packet::AppExchange;
+use crate::packet::{AppBurstRequest, AppExchange};
 use crate::timestamp::Timestamp;
 
 /// How an operation's bytes move (`enums.yaml` app_engines, in order).
@@ -27,15 +28,18 @@ pub enum Engine {
     Exchange,
     /// The same exchange on a connection opened for it alone.
     Bulk,
+    /// Paced UDP datagrams on the flow's port (`crate::burst`).
+    UdpBurst,
 }
 
 impl Engine {
-    pub const ALL: [Engine; 2] = [Self::Exchange, Self::Bulk];
+    pub const ALL: [Engine; 3] = [Self::Exchange, Self::Bulk, Self::UdpBurst];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Exchange => "exchange",
             Self::Bulk => "bulk",
+            Self::UdpBurst => "udp_burst",
         }
     }
 
@@ -88,6 +92,9 @@ pub struct Done {
     pub outcome: Outcome,
     /// The object opened its connection (handshake and slow start).
     pub new_connection: Option<bool>,
+    /// udp_burst: datagrams planned, and those that arrived.
+    pub plan_packets: Option<u32>,
+    pub packets: Option<u32>,
 }
 
 impl Done {
@@ -100,6 +107,8 @@ impl Done {
             bytes_down: 0,
             outcome,
             new_connection: None,
+            plan_packets: None,
+            packets: None,
         }
     }
 }
@@ -237,10 +246,13 @@ fn run_one(x: &Exec, pool: &Mutex<Pool>, op: &Operation) -> Done {
         let mut p = pool.lock().unwrap();
         let idle = match op.engine {
             Engine::Exchange => p.take_idle(),
-            Engine::Bulk => None,
+            Engine::Bulk | Engine::UdpBurst => None,
         };
         (idle, p.server().to_string())
     };
+    if op.engine == Engine::UdpBurst {
+        return udp_burst(x, &server, op);
+    }
     let (mut conn, fresh) = match idle {
         Some(c) => (c, false),
         None => match exchange::connect(&server) {
@@ -253,6 +265,71 @@ fn run_one(x: &Exec, pool: &Mutex<Pool>, op: &Operation) -> Done {
         pool.lock().unwrap().put_back(vec![conn]);
     }
     d
+}
+
+/// The object as a paced UDP burst: downlink when it has a response, else
+/// uplink; datagram size and spacing from its chunk and rate
+/// (`burst::shape`), the think time as the server's delay.
+fn udp_burst(x: &Exec, server: &str, op: &Operation) -> Done {
+    let f = op.fetch;
+    let (direction, bytes) = if f.down > 0 {
+        (burst::DOWNLINK, f.down)
+    } else {
+        (burst::UPLINK, f.up)
+    };
+    let (count, size, interval) = burst::shape(bytes, f.rate_bps, f.chunk);
+    let req = AppBurstRequest {
+        flow_id: x.flow_id,
+        object_id: op.id,
+        activity: f.activity,
+        direction,
+        dscp: burst::UNMARKED,
+        count,
+        size,
+        interval_us: interval.as_micros() as u32,
+        delay_ms: f.delay_ms,
+    };
+    let planned = Done {
+        plan_packets: Some(count),
+        ..Done::not_started(Outcome::Skipped)
+    };
+    let Ok(sock) = burst::socket(server) else {
+        return planned;
+    };
+    let start = Timestamp::now();
+    let mut arrived = 0u32;
+    let r = burst::run(&sock, &req, x.stop, |io| {
+        if io.direction == Direction::Received {
+            arrived += 1;
+        }
+        x.sink
+            .lock()
+            .unwrap()
+            .push(PacketRow::burst(x.flow_id, f.activity, &io));
+        match io.direction {
+            Direction::Sent => x.counters.sent(io.size as u64),
+            Direction::Received => x.counters.received(io.size as u64),
+        }
+    });
+    let (outcome, received) = match &r {
+        Ok(b) => (Outcome::Ok, Some(b.received)),
+        Err(_) if x.stop.load(Ordering::Acquire) => (Outcome::Stopped, None),
+        Err(e) if e.kind() == io::ErrorKind::TimedOut => (Outcome::Timeout, None),
+        Err(_) => (Outcome::Error, None),
+    };
+    let b = r.unwrap_or_default();
+    Done {
+        start: Some(start),
+        first_byte: b.first,
+        done: (outcome == Outcome::Ok).then(Timestamp::now),
+        bytes_up: b.bytes_up,
+        bytes_down: b.bytes_down,
+        outcome,
+        new_connection: None,
+        plan_packets: Some(count),
+        // downlink: what arrived here even when the burst did not end
+        packets: received.or((direction == burst::DOWNLINK).then_some(arrived)),
+    }
 }
 
 fn transfer(x: &Exec, conn: &mut TcpStream, op: &Operation, fresh: bool) -> Done {
@@ -301,6 +378,8 @@ fn transfer(x: &Exec, conn: &mut TcpStream, op: &Operation, fresh: bool) -> Done
         bytes_down: down,
         outcome,
         new_connection: Some(fresh),
+        plan_packets: None,
+        packets: None,
     }
 }
 

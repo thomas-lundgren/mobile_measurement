@@ -10,7 +10,9 @@ on the findings page); **C1 done** (2026-10-21: `app_traffic/graph.rs`,
 `task_interval_s`, `max_open_tasks`; `Agent::next_task`, `executor::run_timed`;
 lateness and dropped tasks on the page); **D0 done** (2026-10-21: packet
 layouts generated from `contracts/packets/layouts.yaml`); **D1 done** (2026-10-21:
-`engines`, `Engine::{Exchange, Bulk}`, paced uploads). Next: D2. Supersedes the step order in
+`engines`, `Engine::{Exchange, Bulk}`, paced uploads); **D2 done** (2026-10-21:
+`AppBurst*` packets generated from `layouts.yaml`, `core/src/burst.rs`,
+`Engine::UdpBurst`, the flow's port over UDP). Next: D3. Supersedes the step order in
 `ai_traffic_implementation_plan.md` (see its "Order" section).
 
 ## 1. The proposal (summary)

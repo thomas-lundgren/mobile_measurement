@@ -833,9 +833,12 @@ and how the apps themselves fare (page load time, video segment time).
   `app_up_bytes`: request → first byte → completion per object, the gaps
   inside a stream, and per episode (a page view, a sync, an agent task step).
 - `engines` maps activities to how their objects move: `exchange` (default:
-  request/response on the user's pooled connections) or `bulk` (the same
-  exchange on a connection opened for that object alone). An upload with a
-  rate is paced on the phone.
+  request/response on the user's pooled connections), `bulk` (the same
+  exchange on a connection opened for that object alone) or `udp_burst`
+  (paced datagrams on the flow's port over UDP, `contracts/packets/app_burst.md`:
+  the phone requests a downlink burst or sends an uplink one, the server
+  sends or counts and acknowledges; both log every datagram). An upload with
+  a rate is paced on the phone.
 - `loop` (agent, websearch): `closed` (default) — a user starts the next
   task after the last one ended, so a slow network makes them ask for less —
   or `open`: tasks arrive at random (mean `task_interval_s`) whatever is still

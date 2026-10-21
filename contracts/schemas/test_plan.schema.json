@@ -131,8 +131,8 @@
         "engines": {
           "type": "object",
           "propertyNames": { "pattern": "^[a-z_]+$" },
-          "additionalProperties": { "enum": ["exchange", "bulk"] },
-          "description": "How each activity's objects move (activity name from enums.yaml app_activities -> enums.yaml app_engines); unlisted activities use exchange. exchange: request/response on the user's pooled connections. bulk: the same exchange on a connection opened for that object alone (its own handshake, slow start and congestion window; never shared or reused)."
+          "additionalProperties": { "enum": ["exchange", "bulk", "udp_burst"] },
+          "description": "How each activity's objects move (activity name from enums.yaml app_activities -> enums.yaml app_engines); unlisted activities use exchange. exchange: request/response on the user's pooled connections. bulk: the same exchange on a connection opened for that object alone (its own handshake, slow start and congestion window; never shared or reused). udp_burst: the object as paced UDP datagrams on the flow's port (contracts/packets/app_burst.md): 1200-byte datagrams (an object's chunk_bytes when set) at its rate_bps, or 8 Mbit/s when it has none."
         },
         "loop": {
           "enum": ["closed", "open"],

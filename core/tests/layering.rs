@@ -10,6 +10,7 @@ use std::path::Path;
 const ENGINES: &[&str] = &[
     "src/endpoint.rs",
     "src/exchange.rs",
+    "src/burst.rs",
     "src/packet.rs",
     "src/udp_timing.rs",
     "src/log_writer.rs",

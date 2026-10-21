@@ -1,0 +1,17 @@
+{
+  "packet_type": "AppBurstEnd",
+  "version": 1,
+  "description": "Golden vectors for AppBurstEnd (pkt_t=0x07, ver=0x01), 18 bytes on the wire. Layout: pkt_t(1) ver(1) flow_id(4) object_id(8) sent(4).",
+  "cases": [
+    {
+      "name": "frame_upload_sent",
+      "notes": "The frame upload's 200 datagrams are out.",
+      "decoded": {
+        "flow_id": 4,
+        "object_id": 281474984050692,
+        "sent": 200
+      },
+      "hex": "0701000000040001000000700004000000c8"
+    }
+  ]
+}

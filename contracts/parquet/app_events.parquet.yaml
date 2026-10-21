@@ -51,5 +51,7 @@ columns:
   - { name: done_utc_ns,      type: uint64, nullable: true }
   - { name: bytes_up,   type: uint64, nullable: false, doc: "Bytes written, request header included." }
   - { name: bytes_down, type: uint64, nullable: false, doc: "Bytes read, acknowledgement included." }
+  - { name: plan_packets, type: uint32, nullable: true, doc: "udp_burst: datagrams in the burst. Null for other engines." }
+  - { name: packets,      type: uint32, nullable: true, doc: "udp_burst: datagrams that arrived (downlink: at the phone; uplink: the server's AppBurstAck). Null for other engines or when unknown." }
   - { name: outcome,    type: utf8,   nullable: false, doc: "enums.yaml app_outcomes (dep_failed: a node it waited for did not end ok)." }
   - { name: new_connection, type: bool, nullable: true, doc: "The object opened its connection (handshake and slow start) rather than reusing an idle one from the pool; null when it never started." }

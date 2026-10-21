@@ -49,11 +49,13 @@ ACTIVE_TAIL_NS = 200_000_000
 
 
 def objects(td) -> pd.DataFrame:
-    """One row per app object seen by the mobile node."""
+    """One row per app object the mobile node moved as a TCP exchange (bulk
+    included). UDP bursts are datagrams, not request → response: their
+    objects are in ``app_events``."""
     pk = td.packets
     if pk is None or pk.empty or "app_activity" not in pk:
         return pd.DataFrame()
-    m = pk[(pk["node"] == "mobile") & pk["app_activity"].notna()].copy()
+    m = pk[(pk["node"] == "mobile") & pk["app_activity"].notna() & (pk["protocol"] != schema.PROTO_UDP)].copy()
     if m.empty:
         return pd.DataFrame()
     m["t"] = pd.to_numeric(m["utc_ns"], errors="coerce")

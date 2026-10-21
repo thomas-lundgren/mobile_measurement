@@ -112,6 +112,8 @@ pub struct PacketTiming {
     /// app_traffic rows: bytes the UE sends up for this object (request body,
     /// LLM context, upload). Null on rows of v1 requests.
     pub app_up_bytes: Option<u64>,
+    /// udp_burst rows: the datagram's index in its burst.
+    pub app_packet_index: Option<u32>,
 }
 
 impl PacketRow {
@@ -179,6 +181,36 @@ impl PacketRow {
         )
     }
 
+    /// The row both nodes log for one data datagram of a UDP burst
+    /// (`crate::burst`): received rows carry the sender's timestamps, the
+    /// kernel receive time and the DSCP that arrived.
+    pub fn burst(flow_id: u32, activity: u8, io: &crate::burst::BurstIo) -> Self {
+        let d = io.data;
+        let received = io.direction == Direction::Received;
+        Self {
+            sender: received.then_some(Timestamp {
+                mono_ns: d.send_mono_ns,
+                utc_ns: d.send_utc_ns,
+            }),
+            dscp_recv: io.tos.map(|t| t >> 2),
+            timing: PacketTiming {
+                kernel_rx_utc_ns: io.kernel_utc_ns,
+                app_activity: Some(app_activity_name(activity)),
+                app_object_bytes: Some(d.count as u64 * io.size as u64),
+                app_packet_index: Some(d.index),
+                ..PacketTiming::default()
+            },
+            ..Self::new(
+                flow_id,
+                d.object_id,
+                io.direction,
+                io.at,
+                io.size as u32,
+                Protocol::Udp,
+            )
+        }
+    }
+
     /// The row both nodes log for one read or write of a request/response
     /// exchange (`crate::exchange`). `v1`: the request came in the old layout
     /// (object size = the larger direction, no separate upload size).
@@ -241,6 +273,7 @@ fn packets_schema() -> Schema {
         Field::new("app_activity", DataType::Utf8, true),
         Field::new("app_object_bytes", DataType::UInt64, true),
         Field::new("app_up_bytes", DataType::UInt64, true),
+        Field::new("app_packet_index", DataType::UInt32, true),
     ])
 }
 
@@ -475,6 +508,12 @@ impl SegmentedPacketWriter {
                     self.rows
                         .iter()
                         .map(|r| r.timing.app_up_bytes)
+                        .collect::<Vec<_>>(),
+                )) as _,
+                Arc::new(UInt32Array::from(
+                    self.rows
+                        .iter()
+                        .map(|r| r.timing.app_packet_index)
                         .collect::<Vec<_>>(),
                 )) as _,
             ],
@@ -774,7 +813,7 @@ mod tests {
             .build()
             .unwrap();
         let batch = reader.next().unwrap().unwrap();
-        assert_eq!(batch.num_columns(), 26, "join + data columns");
+        assert_eq!(batch.num_columns(), 27, "join + data columns");
         let names: Vec<String> = batch
             .schema()
             .fields()

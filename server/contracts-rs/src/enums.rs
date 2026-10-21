@@ -50,6 +50,7 @@ wire_enum!(
     AppEngine {
         Exchange => "exchange",
         Bulk     => "bulk",
+        UdpBurst => "udp_burst",
     }
 );
 

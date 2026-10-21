@@ -348,6 +348,8 @@ fn row(flow_id: u32, op: &Operation, d: Done) -> AppEventRow {
         done: d.done,
         bytes_up: d.bytes_up,
         bytes_down: d.bytes_down,
+        plan_packets: d.plan_packets,
+        packets: d.packets,
         outcome: d.outcome.as_str(),
         new_connection: d.new_connection,
     }

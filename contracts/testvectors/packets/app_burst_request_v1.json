@@ -1,0 +1,39 @@
+{
+  "packet_type": "AppBurstRequest",
+  "version": 1,
+  "description": "Golden vectors for AppBurstRequest (pkt_t=0x05, ver=0x01), 34 bytes on the wire. See contracts/packets/app_burst.md. Layout: pkt_t(1) ver(1) flow_id(4) object_id(8) activity(1) direction(1) dscp(1) reserved(1) count(4) size(4) interval_us(4) delay_ms(4).",
+  "cases": [
+    {
+      "name": "video_segment_down",
+      "notes": "A 1.875 MB video segment (activity 6) as 1563 datagrams of 1200 B, 1 ms apart (9.6 Mbit/s), unmarked, after 20 ms.",
+      "decoded": {
+        "flow_id": 4,
+        "object_id": 281474984050691,
+        "activity": 6,
+        "direction": 0,
+        "dscp": 255,
+        "count": 1563,
+        "size": 1200,
+        "interval_us": 1000,
+        "delay_ms": 20
+      },
+      "hex": "05010000000400010000007000030600ff000000061b000004b0000003e800000014"
+    },
+    {
+      "name": "frame_upload_ef",
+      "notes": "A 240 kB frame upload (activity 8) as 200 datagrams of 1200 B every 2 ms, the server's side marked EF (46).",
+      "decoded": {
+        "flow_id": 4,
+        "object_id": 281474984050692,
+        "activity": 8,
+        "direction": 1,
+        "dscp": 46,
+        "count": 200,
+        "size": 1200,
+        "interval_us": 2000,
+        "delay_ms": 0
+      },
+      "hex": "050100000004000100000070000408012e00000000c8000004b0000007d000000000"
+    }
+  ]
+}

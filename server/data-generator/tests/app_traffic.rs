@@ -555,6 +555,109 @@ async fn bulk_engine_uploads_on_its_own_paced_connection() {
     .await;
 }
 
+/// udp_burst: a video segment comes down and a frame goes up as paced
+/// datagrams on the flow's UDP port, each logged per datagram on the phone
+/// with its index and the sender's timestamps; a page object beside them
+/// stays a TCP exchange.
+#[tokio::test(flavor = "multi_thread")]
+async fn udp_bursts_both_ways_beside_an_exchange() {
+    let st = AppState::default();
+    let dir = tempfile::tempdir().unwrap();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let prep = send(&st, "POST", "/internal/generators", Some(json!({
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3XB", "device_id": "dev_x", "session_id": "ses_x",
+        "flow": {"flow_id": 9, "type": "app_traffic", "profile": "script"},
+        "server_port": port, "node_log_dir": dir.path().to_str().unwrap()
+    }))).await;
+    let gid = prep["generator_id"].as_str().unwrap().to_string();
+    let act = |at_ms, kind: &str, bytes, rate_kbps, activity: &str| AppAction {
+        at_ms,
+        kind: kind.into(),
+        bytes,
+        rate_kbps: Some(rate_kbps),
+        activity: Some(activity.into()),
+        ..AppAction::default()
+    };
+    let code = fieldtest_core::packet::app_activity_code;
+    let cfg = AppTraffic {
+        server: format!("127.0.0.1:{port}"),
+        flow_id: 9,
+        profile: "script".into(),
+        workers: 1,
+        seed: 1,
+        scale: 1.0,
+        // 120 kB down at 960 kbit/s: 100 datagrams of 1200 B, 10 ms apart;
+        // 24 kB up at 960 kbit/s: 20 datagrams
+        actions: vec![
+            act(0, "down", 120_000, 960, "video_chunk"),
+            act(0, "up", 24_000, 960, "photo_upload"),
+            act(0, "down", 30_000, 10_000, "web_object"),
+        ],
+        placement: app_traffic::Placement::Device,
+        log: Some(app_log(dir.path())),
+        open: None,
+        engines: [
+            (code("video_chunk"), app_traffic::Engine::UdpBurst),
+            (code("photo_upload"), app_traffic::Engine::UdpBurst),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    let (sink, mut rx, _) = packet_channel(1 << 16);
+    let stop = AtomicBool::new(false);
+    let tally = Counters::default();
+    std::thread::scope(|s| {
+        s.spawn(|| app_traffic::run(&cfg, sink, &tally, &stop));
+        std::thread::sleep(Duration::from_millis(3000));
+        stop.store(true, Ordering::Release);
+    });
+    let ev = app_events(&dir.path().join("app_events_0009.parquet"));
+    let by = |a: &str| ev.iter().find(|r| r.s("activity") == a).unwrap();
+    let video = by("video_chunk");
+    assert_eq!((video.s("engine"), video.s("outcome")), ("udp_burst", "ok"));
+    assert_eq!((video.u("plan_packets"), video.u("packets")), (100, 100));
+    let took = (video.u("done_mono_ns") - video.u("start_mono_ns")) as f64 / 1e6;
+    assert!((950.0..1600.0).contains(&took), "paced at 10 ms: {took} ms");
+    let up = by("photo_upload");
+    assert_eq!((up.s("engine"), up.s("outcome")), ("udp_burst", "ok"));
+    assert_eq!(
+        (up.u("plan_packets"), up.u("packets")),
+        (20, 20),
+        "the server's ack"
+    );
+    assert_eq!(by("web_object").s("engine"), "exchange");
+    // the phone's rows: one per datagram, indexed, with the sender's times
+    let mut rows = vec![];
+    while let Ok(r) = rx.pop() {
+        rows.push(r);
+    }
+    let video_rx: Vec<_> = rows
+        .iter()
+        .filter(|r| r.timing.app_activity == Some("video_chunk"))
+        .collect();
+    assert_eq!(video_rx.len(), 100);
+    assert!(video_rx.iter().all(|r| r.direction == Direction::Received
+        && r.sender.is_some()
+        && r.timing.app_packet_index.is_some()));
+    let mut idx: Vec<u32> = video_rx
+        .iter()
+        .map(|r| r.timing.app_packet_index.unwrap())
+        .collect();
+    idx.sort();
+    assert_eq!(idx, (0..100).collect::<Vec<_>>());
+    send(
+        &st,
+        "POST",
+        &format!("/internal/generators/{gid}/stop"),
+        None,
+    )
+    .await;
+}
+
 /// A test that ends mid-object logs it as `stopped`: started, never done.
 #[tokio::test(flavor = "multi_thread")]
 async fn stopping_mid_object_logs_stopped() {

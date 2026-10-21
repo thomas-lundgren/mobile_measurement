@@ -300,6 +300,7 @@ public final class Contract {
 
         public static final String EXCHANGE = "exchange";
         public static final String BULK = "bulk";
+        public static final String UDP_BURST = "udp_burst";
     }
 
     /** enums.yaml app_outcomes */

@@ -44,7 +44,11 @@ opaque bytes with a transport-level sequence).
 | `0x02` | `Realtime` | v1: 28 B (`RealtimePacket`) | [`realtime.md`](realtime.md) |
 | `0x03` | `DscpProbe` | v1: 24 B (`DscpProbePacket`) | [`dscp_probe.md`](dscp_probe.md) |
 | `0x04` | `AppRequest` | v1: 22 B (`AppRequest`), v2: 42 B (`AppExchange`) | [`app_request.md`](app_request.md) |
-| `0x05` – `0x7f` | reserved | — | — |
+| `0x05` | `AppBurstRequest` | v1: 32 B (`AppBurstRequest`) | [`app_burst.md`](app_burst.md) |
+| `0x06` | `AppBurstData` | v1: 36 B (`AppBurstData`) | [`app_burst.md`](app_burst.md) |
+| `0x07` | `AppBurstEnd` | v1: 16 B (`AppBurstEnd`) | [`app_burst.md`](app_burst.md) |
+| `0x08` | `AppBurstAck` | v1: 16 B (`AppBurstAck`) | [`app_burst.md`](app_burst.md) |
+| `0x09` – `0x7f` | reserved | — | — |
 | `0x80` – `0xff` | private | — | — |
 <!-- END GENERATED: registry -->
 

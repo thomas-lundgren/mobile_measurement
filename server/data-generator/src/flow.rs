@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use fieldtest_core::burst;
 pub use fieldtest_core::endpoint::Counters;
 use fieldtest_core::endpoint::{self, RealtimeStream};
 use fieldtest_core::exchange;
@@ -400,9 +401,13 @@ pub fn spawn_bulk_tcp(
 /// app_traffic object server: accepts any number of UE connections and runs the
 /// request/response engine's server side on each (`fieldtest_core::exchange`):
 /// read the upload, wait the think time, send the response (paced when asked)
-/// or acknowledge. Rows carry the object id, activity and sizes, like the UE's.
+/// or acknowledge. On the same port over UDP it serves bursts
+/// (`fieldtest_core::burst`). Rows carry the object id, activity and sizes,
+/// like the UE's.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_app_server(
     listener: TcpListener,
+    udp: UdpSocket,
     sink: LogSink,
     writer: WriterHandle,
     flow_id: u32,
@@ -415,6 +420,19 @@ pub fn spawn_app_server(
         listener.set_nonblocking(true).ok();
         let sink = Mutex::new(sink);
         thread::scope(|s| {
+            let (sink_b, counters_b, stop_b) = (&sink, &*counters, &*stop);
+            s.spawn(move || {
+                burst::serve(&udp, stop_b, &|io, activity| {
+                    sink_b
+                        .lock()
+                        .unwrap()
+                        .push(PacketRow::burst(flow_id, activity, &io));
+                    match io.direction {
+                        Direction::Sent => counters_b.sent(io.size as u64),
+                        Direction::Received => counters_b.received(io.size as u64),
+                    }
+                })
+            });
             while !stop.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((conn, addr)) => {

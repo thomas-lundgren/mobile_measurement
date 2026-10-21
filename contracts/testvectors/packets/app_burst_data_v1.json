@@ -1,0 +1,34 @@
+{
+  "packet_type": "AppBurstData",
+  "version": 1,
+  "description": "Golden vectors for AppBurstData (pkt_t=0x06, ver=0x01), 38-byte header, zero-padded to the burst's size. See contracts/packets/app_burst.md. Layout: pkt_t(1) ver(1) flow_id(4) object_id(8) index(4) count(4) send_mono_ns(8) send_utc_ns(8).",
+  "cases": [
+    {
+      "name": "first_of_segment",
+      "notes": "Datagram 0 of the video segment burst.",
+      "decoded": {
+        "flow_id": 4,
+        "object_id": 281474984050691,
+        "index": 0,
+        "count": 1563,
+        "send_mono_ns": 81115870780858,
+        "send_utc_ns": 1792556320539545262
+      },
+      "hex": "0601000000040001000000700003000000000000061b000049c642a9ddba18e07079e5a40eae"
+    },
+    {
+      "name": "last_padded_to_64",
+      "notes": "The last datagram, padded with zeros to 64 bytes (a burst of small datagrams).",
+      "decoded": {
+        "flow_id": 4,
+        "object_id": 281474984050691,
+        "index": 1562,
+        "count": 1563,
+        "send_mono_ns": 81117433780858,
+        "send_utc_ns": 1792556322102545262
+      },
+      "trailing_pad_bytes": 26,
+      "hex": "06010000000400010000007000030000061a0000061b000049c69fd35a7a18e0707a42cd8b6e0000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

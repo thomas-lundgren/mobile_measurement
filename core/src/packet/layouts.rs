@@ -8,6 +8,10 @@ pub const PKT_PROBE: u8 = 0x01;
 pub const PKT_REALTIME: u8 = 0x02;
 pub const PKT_DSCP_PROBE: u8 = 0x03;
 pub const PKT_APP_REQUEST: u8 = 0x04;
+pub const PKT_APP_BURST_REQUEST: u8 = 0x05;
+pub const PKT_APP_BURST_DATA: u8 = 0x06;
+pub const PKT_APP_BURST_END: u8 = 0x07;
+pub const PKT_APP_BURST_ACK: u8 = 0x08;
 /// Per-type format versions (`ver`).
 pub const VER_1: u8 = 0x01;
 pub const VER_2: u8 = 0x02;
@@ -303,6 +307,239 @@ impl AppExchange {
     }
 }
 
+/// App-traffic UDP burst, phone to server: announces one object moved as `count` paced datagrams of `size` bytes. Downlink: the server waits `delay_ms`, then sends them; uplink: the phone sends them, then an `AppBurstEnd`.
+///
+/// `pkt_t = 0x05`, `ver = 0x01`: 32-byte core, 34 on the wire. Spec: `contracts/packets/app_burst.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppBurstRequest {
+    /// Server-assigned per `RUN_TEST`.
+    pub flow_id: u32,
+    /// As `AppExchange`: the `sequence_number` of every row of this object.
+    pub object_id: u64,
+    /// Activity code (`enums.yaml` app_activities).
+    pub activity: u8,
+    /// `0` = downlink (the server sends), `1` = uplink (the phone sends).
+    pub direction: u8,
+    /// DSCP (0–63) to mark the server's datagrams with; `0xFF` = unmarked.
+    pub dscp: u8,
+    /// Datagrams in the burst.
+    pub count: u32,
+    /// UDP payload bytes per datagram (an `AppBurstData` header, zero-padded).
+    pub size: u32,
+    /// Spacing between datagrams (µs): the pacing.
+    pub interval_us: u32,
+    /// Downlink: server think time before the first datagram.
+    pub delay_ms: u32,
+}
+
+impl AppBurstRequest {
+    pub const PKT_T: u8 = PKT_APP_BURST_REQUEST;
+    pub const VER: u8 = VER_1;
+    pub const CORE_LEN: usize = 32;
+    pub const WIRE_LEN: usize = 34;
+
+    pub fn to_bytes(&self) -> [u8; Self::WIRE_LEN] {
+        let mut b = [0u8; Self::WIRE_LEN];
+        b[0] = Self::PKT_T;
+        b[1] = Self::VER;
+        b[2..6].copy_from_slice(&self.flow_id.to_be_bytes());
+        b[6..14].copy_from_slice(&self.object_id.to_be_bytes());
+        b[14] = self.activity;
+        b[15] = self.direction;
+        b[16] = self.dscp;
+        // _reserved: reserved, 0
+        b[18..22].copy_from_slice(&self.count.to_be_bytes());
+        b[22..26].copy_from_slice(&self.size.to_be_bytes());
+        b[26..30].copy_from_slice(&self.interval_us.to_be_bytes());
+        b[30..34].copy_from_slice(&self.delay_ms.to_be_bytes());
+        b
+    }
+
+    /// Decode from a buffer that begins with the 2-byte header; bytes
+    /// beyond the core are ignored.
+    pub fn decode(buf: &[u8]) -> Result<Self, PacketError> {
+        if buf.len() < 2 {
+            return Err(PacketError::ShortBuffer);
+        }
+        if buf[0] != Self::PKT_T || buf[1] != Self::VER {
+            return Err(PacketError::UnknownType(buf[0], buf[1]));
+        }
+        if buf.len() < Self::WIRE_LEN {
+            return Err(PacketError::ShortBuffer);
+        }
+        Ok(Self {
+            flow_id: u32::from_be_bytes(buf[2..6].try_into().unwrap()),
+            object_id: u64::from_be_bytes(buf[6..14].try_into().unwrap()),
+            activity: buf[14],
+            direction: buf[15],
+            dscp: buf[16],
+            count: u32::from_be_bytes(buf[18..22].try_into().unwrap()),
+            size: u32::from_be_bytes(buf[22..26].try_into().unwrap()),
+            interval_us: u32::from_be_bytes(buf[26..30].try_into().unwrap()),
+            delay_ms: u32::from_be_bytes(buf[30..34].try_into().unwrap()),
+        })
+    }
+}
+
+/// One datagram of a UDP burst, either direction; zero-padded to the burst's `size`.
+///
+/// `pkt_t = 0x06`, `ver = 0x01`: 36-byte core, 38 on the wire. Spec: `contracts/packets/app_burst.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppBurstData {
+    /// Server-assigned per `RUN_TEST`.
+    pub flow_id: u32,
+    /// The burst's object.
+    pub object_id: u64,
+    /// Position in the burst, from 0.
+    pub index: u32,
+    /// Datagrams in the burst.
+    pub count: u32,
+    /// Sender's `CLOCK_MONOTONIC` at transmit.
+    pub send_mono_ns: u64,
+    /// Sender's `CLOCK_REALTIME` at transmit.
+    pub send_utc_ns: u64,
+}
+
+impl AppBurstData {
+    pub const PKT_T: u8 = PKT_APP_BURST_DATA;
+    pub const VER: u8 = VER_1;
+    pub const CORE_LEN: usize = 36;
+    pub const WIRE_LEN: usize = 38;
+
+    pub fn to_bytes(&self) -> [u8; Self::WIRE_LEN] {
+        let mut b = [0u8; Self::WIRE_LEN];
+        b[0] = Self::PKT_T;
+        b[1] = Self::VER;
+        b[2..6].copy_from_slice(&self.flow_id.to_be_bytes());
+        b[6..14].copy_from_slice(&self.object_id.to_be_bytes());
+        b[14..18].copy_from_slice(&self.index.to_be_bytes());
+        b[18..22].copy_from_slice(&self.count.to_be_bytes());
+        b[22..30].copy_from_slice(&self.send_mono_ns.to_be_bytes());
+        b[30..38].copy_from_slice(&self.send_utc_ns.to_be_bytes());
+        b
+    }
+
+    /// Decode from a buffer that begins with the 2-byte header; bytes
+    /// beyond the core are ignored.
+    pub fn decode(buf: &[u8]) -> Result<Self, PacketError> {
+        if buf.len() < 2 {
+            return Err(PacketError::ShortBuffer);
+        }
+        if buf[0] != Self::PKT_T || buf[1] != Self::VER {
+            return Err(PacketError::UnknownType(buf[0], buf[1]));
+        }
+        if buf.len() < Self::WIRE_LEN {
+            return Err(PacketError::ShortBuffer);
+        }
+        Ok(Self {
+            flow_id: u32::from_be_bytes(buf[2..6].try_into().unwrap()),
+            object_id: u64::from_be_bytes(buf[6..14].try_into().unwrap()),
+            index: u32::from_be_bytes(buf[14..18].try_into().unwrap()),
+            count: u32::from_be_bytes(buf[18..22].try_into().unwrap()),
+            send_mono_ns: u64::from_be_bytes(buf[22..30].try_into().unwrap()),
+            send_utc_ns: u64::from_be_bytes(buf[30..38].try_into().unwrap()),
+        })
+    }
+}
+
+/// Uplink burst, phone to server, after its last datagram: how many it sent. Repeated until acknowledged.
+///
+/// `pkt_t = 0x07`, `ver = 0x01`: 16-byte core, 18 on the wire. Spec: `contracts/packets/app_burst.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppBurstEnd {
+    /// Server-assigned per `RUN_TEST`.
+    pub flow_id: u32,
+    /// The burst's object.
+    pub object_id: u64,
+    /// Datagrams the phone sent.
+    pub sent: u32,
+}
+
+impl AppBurstEnd {
+    pub const PKT_T: u8 = PKT_APP_BURST_END;
+    pub const VER: u8 = VER_1;
+    pub const CORE_LEN: usize = 16;
+    pub const WIRE_LEN: usize = 18;
+
+    pub fn to_bytes(&self) -> [u8; Self::WIRE_LEN] {
+        let mut b = [0u8; Self::WIRE_LEN];
+        b[0] = Self::PKT_T;
+        b[1] = Self::VER;
+        b[2..6].copy_from_slice(&self.flow_id.to_be_bytes());
+        b[6..14].copy_from_slice(&self.object_id.to_be_bytes());
+        b[14..18].copy_from_slice(&self.sent.to_be_bytes());
+        b
+    }
+
+    /// Decode from a buffer that begins with the 2-byte header; bytes
+    /// beyond the core are ignored.
+    pub fn decode(buf: &[u8]) -> Result<Self, PacketError> {
+        if buf.len() < 2 {
+            return Err(PacketError::ShortBuffer);
+        }
+        if buf[0] != Self::PKT_T || buf[1] != Self::VER {
+            return Err(PacketError::UnknownType(buf[0], buf[1]));
+        }
+        if buf.len() < Self::WIRE_LEN {
+            return Err(PacketError::ShortBuffer);
+        }
+        Ok(Self {
+            flow_id: u32::from_be_bytes(buf[2..6].try_into().unwrap()),
+            object_id: u64::from_be_bytes(buf[6..14].try_into().unwrap()),
+            sent: u32::from_be_bytes(buf[14..18].try_into().unwrap()),
+        })
+    }
+}
+
+/// Server to phone, answering an `AppBurstEnd`: how many of the burst's datagrams arrived.
+///
+/// `pkt_t = 0x08`, `ver = 0x01`: 16-byte core, 18 on the wire. Spec: `contracts/packets/app_burst.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppBurstAck {
+    /// Server-assigned per `RUN_TEST`.
+    pub flow_id: u32,
+    /// The burst's object.
+    pub object_id: u64,
+    /// Datagrams the server received.
+    pub received: u32,
+}
+
+impl AppBurstAck {
+    pub const PKT_T: u8 = PKT_APP_BURST_ACK;
+    pub const VER: u8 = VER_1;
+    pub const CORE_LEN: usize = 16;
+    pub const WIRE_LEN: usize = 18;
+
+    pub fn to_bytes(&self) -> [u8; Self::WIRE_LEN] {
+        let mut b = [0u8; Self::WIRE_LEN];
+        b[0] = Self::PKT_T;
+        b[1] = Self::VER;
+        b[2..6].copy_from_slice(&self.flow_id.to_be_bytes());
+        b[6..14].copy_from_slice(&self.object_id.to_be_bytes());
+        b[14..18].copy_from_slice(&self.received.to_be_bytes());
+        b
+    }
+
+    /// Decode from a buffer that begins with the 2-byte header; bytes
+    /// beyond the core are ignored.
+    pub fn decode(buf: &[u8]) -> Result<Self, PacketError> {
+        if buf.len() < 2 {
+            return Err(PacketError::ShortBuffer);
+        }
+        if buf[0] != Self::PKT_T || buf[1] != Self::VER {
+            return Err(PacketError::UnknownType(buf[0], buf[1]));
+        }
+        if buf.len() < Self::WIRE_LEN {
+            return Err(PacketError::ShortBuffer);
+        }
+        Ok(Self {
+            flow_id: u32::from_be_bytes(buf[2..6].try_into().unwrap()),
+            object_id: u64::from_be_bytes(buf[6..14].try_into().unwrap()),
+            received: u32::from_be_bytes(buf[14..18].try_into().unwrap()),
+        })
+    }
+}
+
 #[cfg(test)]
 mod golden {
     //! Each layout against its hand-authored vectors: the decoded values
@@ -435,6 +672,95 @@ mod golden {
             );
             assert_eq!(got, want, "{name}: encode");
             assert_eq!(AppExchange::decode(&want).unwrap(), p, "{name}: decode");
+        }
+    }
+
+    #[test]
+    fn app_burst_request_v1() {
+        for case in cases("app_burst_request_v1.json") {
+            let (d, name) = (&case["decoded"], case["name"].as_str().unwrap());
+            let p = AppBurstRequest {
+                flow_id: d["flow_id"].as_u64().unwrap() as u32,
+                object_id: d["object_id"].as_u64().unwrap(),
+                activity: d["activity"].as_u64().unwrap() as u8,
+                direction: d["direction"].as_u64().unwrap() as u8,
+                dscp: d["dscp"].as_u64().unwrap() as u8,
+                count: d["count"].as_u64().unwrap() as u32,
+                size: d["size"].as_u64().unwrap() as u32,
+                interval_us: d["interval_us"].as_u64().unwrap() as u32,
+                delay_ms: d["delay_ms"].as_u64().unwrap() as u32,
+            };
+            let want = bytes(case["hex"].as_str().unwrap());
+            let mut got = p.to_bytes().to_vec();
+            got.resize(
+                got.len() + case["trailing_pad_bytes"].as_u64().unwrap_or(0) as usize,
+                0,
+            );
+            assert_eq!(got, want, "{name}: encode");
+            assert_eq!(AppBurstRequest::decode(&want).unwrap(), p, "{name}: decode");
+        }
+    }
+
+    #[test]
+    fn app_burst_data_v1() {
+        for case in cases("app_burst_data_v1.json") {
+            let (d, name) = (&case["decoded"], case["name"].as_str().unwrap());
+            let p = AppBurstData {
+                flow_id: d["flow_id"].as_u64().unwrap() as u32,
+                object_id: d["object_id"].as_u64().unwrap(),
+                index: d["index"].as_u64().unwrap() as u32,
+                count: d["count"].as_u64().unwrap() as u32,
+                send_mono_ns: d["send_mono_ns"].as_u64().unwrap(),
+                send_utc_ns: d["send_utc_ns"].as_u64().unwrap(),
+            };
+            let want = bytes(case["hex"].as_str().unwrap());
+            let mut got = p.to_bytes().to_vec();
+            got.resize(
+                got.len() + case["trailing_pad_bytes"].as_u64().unwrap_or(0) as usize,
+                0,
+            );
+            assert_eq!(got, want, "{name}: encode");
+            assert_eq!(AppBurstData::decode(&want).unwrap(), p, "{name}: decode");
+        }
+    }
+
+    #[test]
+    fn app_burst_end_v1() {
+        for case in cases("app_burst_end_v1.json") {
+            let (d, name) = (&case["decoded"], case["name"].as_str().unwrap());
+            let p = AppBurstEnd {
+                flow_id: d["flow_id"].as_u64().unwrap() as u32,
+                object_id: d["object_id"].as_u64().unwrap(),
+                sent: d["sent"].as_u64().unwrap() as u32,
+            };
+            let want = bytes(case["hex"].as_str().unwrap());
+            let mut got = p.to_bytes().to_vec();
+            got.resize(
+                got.len() + case["trailing_pad_bytes"].as_u64().unwrap_or(0) as usize,
+                0,
+            );
+            assert_eq!(got, want, "{name}: encode");
+            assert_eq!(AppBurstEnd::decode(&want).unwrap(), p, "{name}: decode");
+        }
+    }
+
+    #[test]
+    fn app_burst_ack_v1() {
+        for case in cases("app_burst_ack_v1.json") {
+            let (d, name) = (&case["decoded"], case["name"].as_str().unwrap());
+            let p = AppBurstAck {
+                flow_id: d["flow_id"].as_u64().unwrap() as u32,
+                object_id: d["object_id"].as_u64().unwrap(),
+                received: d["received"].as_u64().unwrap() as u32,
+            };
+            let want = bytes(case["hex"].as_str().unwrap());
+            let mut got = p.to_bytes().to_vec();
+            got.resize(
+                got.len() + case["trailing_pad_bytes"].as_u64().unwrap_or(0) as usize,
+                0,
+            );
+            assert_eq!(got, want, "{name}: encode");
+            assert_eq!(AppBurstAck::decode(&want).unwrap(), p, "{name}: decode");
         }
     }
 }

@@ -1,0 +1,17 @@
+{
+  "packet_type": "AppBurstAck",
+  "version": 1,
+  "description": "Golden vectors for AppBurstAck (pkt_t=0x08, ver=0x01), 18 bytes on the wire. Layout: pkt_t(1) ver(1) flow_id(4) object_id(8) received(4).",
+  "cases": [
+    {
+      "name": "frame_upload_three_lost",
+      "notes": "197 of the 200 datagrams arrived.",
+      "decoded": {
+        "flow_id": 4,
+        "object_id": 281474984050692,
+        "received": 197
+      },
+      "hex": "0801000000040001000000700004000000c5"
+    }
+  ]
+}

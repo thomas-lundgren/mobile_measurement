@@ -188,6 +188,8 @@ fn write_all(dir: &Path) -> Vec<(&'static str, PathBuf)> {
         done: None,
         bytes_up: 44,
         bytes_down: 0,
+        plan_packets: None,
+        packets: None,
         outcome: "stopped",
         new_connection: Some(true),
     };

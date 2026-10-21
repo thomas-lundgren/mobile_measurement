@@ -519,6 +519,8 @@ pub struct AppEventRow {
     pub done: Option<Timestamp>,
     pub bytes_up: u64,
     pub bytes_down: u64,
+    pub plan_packets: Option<u32>,
+    pub packets: Option<u32>,
     pub outcome: &'static str,
     pub new_connection: Option<bool>,
 }
@@ -565,6 +567,8 @@ fn app_events_schema() -> Schema {
         u64n("done_utc_ns", true),
         u64n("bytes_up", false),
         u64n("bytes_down", false),
+        Field::new("plan_packets", DataType::UInt32, true),
+        Field::new("packets", DataType::UInt32, true),
         utf8("outcome"),
         Field::new("new_connection", DataType::Boolean, true),
     ])
@@ -637,6 +641,12 @@ pub fn write_app_events(
             opt64(&|r| r.done.map(|t| t.utc_ns)),
             u64s(&|r| r.bytes_up),
             u64s(&|r| r.bytes_down),
+            Arc::new(UInt32Array::from(
+                rows.iter().map(|r| r.plan_packets).collect::<Vec<_>>(),
+            )) as _,
+            Arc::new(UInt32Array::from(
+                rows.iter().map(|r| r.packets).collect::<Vec<_>>(),
+            )) as _,
             strs(&|r| r.outcome),
             Arc::new(BooleanArray::from(
                 rows.iter().map(|r| r.new_connection).collect::<Vec<_>>(),

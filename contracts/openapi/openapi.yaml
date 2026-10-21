@@ -524,6 +524,7 @@ components:
       enum:
       - exchange
       - bulk
+      - udp_burst
     AppLoop:
       type: string
       description: How an app_traffic flow's work arrives.

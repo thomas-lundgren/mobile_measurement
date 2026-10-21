@@ -303,6 +303,7 @@ app_step_kinds:
 app_engines:
   - exchange         # request/response on the user's pooled connections (default)
   - bulk             # the same exchange on a connection of its own, opened for it
+  - udp_burst        # paced UDP datagrams (contracts/packets/app_burst.md)
 
 # ---------------------------------------------------------------------------
 # How an app object ended (app_events.parquet outcome).

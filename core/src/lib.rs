@@ -8,6 +8,7 @@
 pub mod app_traffic;
 pub mod auth;
 pub mod aux_log;
+pub mod burst;
 pub mod endpoint;
 pub mod exchange;
 pub mod log_writer;

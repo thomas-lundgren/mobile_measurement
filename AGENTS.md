@@ -395,7 +395,8 @@ INITIALIZING → REGISTERING → IDLE → WAITING_FOR_TEST → PREPARING → RUN
 
 The realtime UDP and bulk TCP send/receive loops exist once, in
 `core/src/endpoint.rs`, and the request/response engine behind app traffic in
-`core/src/exchange.rs` (UE `transfer`, server `serve`); both are used by the UE
+`core/src/exchange.rs` (UE `transfer`, server `serve`) and the paced UDP
+burst engine in `core/src/burst.rs` (UE `run`, server `serve`); all are used by the UE
 engine and the server's data-generator (symmetric peers). Application
 workloads (`core/src/app_traffic`) only decide what to transfer and when —
 see `planning/app_workload_layering.md`. The engines report every read and

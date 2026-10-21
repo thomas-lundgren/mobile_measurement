@@ -21,7 +21,7 @@ import com.google.gson.annotations.SerializedName
 /**
  * 
  *
- * Values: exchange,bulk
+ * Values: exchange,bulk,udp_burst
  */
 
 enum class AppEngine(val value: kotlin.String) {
@@ -30,7 +30,10 @@ enum class AppEngine(val value: kotlin.String) {
     exchange("exchange"),
 
     @SerializedName(value = "bulk")
-    bulk("bulk");
+    bulk("bulk"),
+
+    @SerializedName(value = "udp_burst")
+    udp_burst("udp_burst");
 
     /**
      * Override [toString()] to avoid using the enum variable name as the value, and instead use

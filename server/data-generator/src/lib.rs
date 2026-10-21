@@ -186,8 +186,12 @@ async fn prepare(
                     )
                 })?;
             let port = listener.local_addr().map_err(internal)?.port();
+            // the same port over UDP for udp_burst objects
+            let udp = std::net::UdpSocket::bind(("0.0.0.0", port))
+                .map_err(|e| (StatusCode::CONFLICT, format!("bind udp {port}: {e}")))?;
             let h = flow::spawn_app_server(
                 listener,
+                udp,
                 sink,
                 writer,
                 flow_id,

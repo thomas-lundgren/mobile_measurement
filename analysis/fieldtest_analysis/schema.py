@@ -50,6 +50,7 @@ PACKETS = [
     "app_activity",
     "app_object_bytes",
     "app_up_bytes",
+    "app_packet_index",
     "dscp_sent",
     "dscp_recv",
 ]
@@ -163,6 +164,8 @@ APP_EVENTS = [
     "done_utc_ns",
     "bytes_up",
     "bytes_down",
+    "plan_packets",
+    "packets",
     "outcome",
     "new_connection",
 ]
