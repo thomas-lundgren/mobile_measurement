@@ -29,6 +29,6 @@ pub mod graph;
 mod model;
 mod scheduler;
 
-pub use executor::Outcome;
+pub use executor::{Engine, Outcome};
 pub use model::*;
 pub use scheduler::{run, AppLog, AppTraffic, OpenLoop, Operation};

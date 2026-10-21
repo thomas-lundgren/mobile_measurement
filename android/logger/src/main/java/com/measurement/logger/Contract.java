@@ -294,6 +294,14 @@ public final class Contract {
         public static final String FETCH = "fetch";
     }
 
+    /** enums.yaml app_engines */
+    public static final class AppEngines {
+        private AppEngines() {}
+
+        public static final String EXCHANGE = "exchange";
+        public static final String BULK = "bulk";
+    }
+
     /** enums.yaml app_outcomes */
     public static final class AppOutcomes {
         private AppOutcomes() {}

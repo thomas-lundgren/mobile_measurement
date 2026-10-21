@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use super::executor::{self, Done, Exec, Outcome};
+use super::executor::{self, Done, Engine, Exec, Outcome};
 use super::model::Rng;
 use super::{activity_name, Agent, AppAction, Fetch, GraphNode, Placement, Step, StepMeta};
 use crate::aux_log::{self, AppEventRow, AuxContext};
@@ -48,6 +48,9 @@ pub struct AppTraffic {
     pub log: Option<AppLog>,
     /// Open loop (profiles "agent", "websearch"); none: closed loop.
     pub open: Option<OpenLoop>,
+    /// How each activity's objects move (activity code -> engine); others
+    /// use `Engine::Exchange`.
+    pub engines: std::collections::BTreeMap<u8, Engine>,
 }
 
 /// How tasks arrive in open loop.
@@ -85,6 +88,7 @@ pub struct Operation {
     pub after: Option<Vec<u64>>,
     /// Open loop: when it is due.
     pub due: Option<Timestamp>,
+    pub engine: Engine,
     pub meta: StepMeta,
     pub fetch: Fetch,
     pub parallel: usize,
@@ -175,7 +179,16 @@ fn agent(cfg: &AppTraffic, exec: &Exec, rows: &Mutex<Vec<AppEventRow>>, w: u32, 
             }
         };
         episode += 1;
-        let ops = operations(w, episode, &nodes, parallel, graph, Timestamp::now(), None);
+        let ops = operations(
+            cfg,
+            w,
+            episode,
+            &nodes,
+            parallel,
+            graph,
+            Timestamp::now(),
+            None,
+        );
         let deps = nodes.into_iter().map(|n| n.deps).collect();
         let done = executor::run_graph(exec, &pool, &ops, deps, parallel);
         log(cfg, rows, &ops, done);
@@ -219,7 +232,7 @@ fn agent_open(
                 mono_ns: arrived.mono_ns + o.as_nanos() as u64,
                 utc_ns: arrived.utc_ns + o.as_nanos() as u64,
             };
-            let mut ops = operations(w, episode, &nodes, nodes.len(), true, arrived, None);
+            let mut ops = operations(cfg, w, episode, &nodes, nodes.len(), true, arrived, None);
             for (op, o) in ops.iter_mut().zip(&offsets) {
                 op.due = Some(due_ts(*o));
             }
@@ -267,7 +280,9 @@ fn offsets(nodes: &[GraphNode]) -> Vec<Duration> {
 
 /// A step's operations. object_id: agent | episode (page, sync, segment,
 /// task...) | object.
+#[allow(clippy::too_many_arguments)]
 fn operations(
+    cfg: &AppTraffic,
     w: u32,
     episode: u64,
     nodes: &[GraphNode],
@@ -287,6 +302,11 @@ fn operations(
             after_episode: (episode > 1).then(|| episode - 1),
             after: graph.then(|| n.deps.iter().map(|&j| base | j as u64).collect()),
             due,
+            engine: cfg
+                .engines
+                .get(&n.fetch.activity)
+                .copied()
+                .unwrap_or(Engine::Exchange),
             meta: n.meta,
             fetch: n.fetch,
             parallel,
@@ -311,6 +331,7 @@ fn row(flow_id: u32, op: &Operation, d: Done) -> AppEventRow {
         step: op.meta.step,
         step_kind: op.meta.kind,
         activity: activity_name(f.activity),
+        engine: op.engine.as_str(),
         episode: op.episode,
         after_episode: op.after_episode,
         after_objects: op.after.clone(),

@@ -243,7 +243,7 @@ def tasks(td) -> list[dict] | None:
 
 
 def intent(td) -> list[dict] | None:
-    """Per activity, planned against observed: how long objects waited for a
+    """Per activity and engine, planned against observed: how long objects waited for a
     connection (ready → start; closed loop: ready is when the burst was
     planned, in a task graph when the last object it waited for ended), how late they started (due →
     start; open loop), the server's planned think time against the observed
@@ -262,9 +262,9 @@ def intent(td) -> list[dict] | None:
             return r["planned_mono_ns"]
         return max(done.get(d, np.nan) for d in deps)
 
-    ev = ev.assign(ready_mono_ns=ev.apply(ready, axis=1))
+    ev = ev.assign(ready_mono_ns=ev.apply(ready, axis=1), engine=ev["engine"].fillna("exchange"))
     out = []
-    for act, a in ev.groupby("activity"):
+    for (act, engine), a in ev.groupby(["activity", "engine"]):
         started = a[a["start_mono_ns"].notna()]
         ok = a[a["outcome"] == "ok"]
         first = _ms(ok["start_mono_ns"], ok["first_byte_mono_ns"])
@@ -273,7 +273,7 @@ def intent(td) -> list[dict] | None:
         plan_stream = pd.to_numeric(paced["plan_down_bytes"]) * 8 / pd.to_numeric(paced["plan_rate_bps"]) * 1e3
         obs_stream = _ms(paced["first_byte_mono_ns"], paced["done_mono_ns"])
         out.append({
-            "activity": act, "objects": len(a),
+            "activity": act, "engine": engine, "objects": len(a),
             "outcomes": {k: int(v) for k, v in a["outcome"].value_counts().items()},
             "conn_wait_ms": stats.pcts(_ms(started["ready_mono_ns"], started["start_mono_ns"]), (50, 90), nd=0)
             if started["due_mono_ns"].isna().all() else None,

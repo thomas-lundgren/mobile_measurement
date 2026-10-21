@@ -1,6 +1,6 @@
 //! `contracts/schemas/test_plan.schema.json` — the port-less plan + bindings.
 
-use crate::enums::Direction;
+use crate::enums::{AppEngine, Direction};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -97,6 +97,10 @@ pub enum Flow {
         /// profiles "agent", "websearch": where the tools run (default device).
         #[serde(skip_serializing_if = "Option::is_none", default)]
         placement: Option<AppToolPlacement>,
+        /// How each activity's objects move (activity name -> engine);
+        /// unlisted activities use exchange.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        engines: Option<std::collections::BTreeMap<String, AppEngine>>,
         /// profiles "agent", "websearch": closed (default) or open loop.
         #[serde(rename = "loop", skip_serializing_if = "Option::is_none", default)]
         loop_mode: Option<AppLoop>,

@@ -220,7 +220,8 @@
         sent) or started <b>late</b> (open loop: due → request sent), the
         server's <b>planned think time</b> (an LLM's time to first token, a tool's latency) against the observed
         <b>first byte</b> — what lies <b>beyond the think time</b> is network and upload — and for paced streams
-        (token streams) their planned length against the observed one. <b>Outcomes</b>: ok, timeout, stopped (the
+        (token streams) their planned length against the observed one. <b>Engine</b>: exchange (the user's pooled
+        connections) or bulk (a connection of its own per object). <b>Outcomes</b>: ok, timeout, stopped (the
         test ended), error (connection lost), skipped (no connection).</p>
       <div class="scroll"><table id="appIntent"></table></div>
     </section>
@@ -409,11 +410,11 @@ function renderApp() {
     "No tests with the phone's task record this day.");
   const one = (p) => (p ? num(p.p50) : '<span class="muted">–</span>');
   const outs = (o) => Object.entries(o).map(([k, n]) => (k === "ok" ? `${n}` : `<span class="muted">${esc(k)}</span> ${n}`)).join(", ");
-  table($("appIntent"), [["Time"], ["Activity"], ["Outcomes"], ["Wait for connection p50 / p90 ms", "num"],
+  table($("appIntent"), [["Time"], ["Activity"], ["Engine"], ["Outcomes"], ["Wait for connection p50 / p90 ms", "num"],
     ["Late p50 / p90 ms", "num"],
     ["Think planned p50 / p90 ms", "num"], ["First byte p50 / p90 ms", "num"], ["Beyond think p50 / p90 ms", "num"],
     ["Stream planned / observed p50 ms", "num"], ["New connection", "num"], ["MB planned / moved", "num"]],
-    withLog.flatMap((t) => t.app.intent.map((a) => [when(t), esc(a.activity), outs(a.outcomes), ms(a.conn_wait_ms), ms(a.late_ms),
+    withLog.flatMap((t) => t.app.intent.map((a) => [when(t), esc(a.activity), esc(a.engine || "exchange"), outs(a.outcomes), ms(a.conn_wait_ms), ms(a.late_ms),
       ms(a.think_plan_ms), ms(a.first_byte_ms), ms(a.beyond_think_ms),
       a.stream_ms ? `${one(a.stream_plan_ms)} / ${one(a.stream_ms)}` : '<span class="muted">–</span>',
       pct(a.new_conn_share), `${num(a.mbytes_plan, 2)} / ${num(a.mbytes_moved, 2)}`])),

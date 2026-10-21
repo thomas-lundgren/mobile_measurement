@@ -20,6 +20,30 @@ use crate::log_writer::{Direction, LogSink, PacketRow};
 use crate::packet::AppExchange;
 use crate::timestamp::Timestamp;
 
+/// How an operation's bytes move (`enums.yaml` app_engines, in order).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Engine {
+    /// Request/response on the user's pooled connections.
+    Exchange,
+    /// The same exchange on a connection opened for it alone.
+    Bulk,
+}
+
+impl Engine {
+    pub const ALL: [Engine; 2] = [Self::Exchange, Self::Bulk];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Exchange => "exchange",
+            Self::Bulk => "bulk",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|e| e.as_str() == s)
+    }
+}
+
 /// How an operation ended (`enums.yaml` app_outcomes, in order).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -130,18 +154,10 @@ pub fn run_graph(
                         }
                     };
                     let Some(i) = i else { break };
-                    let taken = pool.lock().unwrap().take_one();
-                    let d = match taken {
-                        Some((mut c, fresh)) => {
-                            connected.store(true, Ordering::Release);
-                            let d = transfer(x, &mut c, &ops[i], fresh);
-                            if d.outcome == Outcome::Ok {
-                                pool.lock().unwrap().put_back(vec![c]);
-                            }
-                            d
-                        }
-                        None => Done::not_started(Outcome::Skipped),
-                    };
+                    let d = run_one(x, pool, &ops[i]);
+                    if d.start.is_some() {
+                        connected.store(true, Ordering::Release);
+                    }
                     let ok = d.outcome == Outcome::Ok;
                     {
                         let mut g = state.lock().unwrap();
@@ -205,22 +221,38 @@ pub fn run_timed(x: &Exec, pool: &Mutex<Pool>, ops: &[Operation], due: &[Instant
                     if x.stop.load(Ordering::Acquire) {
                         return Done::not_started(Outcome::Stopped);
                     }
-                    let taken = pool.lock().unwrap().take_one();
-                    match taken {
-                        Some((mut c, fresh)) => {
-                            let d = transfer(x, &mut c, op, fresh);
-                            if d.outcome == Outcome::Ok {
-                                pool.lock().unwrap().put_back(vec![c]);
-                            }
-                            d
-                        }
-                        None => Done::not_started(Outcome::Skipped),
-                    }
+                    run_one(x, pool, op)
                 })
             })
             .collect();
         runs.into_iter().map(|r| r.join().unwrap()).collect()
     })
+}
+
+/// One operation through its engine. `exchange`: an idle pooled connection
+/// (or a new one), handed back when it ended ok. `bulk`: a connection of its
+/// own, closed after. Connecting happens outside the pool's lock.
+fn run_one(x: &Exec, pool: &Mutex<Pool>, op: &Operation) -> Done {
+    let (idle, server) = {
+        let mut p = pool.lock().unwrap();
+        let idle = match op.engine {
+            Engine::Exchange => p.take_idle(),
+            Engine::Bulk => None,
+        };
+        (idle, p.server().to_string())
+    };
+    let (mut conn, fresh) = match idle {
+        Some(c) => (c, false),
+        None => match exchange::connect(&server) {
+            Ok(c) => (c, true),
+            Err(_) => return Done::not_started(Outcome::Skipped),
+        },
+    };
+    let d = transfer(x, &mut conn, op, fresh);
+    if op.engine == Engine::Exchange && d.outcome == Outcome::Ok {
+        pool.lock().unwrap().put_back(vec![conn]);
+    }
+    d
 }
 
 fn transfer(x: &Exec, conn: &mut TcpStream, op: &Operation, fresh: bool) -> Done {
@@ -287,6 +319,7 @@ mod tests {
             after_episode: None,
             after: None,
             due: None,
+            engine: Engine::Exchange,
             meta: StepMeta {
                 task: 1,
                 step: 1,
@@ -377,6 +410,71 @@ mod tests {
         // the plan's connection was reused for the search
         assert_eq!(d[0].new_connection, Some(true));
         assert_eq!(d[1].new_connection, Some(false));
+    }
+
+    /// Bulk: every operation opens a connection of its own and closes it;
+    /// nothing goes back to the pool. Exchange reuses the pooled one.
+    #[test]
+    fn bulk_opens_a_connection_per_operation() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let (sink, _rx, _) = packet_channel(1 << 14);
+        let (sink, counters, stop) = (
+            Mutex::new(sink),
+            Counters::default(),
+            AtomicBool::new(false),
+        );
+        let accepted = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|s| {
+            let (stop, accepted) = (&stop, &accepted);
+            s.spawn(move || {
+                listener.set_nonblocking(true).unwrap();
+                std::thread::scope(|s| {
+                    while !stop.load(Ordering::Acquire) {
+                        match listener.accept() {
+                            Ok((c, _)) => {
+                                accepted.fetch_add(1, Ordering::AcqRel);
+                                s.spawn(move || exchange::serve(c, stop, |_, _, _, _| {}));
+                            }
+                            Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                        }
+                    }
+                });
+            });
+            let x = Exec {
+                flow_id: 1,
+                sink: &sink,
+                counters: &counters,
+                stop,
+            };
+            let pool = Mutex::new(Pool::new(&addr, Duration::from_secs(20)));
+            let chain = |engine| -> Vec<Operation> {
+                (0..3)
+                    .map(|i| Operation {
+                        engine,
+                        ..op(i, 5_000, 0)
+                    })
+                    .collect()
+            };
+            let deps = || vec![vec![], vec![0], vec![1]];
+            let bulk = run_graph(&x, &pool, &chain(Engine::Bulk), deps(), 6);
+            assert!(bulk
+                .iter()
+                .all(|d| d.outcome == Outcome::Ok && d.new_connection == Some(true)));
+            assert!(
+                pool.lock().unwrap().take_idle().is_none(),
+                "bulk connections are not pooled"
+            );
+            assert_eq!(accepted.load(Ordering::Acquire), 3);
+            let ex = run_graph(&x, &pool, &chain(Engine::Exchange), deps(), 6);
+            let fresh: Vec<_> = ex.iter().map(|d| d.new_connection).collect();
+            assert_eq!(
+                fresh,
+                [Some(true), Some(false), Some(false)],
+                "one pooled connection, reused"
+            );
+            stop.store(true, Ordering::Release);
+        });
     }
 
     /// The search's connection is dropped: the search fails, and everything

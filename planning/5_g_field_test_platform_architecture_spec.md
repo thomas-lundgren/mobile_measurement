@@ -832,6 +832,10 @@ and how the apps themselves fare (page load time, video segment time).
   (`sequence_number`), tagged `app_activity`, `app_object_bytes` and
   `app_up_bytes`: request → first byte → completion per object, the gaps
   inside a stream, and per episode (a page view, a sync, an agent task step).
+- `engines` maps activities to how their objects move: `exchange` (default:
+  request/response on the user's pooled connections) or `bulk` (the same
+  exchange on a connection opened for that object alone). An upload with a
+  rate is paced on the phone.
 - `loop` (agent, websearch): `closed` (default) — a user starts the next
   task after the last one ended, so a slow network makes them ask for less —
   or `open`: tasks arrive at random (mean `task_interval_s`) whatever is still

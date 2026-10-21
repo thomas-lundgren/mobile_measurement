@@ -281,6 +281,7 @@
               "profile": "agent",
               "workers": 2,
               "placement": "hybrid",
+              "engines": { "web_fetch": "bulk" },
               "loop": "open",
               "task_interval_s": 30,
               "max_open_tasks": 3,

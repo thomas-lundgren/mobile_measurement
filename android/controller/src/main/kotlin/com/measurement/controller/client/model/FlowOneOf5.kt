@@ -16,6 +16,7 @@
 package com.measurement.controller.client.model
 
 import com.measurement.controller.client.model.AppAction
+import com.measurement.controller.client.model.AppEngine
 import com.measurement.controller.client.model.AppLoop
 import com.measurement.controller.client.model.AppProfile
 import com.measurement.controller.client.model.AppToolPlacement
@@ -29,6 +30,7 @@ import com.google.gson.annotations.SerializedName
  * @param profile User model: web | mail | video | social | mixed | script.
  * @param type 
  * @param actions profile \"script\" only: the timeline to run.
+ * @param engines How each activity's objects move (activity name -> engine); unlisted activities use exchange.
  * @param loop profiles \"agent\", \"websearch\": closed (default) or open loop.
  * @param maxOpenTasks loop open: unfinished tasks per user before an arriving one is dropped (default 4).
  * @param placement profiles \"agent\", \"websearch\": where the tools run (default device).
@@ -54,6 +56,10 @@ data class FlowOneOf5 (
     /* profile \"script\" only: the timeline to run. */
     @SerializedName("actions")
     val actions: kotlin.collections.List<AppAction>? = null,
+
+    /* How each activity's objects move (activity name -> engine); unlisted activities use exchange. */
+    @SerializedName("engines")
+    val engines: kotlin.collections.Map<kotlin.String, AppEngine>? = null,
 
     /* profiles \"agent\", \"websearch\": closed (default) or open loop. */
     @SerializedName("loop")

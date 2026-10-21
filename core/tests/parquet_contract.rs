@@ -171,6 +171,7 @@ fn write_all(dir: &Path) -> Vec<(&'static str, PathBuf)> {
         step: 1,
         step_kind: "llm_turn",
         activity: "llm_call",
+        engine: "exchange",
         episode: 1,
         after_episode: None,
         after_objects: Some(vec![1 << 20]),

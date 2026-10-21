@@ -502,6 +502,7 @@ pub struct AppEventRow {
     pub step: u32,
     pub step_kind: &'static str,
     pub activity: &'static str,
+    pub engine: &'static str,
     pub episode: u64,
     pub after_episode: Option<u64>,
     pub after_objects: Option<Vec<u64>>,
@@ -538,6 +539,7 @@ fn app_events_schema() -> Schema {
         u32n("step"),
         utf8("step_kind"),
         utf8("activity"),
+        utf8("engine"),
         u64n("episode", false),
         u64n("after_episode", true),
         Field::new(
@@ -601,6 +603,7 @@ pub fn write_app_events(
             u32s(&|r| r.step),
             strs(&|r| r.step_kind),
             strs(&|r| r.activity),
+            strs(&|r| r.engine),
             u64s(&|r| r.episode),
             opt64(&|r| r.after_episode),
             {

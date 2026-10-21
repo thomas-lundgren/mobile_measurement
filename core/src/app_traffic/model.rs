@@ -111,7 +111,8 @@ pub struct AppAction {
     /// "down" only: server think time before the first byte.
     #[serde(default)]
     pub delay_ms: Option<u32>,
-    /// "down" only: pace the response at this rate (a token stream).
+    /// "down": pace the response at this rate (a token stream); "up": the
+    /// phone paces the upload at this rate.
     #[serde(default)]
     pub rate_kbps: Option<u32>,
     /// "down" with rate_kbps: bytes per paced write (default 5 ms worth).
@@ -455,7 +456,11 @@ impl Agent {
                     let a = script.pop_front().unwrap();
                     let activity = activity_code(a.activity.as_deref().unwrap_or("other"));
                     let f = if a.kind == "up" {
-                        Fetch::upload(activity, a.bytes.max(1))
+                        // a rate paces the upload on the phone
+                        Fetch {
+                            rate_bps: a.rate_kbps.unwrap_or(0).saturating_mul(1000),
+                            ..Fetch::upload(activity, a.bytes.max(1))
+                        }
                     } else {
                         Fetch {
                             up: a.up_bytes.unwrap_or(0),
@@ -1337,6 +1342,10 @@ mod tests {
         assert_eq!(
             list("app_outcomes"),
             crate::app_traffic::Outcome::ALL.map(crate::app_traffic::Outcome::as_str)
+        );
+        assert_eq!(
+            list("app_engines"),
+            crate::app_traffic::Engine::ALL.map(crate::app_traffic::Engine::as_str)
         );
     }
 

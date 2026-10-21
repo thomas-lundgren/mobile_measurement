@@ -70,6 +70,7 @@ fn enums_match_yaml() {
         ("device_roles", rust_set(DeviceRole::ALL, DeviceRole::wire)),
         ("vpn_scopes", rust_set(VpnScope::ALL, VpnScope::wire)),
         ("probe_kinds", rust_set(ProbeKind::ALL, ProbeKind::wire)),
+        ("app_engines", rust_set(AppEngine::ALL, AppEngine::wire)),
     ];
 
     for (key, rust) in cases {

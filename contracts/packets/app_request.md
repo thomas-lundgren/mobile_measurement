@@ -39,7 +39,8 @@ Protocol: the server reads `up_bytes`, waits `delay_ms`, then sends
 after the think time: the reply is generated at that rate whatever the network
 does, so what a stall holds back goes out in one write when it clears (as an
 LLM server's would). With `down_bytes = 0` the server echoes the 44-byte header
-once the upload is in.
+once the upload is in; a `rate_bps` there paces the upload on the phone (the
+server ignores it).
 
 Logs: both nodes tag every row with `app_activity`, `app_object_bytes`
 (`down_bytes`) and `app_up_bytes`.

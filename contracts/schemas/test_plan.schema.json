@@ -128,6 +128,12 @@
           "enum": ["device", "cloud", "hybrid"],
           "description": "profiles agent and websearch: where the tools run (default device). device: tool calls are phone traffic, and the next LLM call sends their results up with the context. cloud: the LLM provider runs them inside the call (server-side tools); the reply stream pauses for the slowest tool, carries the results' text down (cloud_tool) and resumes with the next turn (llm_resume) without a new request, so the context goes up once per call chain. hybrid: MCP calls on the phone, web fetches in the cloud (websearch: the search in the cloud, the page fetches on the phone). Each resume costs the phone a 44-byte request a real provider would not need (a protocol artifact, outside app_up_bytes)."
         },
+        "engines": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z_]+$" },
+          "additionalProperties": { "enum": ["exchange", "bulk"] },
+          "description": "How each activity's objects move (activity name from enums.yaml app_activities -> enums.yaml app_engines); unlisted activities use exchange. exchange: request/response on the user's pooled connections. bulk: the same exchange on a connection opened for that object alone (its own handshake, slow start and congestion window; never shared or reused)."
+        },
         "loop": {
           "enum": ["closed", "open"],
           "description": "profiles agent and websearch: how work arrives (default closed). closed: a user starts the next task only after the last one ended and they read the answer, so a slow network makes them ask for less. open: tasks arrive at random (exponential gaps, mean task_interval_s) whatever is still running, and every object of a task starts when it is due (the task's arrival plus its planned offset: the dependencies' think times and transfers at a nominal 20 Mbit/s), finished dependencies or not; a task arriving while max_open_tasks are unfinished is dropped (logged skipped), so the offered load stays visible. Other profiles run closed."
@@ -150,7 +156,7 @@
               "activity": { "type": "string", "description": "Activity name for the logs (contracts/enums/enums.yaml app_activities)." },
               "up_bytes":    { "type": "integer", "minimum": 0, "description": "kind down: bytes sent up first (request body, LLM context)." },
               "delay_ms":    { "type": "integer", "minimum": 0, "description": "kind down: server think time before the first byte (LLM time to first token, tool latency)." },
-              "rate_kbps":   { "type": "integer", "minimum": 1, "description": "kind down: pace the response at this rate, like a token stream; what a stall holds back follows in one burst." },
+              "rate_kbps":   { "type": "integer", "minimum": 1, "description": "kind down: pace the response at this rate, like a token stream; what a stall holds back follows in one burst. kind up: the phone paces the upload at this rate." },
               "chunk_bytes": { "type": "integer", "minimum": 1, "description": "kind down with rate_kbps: bytes per paced write (default 5 ms worth)." }
             }
           }

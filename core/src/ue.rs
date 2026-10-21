@@ -94,6 +94,9 @@ pub struct UeFlow {
     pub actions: Option<Vec<crate::app_traffic::AppAction>>,
     #[serde(default)]
     pub placement: Option<String>,
+    /// app_traffic: activity name -> "exchange" | "bulk".
+    #[serde(default)]
+    pub engines: Option<std::collections::BTreeMap<String, String>>,
     /// app_traffic "closed" (default) | "open".
     #[serde(default, rename = "loop")]
     pub loop_mode: Option<String>,
@@ -305,6 +308,17 @@ fn spawn_flow(
                             flow.placement.as_deref().unwrap_or("device"),
                         ),
                         log: Some(app_log.clone()),
+                        engines: flow
+                            .engines
+                            .iter()
+                            .flatten()
+                            .filter_map(|(act, e)| {
+                                Some((
+                                    crate::packet::app_activity_code(act),
+                                    crate::app_traffic::Engine::parse(e)?,
+                                ))
+                            })
+                            .collect(),
                         open: (flow.loop_mode.as_deref() == Some("open")).then(|| {
                             crate::app_traffic::OpenLoop {
                                 task_interval_s: flow.task_interval_s.unwrap_or(30.0),

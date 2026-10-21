@@ -519,6 +519,11 @@ components:
       enum:
       - down
       - up
+    AppEngine:
+      type: string
+      enum:
+      - exchange
+      - bulk
     AppLoop:
       type: string
       description: How an app_traffic flow's work arrives.
@@ -1041,6 +1046,17 @@ components:
             items:
               $ref: '#/components/schemas/AppAction'
             description: 'profile "script" only: the timeline to run.'
+          engines:
+            type:
+            - object
+            - 'null'
+            description: |-
+              How each activity's objects move (activity name -> engine);
+              unlisted activities use exchange.
+            additionalProperties:
+              $ref: '#/components/schemas/AppEngine'
+            propertyNames:
+              type: string
           flow_id:
             type: integer
             format: int32

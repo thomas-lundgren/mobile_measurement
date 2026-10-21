@@ -37,7 +37,7 @@ use utoipa::OpenApi;
         Capability, RadioCapability, QosCapability, MobilityCapability, ServingCellField,
         TimestampSource, LoggingConfig, RadioLogging, QosLogging, MobilityLogging, GateableEvent,
         // test plan / orchestration
-        TestPlan, Flow, AppProfile, AppAction, AppActionKind, AppToolPlacement, AppLoop, FlowBinding, CreateTestRequest, RunTestPayload, TestStatus,
+        TestPlan, Flow, AppProfile, AppAction, AppActionKind, AppToolPlacement, AppLoop, AppEngine, FlowBinding, CreateTestRequest, RunTestPayload, TestStatus,
         DeviceSummary, TestSummary, LoggingConfigAck,
         // device status / command
         DeviceStatus, ServerTime, DualClock, Battery, Storage, RadioSnapshot, DeviceCommand,

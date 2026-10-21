@@ -141,6 +141,7 @@ APP_EVENTS = [
     "step",
     "step_kind",
     "activity",
+    "engine",
     "episode",
     "after_episode",
     "after_objects",

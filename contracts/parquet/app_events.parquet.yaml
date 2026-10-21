@@ -25,6 +25,7 @@ columns:
   - { name: step,      type: uint32, nullable: false, doc: "The burst's position in its task, from 1." }
   - { name: step_kind, type: utf8,   nullable: false, doc: "enums.yaml app_step_kinds." }
   - { name: activity,  type: utf8,   nullable: false, doc: "enums.yaml app_activities (as packets app_activity)." }
+  - { name: engine,    type: utf8,   nullable: false, doc: "enums.yaml app_engines: how its bytes moved." }
   - { name: episode,   type: uint64, nullable: false, doc: "The burst, per agent, from 1 (object_id's middle bits)." }
   - { name: after_episode, type: uint64, nullable: true, doc: "The burst this one waited for (closed loop: the agent's previous burst); null for the first." }
   - name: after_objects

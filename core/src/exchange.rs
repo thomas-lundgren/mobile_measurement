@@ -42,7 +42,13 @@ pub fn server_time(delay_ms: u32, down_bytes: u64, rate_bps: u32) -> Duration {
 }
 
 fn deadline(x: &AppExchange) -> Instant {
-    Instant::now() + OBJECT_TIMEOUT + server_time(x.delay_ms, x.down_bytes, x.rate_bps)
+    // a paced upload takes its bytes' time at the rate, like a paced reply
+    let paced_up = if x.down_bytes == 0 && x.rate_bps > 0 {
+        Duration::from_secs_f64(x.up_bytes as f64 * 8.0 / x.rate_bps as f64)
+    } else {
+        Duration::ZERO
+    };
+    Instant::now() + OBJECT_TIMEOUT + paced_up + server_time(x.delay_ms, x.down_bytes, x.rate_bps)
 }
 
 // --- socket primitives ---------------------------------------------------------
@@ -88,13 +94,15 @@ impl Pool {
         }
     }
 
-    /// An idle pooled connection, or a new one (`true`: opened just now);
-    /// none when the server can't be reached. Hand it back with `put_back`.
-    pub fn take_one(&mut self) -> Option<(TcpStream, bool)> {
-        if let Some(c) = self.conns.pop() {
-            return Some((c, false));
-        }
-        connect(&self.server).ok().map(|c| (c, true))
+    /// The server the connections go to.
+    pub fn server(&self) -> &str {
+        &self.server
+    }
+
+    /// An idle pooled connection, if any (opening one is the caller's,
+    /// outside any lock: `connect`).
+    pub fn take_idle(&mut self) -> Option<TcpStream> {
+        self.conns.pop()
     }
 
     pub fn put_back(&mut self, conns: Vec<TcpStream>) {
@@ -171,6 +179,8 @@ pub fn read_exact_until(
 
 /// Run one exchange on `conn`: the request, `up_bytes` in chunks, then the
 /// response (`down_bytes`) or, for an upload, the server's acknowledgement.
+/// An upload (`down_bytes = 0`) with `rate_bps > 0` is paced at that rate
+/// here, on the sending side (the server ignores the rate then).
 /// `on_io(direction, bytes)` is called for every write and read — before the
 /// request is written (its time is the request time), after each later write
 /// and each read. Errors: `Interrupted` when `stop` is set mid-exchange,
@@ -189,11 +199,27 @@ pub fn transfer(
 
     let mut buf = vec![0u8; CHUNK];
     let mut left = x.up_bytes;
+    let paced = (x.down_bytes == 0 && x.rate_bps > 0).then(|| {
+        let (chunk, _) = udp_timing::bulk_pacing(x.rate_bps.div_ceil(1000), CHUNK);
+        (Instant::now(), chunk.max(1) as u64)
+    });
     while left > 0 {
         if stop.load(Ordering::Acquire) {
             return Err(io::ErrorKind::Interrupted.into());
         }
-        let n = left.min(CHUNK as u64) as usize;
+        let mut n = left.min(CHUNK as u64) as usize;
+        if let Some((start, chunk)) = paced {
+            // chunk k is due k chunks' worth of time after the start
+            let sent = x.up_bytes - left;
+            let due = start + Duration::from_secs_f64(sent as f64 * 8.0 / x.rate_bps as f64);
+            while Instant::now() < due {
+                if stop.load(Ordering::Acquire) {
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
+                thread::sleep((due - Instant::now()).min(Duration::from_millis(50)));
+            }
+            n = n.min(chunk as usize);
+        }
         write_all_until(conn, &buf[..n], stop, deadline)?;
         on_io(Direction::Sent, n);
         left -= n as u64;
@@ -422,6 +448,13 @@ mod tests {
                 (up, down),
                 (AppExchange::WIRE_LEN + 150_000, AppExchange::WIRE_LEN)
             );
+            // an upload paced on the phone: 12 kB at 96 kbit/s, about 1 s
+            let (up, _, _, took) = moved(&exchange(4, 12_000, 0, 0, 96_000, 0));
+            assert_eq!(up, AppExchange::WIRE_LEN + 12_000);
+            assert!(
+                took >= Duration::from_millis(900) && took < Duration::from_secs(2),
+                "paced upload {took:?}"
+            );
             // 6000 B at 48 kbit/s after 100 ms: about 1.1 s, in many small reads
             let (_, down, reads, took) = moved(&exchange(3, 2_000, 6_000, 100, 48_000, 140));
             assert_eq!(down, 6_000);
@@ -447,7 +480,7 @@ mod tests {
         assert_eq!(objects[&(3, true)], 6_000);
         assert_eq!(
             counters.bytes_sent.load(Ordering::Relaxed),
-            300_000 + w + 6_000
+            300_000 + w + 6_000 + w
         );
     }
 }

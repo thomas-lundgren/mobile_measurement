@@ -109,6 +109,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale: None,
                 actions: None,
                 placement: None,
+                engines: None,
                 loop_mode: None,
                 task_interval_s: None,
                 max_open_tasks: None,
@@ -136,6 +137,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale: None,
                 actions: None,
                 placement: None,
+                engines: None,
                 loop_mode: None,
                 task_interval_s: None,
                 max_open_tasks: None,
@@ -162,6 +164,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale: None,
                 actions: None,
                 placement: None,
+                engines: None,
                 loop_mode: None,
                 task_interval_s: None,
                 max_open_tasks: None,
@@ -183,6 +186,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale: None,
                 actions: None,
                 placement: None,
+                engines: None,
                 loop_mode: None,
                 task_interval_s: None,
                 max_open_tasks: None,
@@ -195,6 +199,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale,
                 actions,
                 placement,
+                engines,
                 loop_mode,
                 task_interval_s,
                 max_open_tasks,
@@ -234,6 +239,11 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                         .unwrap()
                         .to_string()
                 }),
+                engines: engines.as_ref().map(|m| {
+                    m.iter()
+                        .map(|(k, v)| (k.clone(), v.wire().to_string()))
+                        .collect()
+                }),
                 task_interval_s: *task_interval_s,
                 max_open_tasks: *max_open_tasks,
             },
@@ -259,6 +269,7 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale: None,
                 actions: None,
                 placement: None,
+                engines: None,
                 loop_mode: None,
                 task_interval_s: None,
                 max_open_tasks: None,

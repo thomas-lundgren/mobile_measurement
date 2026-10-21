@@ -46,6 +46,14 @@ macro_rules! wire_enum {
 }
 
 wire_enum!(
+    /// How an app operation's bytes move (`enums.yaml` app_engines).
+    AppEngine {
+        Exchange => "exchange",
+        Bulk     => "bulk",
+    }
+);
+
+wire_enum!(
     /// Server → device commands (`enums.yaml` commands).
     Command {
         RunTest          => "RUN_TEST",

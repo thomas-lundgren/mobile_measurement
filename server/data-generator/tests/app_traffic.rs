@@ -95,6 +95,7 @@ async fn scripted_user_downloads_and_uploads_objects() {
         placement: app_traffic::Placement::Device,
         log: Some(app_log(dir.path())),
         open: None,
+        engines: Default::default(),
     };
     let (sink, mut rx, _) = packet_channel(1 << 16);
     let stop = AtomicBool::new(false);
@@ -339,6 +340,7 @@ async fn websearch_task_runs_as_a_graph() {
         placement: app_traffic::Placement::Device,
         log: Some(app_log(dir.path())),
         open: None,
+        engines: Default::default(),
     };
     let (sink, _rx, _) = packet_channel(1 << 18);
     let stop = AtomicBool::new(false);
@@ -428,6 +430,7 @@ async fn open_loop_tasks_start_when_due_and_overflow_is_dropped() {
             task_interval_s: 0.7,
             max_open_tasks: 2,
         }),
+        engines: Default::default(),
     };
     let (sink, _rx, _) = packet_channel(1 << 18);
     let stop = AtomicBool::new(false);
@@ -461,6 +464,88 @@ async fn open_loop_tasks_start_when_due_and_overflow_is_dropped() {
         .count();
     assert!(dropped >= 1, "the backlog never filled");
     assert!(ev.iter().any(|r| r.s("outcome") == "ok"));
+    send(
+        &st,
+        "POST",
+        &format!("/internal/generators/{gid}/stop"),
+        None,
+    )
+    .await;
+}
+
+/// Engines per activity: a photo upload as `bulk` runs on a connection of
+/// its own, paced on the phone; page objects stay `exchange` on the pool.
+#[tokio::test(flavor = "multi_thread")]
+async fn bulk_engine_uploads_on_its_own_paced_connection() {
+    let st = AppState::default();
+    let dir = tempfile::tempdir().unwrap();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let prep = send(&st, "POST", "/internal/generators", Some(json!({
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3XA", "device_id": "dev_x", "session_id": "ses_x",
+        "flow": {"flow_id": 8, "type": "app_traffic", "profile": "script"},
+        "server_port": port, "node_log_dir": dir.path().to_str().unwrap()
+    }))).await;
+    let gid = prep["generator_id"].as_str().unwrap().to_string();
+    let act = |at_ms, kind: &str, bytes, rate_kbps, activity: &str| AppAction {
+        at_ms,
+        kind: kind.into(),
+        bytes,
+        count: Some(if kind == "down" { 3 } else { 1 }),
+        parallel: Some(1),
+        rate_kbps,
+        activity: Some(activity.into()),
+        ..AppAction::default()
+    };
+    let cfg = AppTraffic {
+        server: format!("127.0.0.1:{port}"),
+        flow_id: 8,
+        profile: "script".into(),
+        workers: 1,
+        seed: 1,
+        scale: 1.0,
+        // 60 kB at 240 kbit/s: 2 s
+        actions: vec![
+            act(0, "down", 20_000, None, "web_object"),
+            act(0, "up", 60_000, Some(240), "photo_upload"),
+        ],
+        placement: app_traffic::Placement::Device,
+        log: Some(app_log(dir.path())),
+        open: None,
+        engines: [(
+            fieldtest_core::packet::app_activity_code("photo_upload"),
+            app_traffic::Engine::Bulk,
+        )]
+        .into_iter()
+        .collect(),
+    };
+    let (sink, _rx, _) = packet_channel(1 << 16);
+    let stop = AtomicBool::new(false);
+    let tally = Counters::default();
+    std::thread::scope(|s| {
+        s.spawn(|| app_traffic::run(&cfg, sink, &tally, &stop));
+        std::thread::sleep(Duration::from_millis(3500));
+        stop.store(true, Ordering::Release);
+    });
+    let ev = app_events(&dir.path().join("app_events_0008.parquet"));
+    assert_eq!(ev.len(), 4);
+    for r in &ev {
+        assert_eq!(r.s("outcome"), "ok");
+        if r.s("activity") == "photo_upload" {
+            assert_eq!((r.s("engine"), r.b("new_connection")), ("bulk", true));
+            let took = (r.u("done_mono_ns") - r.u("start_mono_ns")) as f64 / 1e6;
+            assert!(
+                (1800.0..3000.0).contains(&took),
+                "paced upload took {took} ms"
+            );
+            assert_eq!(r.u("plan_rate_bps"), 240_000);
+        } else {
+            assert_eq!(r.s("engine"), "exchange");
+        }
+    }
     send(
         &st,
         "POST",
@@ -504,6 +589,7 @@ async fn stopping_mid_object_logs_stopped() {
         placement: app_traffic::Placement::Device,
         log: Some(app_log(dir.path())),
         open: None,
+        engines: Default::default(),
     };
     let (sink, _rx, _) = packet_channel(1 << 16);
     let stop = AtomicBool::new(false);
