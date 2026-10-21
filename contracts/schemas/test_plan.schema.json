@@ -163,7 +163,7 @@
               "up_bytes":    { "type": "integer", "minimum": 0, "description": "kind down: bytes sent up first (request body, LLM context)." },
               "delay_ms":    { "type": "integer", "minimum": 0, "description": "kind down: server think time before the first byte (LLM time to first token, tool latency)." },
               "rate_kbps":   { "type": "integer", "minimum": 1, "description": "kind down: pace the response at this rate, like a token stream; what a stall holds back follows in one burst. kind up: the phone paces the upload at this rate." },
-              "chunk_bytes": { "type": "integer", "minimum": 1, "description": "kind down with rate_kbps: bytes per paced write (default 5 ms worth)." }
+              "chunk_bytes": { "type": "integer", "minimum": 1, "description": "kind down with rate_kbps: bytes per paced write (default 5 ms worth). engine udp_burst, either kind: the datagram size (default 1200)." }
             }
           }
         }

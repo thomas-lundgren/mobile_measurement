@@ -115,7 +115,8 @@ pub struct AppAction {
     /// phone paces the upload at this rate.
     #[serde(default)]
     pub rate_kbps: Option<u32>,
-    /// "down" with rate_kbps: bytes per paced write (default 5 ms worth).
+    /// "down" with rate_kbps: bytes per paced write (default 5 ms worth);
+    /// udp_burst, either kind: the datagram size.
     #[serde(default)]
     pub chunk_bytes: Option<u32>,
 }
@@ -456,9 +457,11 @@ impl Agent {
                     let a = script.pop_front().unwrap();
                     let activity = activity_code(a.activity.as_deref().unwrap_or("other"));
                     let f = if a.kind == "up" {
-                        // a rate paces the upload on the phone
+                        // a rate paces the upload on the phone (udp_burst: the
+                        // chunk is the datagram size)
                         Fetch {
                             rate_bps: a.rate_kbps.unwrap_or(0).saturating_mul(1000),
+                            chunk: a.chunk_bytes.unwrap_or(0),
                             ..Fetch::upload(activity, a.bytes.max(1))
                         }
                     } else {

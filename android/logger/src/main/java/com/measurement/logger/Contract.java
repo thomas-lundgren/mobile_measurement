@@ -274,6 +274,7 @@ public final class Contract {
         public static final String CLOUD_TOOL = "cloud_tool";
         public static final String LLM_RESUME = "llm_resume";
         public static final String WEB_SEARCH = "web_search";
+        public static final String VOICE = "voice";
     }
 
     /** enums.yaml app_step_kinds */

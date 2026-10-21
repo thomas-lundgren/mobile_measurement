@@ -277,6 +277,7 @@ app_activities:
   - cloud_tool       # 12 tool result in a cloud-tool reply (see app_request.md)
   - llm_resume       # 13 the reply's next turn after a cloud tool
   - web_search       # 14 a search API call by an agent's tool (websearch)
+  - voice            # 15 a call's media frames (scripted; e.g. paced UDP at 64 kbit/s)
 
 # ---------------------------------------------------------------------------
 # App workload steps (app_events.parquet step_kind): what a burst of a task
