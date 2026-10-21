@@ -109,10 +109,12 @@ The order minimizes rework: fix the cheap trust/consistency issues, then write t
 
 ## Status tracking
 
-| Workstream | Items | Done |
+Checked against the code and docs on 2026-10-21. ☑ done · ◑ partly · ☐ open.
+
+| Workstream | Done | Open |
 |---|---|---|
-| Corrections | C1, C2, C3 | ☐ |
-| A — Contracts | 1.1, 1.2, 1.3, 1.4, 2.8, 3.2, 3.3, 3.4, 3.6, 3.7, M3, M4b | ☐ |
-| B — Semantics | 2.1, 2.2, 2.3, 2.5, 2.6, 2.7, 4.2, 4.3, 4.4, 4.5, M4a | ☐ |
-| C — Consistency | M1, 2.4, 3.1, 3.5, 4.1 | ☐ |
-| D — Security | 3.8, M5 | ◑ designed (impl pending) |
+| Corrections | — | ☐ C1, C2, C3: `design_review.md` still has the three errors (cosmetic; the plan above records the corrections). |
+| A — Contracts | ☑ 1.1, 1.2, 1.3, 1.4, 2.8, 3.2, 3.3, 3.4, 3.6, 3.7, M3, M4b: all in `contracts/` with examples and CI gates. | ◑ 3.4: the `internal_*` schemas are checked only through examples, not shape-compared with their Rust types (CLAUDE.md invariant 7, "Still unchecked"). |
+| B — Semantics | ☑ 2.2, 2.3 (contracts: `directions` has no Bidirectional; two flows); 2.5 (`neighbor_cells` logged); 2.7 (time-sync protocol + `clock.parquet`); 4.2, 4.3, 4.4 (parquet contracts); M4a (`probe.md`); 2.1 (contracts: metadata in `header.json`, join columns in Parquet). | ◑ 2.2/2.3/2.1 **spec text** still lags: §8 flow diagrams and the §8.3 direction table list `Bidirectional`, §3.3 says "every file contains" the version fields. ◑ 2.6: SIGNAL_LOSS still says "> N seconds" with no N; the analysis derives COVERAGE_GAP (RSRP ≤ −110 dBm) but no SIGNAL_LOSS events. ☐ 4.5: no network-change log (only `radio.transport`); P3, defer until needed. |
+| C — Consistency | ☑ 3.1 (direction table shows origin / destination / initiator); 3.5 (§16 symmetric). | ◑ M1: see the 2.1–2.3 spec lag; CLAUDE.md/AGENTS.md invariant 5 still name `Bidirectional`. ☐ 2.4: "traffic generator client" in spec §3.5 and AGENTS.md. ◑ 4.1: 15 bare "client" uses left in the spec. |
+| D — Security | ☑ 3.8, M5: Keystore P-256 device enrollment, signed challenge, operator JWT, server-bound `device_id`. | ☐ TLS: the server still serves plain HTTP (OPERATORS_GUIDE "hardening follow-up"). |

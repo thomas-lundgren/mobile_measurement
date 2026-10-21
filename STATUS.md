@@ -313,11 +313,38 @@ Deferred (optional polish, not blocking Phase 2):
 
 UE engine, server interop, RustCore JNI + aux writers, and the full Android Logger app (builds to an APK) are done. Only 2f — the physical Pixel 9 Pro run — remains.
 
-### Phase 3 — Android Controller (not started)
+### Phase 3 — Android Controller (underway: 3a–3c done)
 
-### Phase 4 — Analysis Toolchain (not started)
+- Open: the generated client's `Flow` is one flat class (utoipa flattens the
+  tagged union), so the OpenAPI doesn't capture the discriminated shape.
 
-### Phase 5 — Hardening (not started)
+### Phase 4 — Analysis Toolchain (underway, in daily use)
+
+Loader, metrics, offset-corrected OWD, derived radio events, the `/viz`
+pages (map, series, findings, app traffic, timing) rebuilt by cron.
+
+- Open (3GPP review §3): route matching across days and per-route summary
+  statistics; saturation detection (only partly, in `timing.py`).
+- Open (remediation 2.6): SIGNAL_LOSS events with a defined N.
+
+### Phase 5 — Hardening (MVP slices 5a–5f done)
+
+- Open: TLS (plain HTTP today); a multi-device fleet (one phone on hand).
+- Open (field): flows don't survive a Wi-Fi ↔ mobile switch, so the scripts
+  start tests only on the mobile network and arriving home cuts a running
+  test; the afternoon commute trigger (≥3 cells in 5 min) is untested on a
+  real commute.
+
+### Contracts and docs (open)
+
+- `internal_*` schemas are not shape-compared with their Rust types
+  (CLAUDE.md invariant 7, "Still unchecked").
+- Spec text lags the contracts: §8 diagrams and the §8.3 direction table
+  still list `Bidirectional` (the contracts model it as two flows), §3.3
+  says every file carries the version fields (they live in `header.json`),
+  invariant 5 in CLAUDE.md/AGENTS.md names `Bidirectional`, "traffic
+  generator client" naming (remediation 2.4). Per-item status:
+  `planning/review_remediation_plan.md` "Status tracking".
 
 ---
 
