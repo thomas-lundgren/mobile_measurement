@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crate::packet::{app_activity_name, AppExchange};
 use crate::timestamp::Timestamp;
 use crate::udp_timing::SendStatus;
 
@@ -176,6 +177,37 @@ impl PacketRow {
             payload_size,
             Protocol::Tcp,
         )
+    }
+
+    /// The row both nodes log for one read or write of a request/response
+    /// exchange (`crate::exchange`). `v1`: the request came in the old layout
+    /// (object size = the larger direction, no separate upload size).
+    pub fn exchange(
+        flow_id: u32,
+        x: &AppExchange,
+        v1: bool,
+        direction: Direction,
+        size: usize,
+    ) -> Self {
+        Self {
+            timing: PacketTiming {
+                app_activity: Some(app_activity_name(x.activity)),
+                app_object_bytes: Some(if v1 {
+                    x.down_bytes.max(x.up_bytes)
+                } else {
+                    x.down_bytes
+                }),
+                app_up_bytes: (!v1).then_some(x.up_bytes),
+                ..PacketTiming::default()
+            },
+            ..Self::tcp(
+                flow_id,
+                x.object_id,
+                direction,
+                Timestamp::now(),
+                size as u32,
+            )
+        }
     }
 }
 

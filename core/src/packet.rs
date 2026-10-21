@@ -194,7 +194,7 @@ impl DscpProbePacket {
 /// on an app_traffic TCP connection: 22-byte core, 24 on the wire. `kind` 0 =
 /// download (the server answers with `size` bytes), 1 = upload (`size` bytes
 /// follow; the server echoes this header back once it has them all).
-/// `activity` is a code from `exchange::ACTIVITIES`, logged by both nodes.
+/// `activity` is a code from `APP_ACTIVITIES`, logged by both nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppRequest {
     pub kind: u8,
@@ -240,6 +240,37 @@ impl AppRequest {
             size: u64::from_be_bytes(buf[16..24].try_into().unwrap()),
         })
     }
+}
+
+/// Activity codes on the wire (the `activity` byte of `AppRequest` and
+/// `AppExchange`: the index) and the names both nodes log for them
+/// (`enums.yaml` app_activities, in order).
+pub const APP_ACTIVITIES: [&str; 14] = [
+    "other",
+    "web_page",
+    "web_object",
+    "mail_sync",
+    "mail_attachment",
+    "mail_send",
+    "video_chunk",
+    "feed_image",
+    "photo_upload",
+    "llm_call",
+    "mcp_call",
+    "web_fetch",
+    "cloud_tool",
+    "llm_resume",
+];
+
+pub fn app_activity_code(name: &str) -> u8 {
+    APP_ACTIVITIES.iter().position(|a| *a == name).unwrap_or(0) as u8
+}
+
+pub fn app_activity_name(code: u8) -> &'static str {
+    APP_ACTIVITIES
+        .get(code as usize)
+        .copied()
+        .unwrap_or("other")
 }
 
 /// App-traffic exchange (`pkt_t = 0x04`, `ver = 0x02`), 44 bytes on the wire:
@@ -349,6 +380,30 @@ impl Packet {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn app_activity_names_round_trip() {
+        for (i, name) in APP_ACTIVITIES.iter().enumerate() {
+            assert_eq!(app_activity_code(name) as usize, i);
+            assert_eq!(app_activity_name(i as u8), *name);
+        }
+        assert_eq!(app_activity_code("nonsense"), 0);
+    }
+
+    /// The wire table is `enums.yaml` app_activities, in order (code = index).
+    #[test]
+    fn app_activities_match_the_contract() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../contracts/enums/enums.yaml");
+        let doc: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let want: Vec<&str> = doc["app_activities"]
+            .as_sequence()
+            .expect("enums.yaml app_activities")
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(APP_ACTIVITIES.as_slice(), want.as_slice());
+    }
+
     use super::*;
 
     #[test]

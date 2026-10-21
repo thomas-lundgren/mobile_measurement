@@ -1,7 +1,8 @@
 # Application workloads over shared traffic engines — assessment and plan
 
 **Status:** accepted with adjustments, 2026-10-20; **A done** (2026-10-20:
-`core/src/exchange.rs`). Supersedes the step order in
+`core/src/exchange.rs`); **A′ done** (2026-10-21: engine without names or
+rows, `exchange::Pool`, `core/tests/layering.rs`). Next: B. Supersedes the step order in
 `ai_traffic_implementation_plan.md` (see its "Order" section).
 
 ## 1. The proposal (summary)
@@ -73,7 +74,8 @@ and scheduling, support composition, then richer AI models.
 
 | | Work | Replaces (AI plan) | Effort |
 | --- | --- | --- | --- |
-| **A** | Extract the request/response engine | new | ~1 day |
+| **A** | Extract the request/response engine (done) | new | ~1 day |
+| **A′** | Finish the separation: activity table to the codec, rows out of the engine, `exchange::Pool`, layering gate (done) | new | ~½ day |
 | **B** | Scheduler apart from execution; operation record with IDs; intended-event log | step 1 | 1–1.5 days |
 | **C** | Open loop and dependency graphs; `agentic_websearch` | step 3 | ~1.5 days |
 | **D** | Engine per operation: exchange, bulk segment, paced UDP burst (+ server side); DSCP per operation | new | 1.5–2 days |
@@ -101,6 +103,40 @@ Pure consolidation; no behaviour or wire change.
   (download, upload with ack, paced stream timing); `ci/check.sh` green; one
   live app phase on cellular, per-activity bytes/timing compared with an
   earlier run.
+
+### A′ — Finish the separation (2026-10-21 review of A)
+
+A moved the exchange into one engine, but the engine still carried app
+vocabulary and the runner still held the pool:
+
+- `exchange.rs` owned the activity name table (`ACTIVITIES`, "llm_call", …)
+  and built app-tagged log rows itself (`exchange::row`, pushed by `serve`).
+- The connection pool (open, reuse, close after `IDLE_CLOSE`) lived in
+  `app_traffic/runner.rs` as a bare `Vec<TcpStream>`.
+- Nothing enforced the direction: the data-generator dropped its
+  `app_traffic` import in A, but no test kept it that way.
+
+Work:
+
+- The activity table moves to `packet.rs` beside the `AppExchange` codec (it
+  is a wire field: code = index of `enums.yaml` `app_activities`); its
+  contract test moves with it.
+- `exchange` reports I/O to an observer on **both** sides (`transfer` already
+  did; `serve` now too) and neither builds rows nor touches the log sink. The
+  exchange → packet row mapping is `PacketRow::exchange` in `log_writer` (the
+  measurement layer), used by the UE runner and the data-generator.
+- `exchange::Pool`: per-agent idle connections, opened on demand, closed after
+  an idle time the workload chooses.
+- `core/tests/layering.rs`: the engines (`endpoint`, `exchange`, `packet`,
+  `udp_timing`, `log_writer`) and the data-generator / test-control sources
+  must not name `app_traffic`. Tests may (they drive a UE).
+
+**Layers and the rule they keep.** Engines move bytes and report what moved;
+workloads (`app_traffic`) decide what to move and when; orchestration (`ue.rs`
+on the phone, `flow.rs` in the data-generator) wires flows to engines. The
+server side has no workload knowledge: everything it does for an exchange is
+dictated by the request on the wire (bytes up, think time, bytes down,
+pacing). The planned `udp_burst` server (D) follows the same rule.
 
 ### B — Scheduler apart from execution
 
@@ -135,6 +171,12 @@ first), `loop: closed | open`, completion vs schedule in a fixed duration.
 
 Parameter registry (AI plan step 2), F2–F4 (step 4), server packet capture
 (step 5).
+
+Also open from `mobile_ai_traffic_generator_development_plan.md` §11:
+`agentic_computer_control` (small frequent commands, screenshot uploads);
+traffic-shape metrics (UL:DL per family, burst peak-to-mean, CV — define
+them first); distributions beyond lognormal; per-run provenance (parameter
+set + seed); AI agents writing `script` timelines.
 
 ## 4. Principles kept
 

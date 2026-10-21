@@ -8,7 +8,10 @@ use serde::Deserialize;
 
 /// Activity codes and names live with the wire format (the server logs them
 /// too); the model's codes below index that table.
-pub use crate::exchange::{activity_code, activity_name, ACTIVITIES};
+pub use crate::packet::{
+    app_activity_code as activity_code, app_activity_name as activity_name,
+    APP_ACTIVITIES as ACTIVITIES,
+};
 const WEB_PAGE: u8 = 1;
 const WEB_OBJECT: u8 = 2;
 const MAIL_SYNC: u8 = 3;

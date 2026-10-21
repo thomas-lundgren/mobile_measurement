@@ -190,7 +190,7 @@ When you add or change such a value:
 
 | Source in `contracts/` | Copies | Gate |
 |---|---|---|
-| `enums/enums.yaml`, `versions/versions.yaml` | Rust `mp-contracts`; `exchange::ACTIVITIES` (`app_activities`) | `server/contracts-rs/tests/parity.rs`; `exchange::activities_match_the_contract` |
+| `enums/enums.yaml`, `versions/versions.yaml` | Rust `mp-contracts`; `packet::APP_ACTIVITIES` (`app_activities`, the wire codes) | `server/contracts-rs/tests/parity.rs`; `packet::app_activities_match_the_contract` |
 | `packets/*.md` + `testvectors/packets/` | `core/src/packet.rs` (one codec, both nodes via JNI) | golden-vector tests in `packet.rs` |
 | `schemas/*.json` | Rust DTOs → generated `openapi.yaml` → generated Kotlin client | `ci/validate_contracts.py` (examples, plus schema vs Rust shape); `openapi_drift`; `ci/check_client_drift.sh` |
 | `schemas/internal_*.json` (server-main ↔ test-control ↔ data-generator) | Rust DTOs (`dto/internal.rs`) → generated `openapi/internal.yaml` | `ci/validate_contracts.py` (schema vs Rust shape); `internal_openapi_drift` |
@@ -396,7 +396,11 @@ The realtime UDP and bulk TCP send/receive loops exist once, in
 `core/src/exchange.rs` (UE `transfer`, server `serve`); both are used by the UE
 engine and the server's data-generator (symmetric peers). Application
 workloads (`core/src/app_traffic`) only decide what to transfer and when —
-see `planning/app_workload_layering.md`.
+see `planning/app_workload_layering.md`. The engines report every read and
+write to their caller and never log or name a workload themselves; the
+server does exactly what each request on the wire asks.
+`core/tests/layering.rs` fails if an engine module or a server process
+reaches `app_traffic`.
 
 ---
 

@@ -15,7 +15,7 @@ has the history; the design documents are still authoritative:
 
 | Path | What |
 |---|---|
-| `core/` | Shared Rust engine (rlib for the server, cdylib + JNI for Android): traffic engines used by both nodes — `endpoint` (realtime UDP / bulk TCP loops) and `exchange` (request/response: `transfer` on the UE, `serve` on the server); `ue` (UE engine); `app_traffic` workloads (`model` = simulated users, `runner` = agents, pools, bursts over `exchange`); `log_writer` (SPSC ring → segmented Parquet), `udp_timing` (kernel timestamps, TOS, pacing), `packet`, `aux_log`, `auth` |
+| `core/` | Shared Rust engine (rlib for the server, cdylib + JNI for Android): traffic engines used by both nodes — `endpoint` (realtime UDP / bulk TCP loops) and `exchange` (request/response: `transfer` on the UE, `serve` on the server; a connection `Pool`); engines report I/O and never reach the workloads (`core/tests/layering.rs`); `ue` (UE engine); `app_traffic` workloads (`model` = simulated users, `runner` = agents, pools, bursts over `exchange`); `log_writer` (SPSC ring → segmented Parquet), `udp_timing` (kernel timestamps, TOS, pacing), `packet`, `aux_log`, `auth` |
 | `server/` | `contracts-rs` (DTOs), `server-main` (REST, auth, uploads, `/viz` pages), `test-control` (scheduling, ports), `data-generator` (server flow threads) |
 | `android/logger` | Logger app (Java + RustCore JNI); `android/build_apk.sh` builds core + APK. `android/controller` (Kotlin, generated client) |
 | `probe/` | `mp-probe`, adb-started on-phone collector (modem qdisc, UDP counters, radio log) on 127.0.0.1:47600 |
@@ -74,7 +74,7 @@ These are the design decisions that span components and are easy to violate piec
 
    | Source in `contracts/` | Copies | Gate |
    |---|---|---|
-   | `enums/enums.yaml`, `versions/versions.yaml` | Rust `mp-contracts`; `exchange::ACTIVITIES` (`app_activities`) | `server/contracts-rs/tests/parity.rs`; `exchange::activities_match_the_contract` |
+   | `enums/enums.yaml`, `versions/versions.yaml` | Rust `mp-contracts`; `packet::APP_ACTIVITIES` (`app_activities`, the wire codes) | `server/contracts-rs/tests/parity.rs`; `packet::app_activities_match_the_contract` |
    | `packets/*.md` + `testvectors/packets/` | `core/src/packet.rs` (one codec, both nodes via JNI) | golden-vector tests in `packet.rs` |
    | `schemas/*.json` | Rust DTOs → generated `openapi.yaml` → generated Kotlin client | `ci/validate_contracts.py` (examples, plus schema vs Rust shape); `openapi_drift`; `ci/check_client_drift.sh` |
    | `schemas/internal_*.json` (server-main ↔ test-control ↔ data-generator) | Rust DTOs (`dto/internal.rs`) → generated `openapi/internal.yaml` | `ci/validate_contracts.py` (schema vs Rust shape); `internal_openapi_drift` |

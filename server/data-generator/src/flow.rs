@@ -421,7 +421,17 @@ pub fn spawn_app_server(
                         counters.note_peer(addr);
                         *state.lock().unwrap() = GeneratorState::Running;
                         let (sink, counters, stop) = (&sink, &*counters, &*stop);
-                        s.spawn(move || exchange::serve(conn, flow_id, sink, counters, stop));
+                        s.spawn(move || {
+                            exchange::serve(conn, stop, |dir, n, x, v1| {
+                                sink.lock()
+                                    .unwrap()
+                                    .push(PacketRow::exchange(flow_id, x, v1, dir, n));
+                                match dir {
+                                    Direction::Sent => counters.sent(n as u64),
+                                    Direction::Received => counters.received(n as u64),
+                                }
+                            })
+                        });
                     }
                     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(ACCEPT_POLL)

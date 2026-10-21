@@ -5,21 +5,21 @@
 //! data-generator runs `serve` on every connection the UE opens. Wire format:
 //! `contracts/packets/app_request.md` (v2; v1 requests are still served).
 //!
-//! The engine knows nothing about users or applications: it moves one
-//! exchange and reports every read and write. Which exchanges happen, when,
-//! and over which pooled connection is the workload's business.
+//! The engine knows nothing about users or applications, and it does not
+//! log: it moves one exchange and reports every read and write to its caller
+//! (`on_io`), which logs them (`PacketRow::exchange`). Which exchanges
+//! happen, and when, is the workload's business; the server side does exactly
+//! what each request on the wire asks. `core/tests/layering.rs` keeps the
+//! workloads (`app_traffic`) out of this module.
 
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::endpoint::Counters;
-use crate::log_writer::{Direction, LogSink, PacketRow, PacketTiming};
+use crate::log_writer::Direction;
 use crate::packet::{AppExchange, AppRequest, VER_1};
-use crate::timestamp::Timestamp;
 use crate::udp_timing;
 
 /// Bytes per read / write (and the cap on a paced write).
@@ -29,32 +29,6 @@ pub const IO_TIMEOUT: Duration = Duration::from_millis(200);
 /// Give up on an exchange (and its connection) after this long beyond the
 /// server's own think and stream time.
 pub const OBJECT_TIMEOUT: Duration = Duration::from_secs(120);
-
-/// Activity codes on the wire (the index) and the names logged for them.
-pub const ACTIVITIES: [&str; 14] = [
-    "other",
-    "web_page",
-    "web_object",
-    "mail_sync",
-    "mail_attachment",
-    "mail_send",
-    "video_chunk",
-    "feed_image",
-    "photo_upload",
-    "llm_call",
-    "mcp_call",
-    "web_fetch",
-    "cloud_tool",
-    "llm_resume",
-];
-
-pub fn activity_code(name: &str) -> u8 {
-    ACTIVITIES.iter().position(|a| *a == name).unwrap_or(0) as u8
-}
-
-pub fn activity_name(code: u8) -> &'static str {
-    ACTIVITIES.get(code as usize).copied().unwrap_or("other")
-}
 
 /// How long the server takes beyond moving the bytes: think time plus, for a
 /// paced stream, its length.
@@ -69,37 +43,6 @@ pub fn server_time(delay_ms: u32, down_bytes: u64, rate_bps: u32) -> Duration {
 
 fn deadline(x: &AppExchange) -> Instant {
     Instant::now() + OBJECT_TIMEOUT + server_time(x.delay_ms, x.down_bytes, x.rate_bps)
-}
-
-/// The packet row both nodes log for one read or write of an exchange. `v1`:
-/// the request came in the old layout (object size = the larger direction, no
-/// separate upload size).
-pub fn row(
-    flow_id: u32,
-    x: &AppExchange,
-    v1: bool,
-    direction: Direction,
-    size: usize,
-) -> PacketRow {
-    PacketRow {
-        timing: PacketTiming {
-            app_activity: Some(activity_name(x.activity)),
-            app_object_bytes: Some(if v1 {
-                x.down_bytes.max(x.up_bytes)
-            } else {
-                x.down_bytes
-            }),
-            app_up_bytes: (!v1).then_some(x.up_bytes),
-            ..PacketTiming::default()
-        },
-        ..PacketRow::tcp(
-            flow_id,
-            x.object_id,
-            direction,
-            Timestamp::now(),
-            size as u32,
-        )
-    }
 }
 
 // --- socket primitives ---------------------------------------------------------
@@ -122,6 +65,54 @@ fn prepare(c: &TcpStream) {
     let _ = c.set_read_timeout(Some(IO_TIMEOUT));
     let _ = c.set_write_timeout(Some(IO_TIMEOUT));
     let _ = c.set_nodelay(true);
+}
+
+/// Idle connections to one server, reused across exchanges like an app's
+/// HTTP connection pool. Connections not used for `idle_close` are closed, so
+/// the next exchange pays for a new handshake (and slow start) as it would in
+/// the app being modelled; the workload chooses the time.
+pub struct Pool {
+    server: String,
+    idle_close: Duration,
+    conns: Vec<TcpStream>,
+    returned: Instant,
+}
+
+impl Pool {
+    pub fn new(server: &str, idle_close: Duration) -> Self {
+        Self {
+            server: server.to_string(),
+            idle_close,
+            conns: Vec::new(),
+            returned: Instant::now(),
+        }
+    }
+
+    /// All pooled connections, topped up to at least `want` with new ones
+    /// (fewer when the server can't be reached; empty when none can be
+    /// opened). Hand the ones still usable back with `put_back`.
+    pub fn take(&mut self, want: usize) -> Vec<TcpStream> {
+        while self.conns.len() < want {
+            match connect(&self.server) {
+                Ok(c) => self.conns.push(c),
+                Err(_) => break,
+            }
+        }
+        std::mem::take(&mut self.conns)
+    }
+
+    pub fn put_back(&mut self, conns: Vec<TcpStream>) {
+        self.conns.extend(conns);
+        self.returned = Instant::now();
+    }
+
+    /// Close the connections if they have sat idle for `idle_close`; call
+    /// while the workload waits.
+    pub fn close_idle(&mut self) {
+        if !self.conns.is_empty() && self.returned.elapsed() >= self.idle_close {
+            self.conns.clear();
+        }
+    }
 }
 
 /// Should a blocked read/write give up? (stopped, or the exchange took too long)
@@ -247,19 +238,15 @@ pub fn transfer(
 /// Serve exchanges on one UE connection until it closes or `stop`: read the
 /// request (v2, or v1) and the upload, wait the think time, then send the
 /// response — paced at `rate_bps` in `chunk_bytes` writes when asked — or,
-/// with no response, acknowledge by echoing the request. Logs a row per read
-/// and write (`row`), like the UE.
+/// with no response, acknowledge by echoing the request.
+/// `on_io(direction, bytes, exchange, v1)` is called for every read and
+/// write, like the client's (`v1`: the request came in the old layout).
 pub fn serve(
     mut conn: TcpStream,
-    flow_id: u32,
-    sink: &Mutex<LogSink>,
-    counters: &Counters,
     stop: &AtomicBool,
+    mut on_io: impl FnMut(Direction, usize, &AppExchange, bool),
 ) {
     prepare(&conn);
-    let push = |dir: Direction, size: usize, x: &AppExchange, v1: bool| {
-        sink.lock().unwrap().push(row(flow_id, x, v1, dir, size));
-    };
     let mut head = [0u8; AppExchange::WIRE_LEN];
     let mut buf = vec![0u8; CHUNK];
     // a connection may sit idle between bursts for as long as the UE keeps it
@@ -286,8 +273,7 @@ pub fn serve(
             _ => return, // not our protocol
         };
         let head = &head[..len];
-        push(Direction::Received, len, &x, v1);
-        counters.received(len as u64);
+        on_io(Direction::Received, len, &x, v1);
         let deadline = deadline(&x);
         let mut left = x.up_bytes;
         while left > 0 {
@@ -295,8 +281,7 @@ pub fn serve(
             match conn.read(&mut buf[..want]) {
                 Ok(0) => return,
                 Ok(n) => {
-                    push(Direction::Received, n, &x, v1);
-                    counters.received(n as u64);
+                    on_io(Direction::Received, n, &x, v1);
                     left -= n as u64;
                 }
                 Err(ref e) if is_timeout(e) => {
@@ -312,8 +297,7 @@ pub fn serve(
             if write_all_until(&mut conn, head, stop, deadline).is_err() {
                 return;
             }
-            push(Direction::Sent, head.len(), &x, v1);
-            counters.sent(head.len() as u64);
+            on_io(Direction::Sent, head.len(), &x, v1);
             continue;
         }
         // think time (an LLM's time to first token, a tool's latency)
@@ -360,8 +344,7 @@ pub fn serve(
             if write_all_until(&mut conn, &buf[..n], stop, deadline).is_err() {
                 return;
             }
-            push(Direction::Sent, n, &x, v1);
-            counters.sent(n as u64);
+            on_io(Direction::Sent, n, &x, v1);
             done += n as u64;
         }
     }
@@ -370,32 +353,11 @@ pub fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::log_writer::packet_channel;
+    use crate::endpoint::Counters;
+    use crate::log_writer::{packet_channel, PacketRow};
+    use crate::packet::app_activity_code;
     use std::net::TcpListener;
-
-    #[test]
-    fn activity_names_round_trip() {
-        for (i, name) in ACTIVITIES.iter().enumerate() {
-            assert_eq!(activity_code(name) as usize, i);
-            assert_eq!(activity_name(i as u8), *name);
-        }
-        assert_eq!(activity_code("nonsense"), 0);
-    }
-
-    /// The wire table is `enums.yaml` app_activities, in order (code = index).
-    #[test]
-    fn activities_match_the_contract() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../contracts/enums/enums.yaml");
-        let doc: serde_yaml::Value =
-            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        let want: Vec<&str> = doc["app_activities"]
-            .as_sequence()
-            .expect("enums.yaml app_activities")
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(ACTIVITIES.as_slice(), want.as_slice());
-    }
+    use std::sync::Mutex;
 
     fn exchange(
         object_id: u64,
@@ -406,7 +368,7 @@ mod tests {
         chunk: u32,
     ) -> AppExchange {
         AppExchange {
-            activity: activity_code("llm_call"),
+            activity: app_activity_code("llm_call"),
             flow_id: 7,
             object_id,
             up_bytes: up,
@@ -433,7 +395,15 @@ mod tests {
         thread::scope(|s| {
             s.spawn(|| {
                 let (conn, _) = listener.accept().unwrap();
-                serve(conn, 7, &sink, &counters, &stop);
+                serve(conn, &stop, |dir, n, x, v1| {
+                    sink.lock()
+                        .unwrap()
+                        .push(PacketRow::exchange(7, x, v1, dir, n));
+                    match dir {
+                        Direction::Sent => counters.sent(n as u64),
+                        Direction::Received => counters.received(n as u64),
+                    }
+                });
             });
             let mut conn = connect(&addr).unwrap();
             let mut moved = |x: &AppExchange| {

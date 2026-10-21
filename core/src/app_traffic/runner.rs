@@ -1,6 +1,6 @@
-//! Runs the users' steps against the server's object server: a connection
-//! pool per agent and the bursts' parallelism here, each object one exchange
-//! of the request/response engine (`crate::exchange`), a row per request,
+//! Runs the users' steps against the server's object server: the bursts'
+//! parallelism here, each object one exchange of the request/response engine
+//! (`crate::exchange`) over the agent's connection pool, a row per request,
 //! chunk and acknowledgement.
 
 use std::collections::VecDeque;
@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use super::{Agent, AppAction, Fetch, Placement, Step, MAX_PARALLEL};
 use crate::endpoint::Counters;
-use crate::exchange;
-use crate::log_writer::{Direction, LogSink};
+use crate::exchange::{self, Pool};
+use crate::log_writer::{Direction, LogSink, PacketRow};
 use crate::packet::AppExchange;
 
 /// Idle connections are closed after this long, as browsers and apps do; the
@@ -72,26 +72,23 @@ fn worker(ctx: &Ctx, w: u32, start: Instant) {
         .wrapping_add((w as u64).wrapping_mul(0x9E37_79B9));
     let mut agent = Agent::new(&ctx.cfg.profile, seed, ctx.cfg.scale, &ctx.cfg.actions)
         .with_placement(ctx.cfg.placement);
-    let mut pool: Vec<TcpStream> = Vec::new();
+    let mut pool = Pool::new(&ctx.cfg.server, IDLE_CLOSE);
     let mut episode = 0u64;
     while !ctx.stop.load(Ordering::Acquire) {
         match agent.next_step(start.elapsed()) {
             Step::Until(t) => {
-                let idle_from = Instant::now();
                 while !ctx.stop.load(Ordering::Acquire) && start.elapsed() < t {
                     std::thread::sleep(
                         (t.saturating_sub(start.elapsed())).min(Duration::from_millis(100)),
                     );
-                    if !pool.is_empty() && idle_from.elapsed() >= IDLE_CLOSE {
-                        pool.clear();
-                    }
+                    pool.close_idle();
                 }
             }
             Step::Burst { fetches, parallel } => {
                 episode += 1;
                 // object_id: agent | episode (page, sync, segment...) | object
                 let base = ((w as u64) << 48) | ((episode & 0x0FFF_FFFF) << 20);
-                pool = burst(ctx, pool, &fetches, parallel, base);
+                burst(ctx, &mut pool, &fetches, parallel, base);
             }
             Step::Done => {
                 while !ctx.stop.load(Ordering::Acquire) {
@@ -102,31 +99,20 @@ fn worker(ctx: &Ctx, w: u32, start: Instant) {
     }
 }
 
-/// Transfer `fetches` over up to `parallel` pooled connections; returns the
-/// connections still usable.
-fn burst(
-    ctx: &Ctx,
-    mut pool: Vec<TcpStream>,
-    fetches: &[Fetch],
-    parallel: usize,
-    base: u64,
-) -> Vec<TcpStream> {
+/// Transfer `fetches` over up to `parallel` pooled connections; the ones
+/// still usable go back to the pool.
+fn burst(ctx: &Ctx, pool: &mut Pool, fetches: &[Fetch], parallel: usize, base: u64) {
     let want = parallel.clamp(1, MAX_PARALLEL).min(fetches.len().max(1));
-    while pool.len() < want {
-        match exchange::connect(&ctx.cfg.server) {
-            Ok(c) => pool.push(c),
-            Err(_) => break,
-        }
-    }
-    if pool.is_empty() {
+    let conns = pool.take(want);
+    if conns.is_empty() {
         // no route to the server right now: skip this burst, don't spin
         std::thread::sleep(Duration::from_secs(1));
-        return pool;
+        return;
     }
     let queue = Mutex::new(fetches.iter().copied().enumerate().collect::<VecDeque<_>>());
     let kept = Mutex::new(Vec::new());
     std::thread::scope(|s| {
-        for mut conn in pool.drain(..) {
+        for mut conn in conns {
             let (queue, kept) = (&queue, &kept);
             s.spawn(move || {
                 loop {
@@ -144,7 +130,7 @@ fn burst(
             });
         }
     });
-    kept.into_inner().unwrap()
+    pool.put_back(kept.into_inner().unwrap());
 }
 
 fn transfer(ctx: &Ctx, conn: &mut TcpStream, f: Fetch, object_id: u64) -> io::Result<()> {
@@ -163,7 +149,7 @@ fn transfer(ctx: &Ctx, conn: &mut TcpStream, f: Fetch, object_id: u64) -> io::Re
         ctx.sink
             .lock()
             .unwrap()
-            .push(exchange::row(flow_id, &x, false, dir, n));
+            .push(PacketRow::exchange(flow_id, &x, false, dir, n));
         match dir {
             Direction::Sent => ctx.counters.sent(n as u64),
             Direction::Received => ctx.counters.received(n as u64),
