@@ -191,7 +191,7 @@ When you add or change such a value:
 | Source in `contracts/` | Copies | Gate |
 |---|---|---|
 | `enums/enums.yaml`, `versions/versions.yaml` | Rust `mp-contracts`; `packet::APP_ACTIVITIES` (`app_activities`, the wire codes) | `server/contracts-rs/tests/parity.rs`; `packet::app_activities_match_the_contract` |
-| `packets/*.md` + `testvectors/packets/` | `core/src/packet.rs` (one codec, both nodes via JNI) | golden-vector tests in `packet.rs` |
+| `packets/layouts.yaml` (+ `packets/*.md` semantics, `testvectors/packets/`) | `core/src/packet/layouts.rs` (one codec, both nodes via JNI) and the specs' layout tables, **generated** by `contracts/codegen/packet_codec.py` | `packet_codec.py --check`; generated golden tests; `validate_contracts.py` packs the vectors from the YAML |
 | `schemas/*.json` | Rust DTOs → generated `openapi.yaml` → generated Kotlin client | `ci/validate_contracts.py` (examples, plus schema vs Rust shape); `openapi_drift`; `ci/check_client_drift.sh` |
 | `schemas/internal_*.json` (server-main ↔ test-control ↔ data-generator) | Rust DTOs (`dto/internal.rs`) → generated `openapi/internal.yaml` | `ci/validate_contracts.py` (schema vs Rust shape); `internal_openapi_drift` |
 | `parquet/*.parquet.yaml` | Rust writers; `analysis/fieldtest_analysis/schema.py` | `core/tests/parquet_contract.rs`; `analysis/tests/test_schema_contract.py` |

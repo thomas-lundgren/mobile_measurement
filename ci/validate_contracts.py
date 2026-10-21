@@ -94,20 +94,24 @@ def check_json_examples(reg, schemas):
 
 
 def check_packet_vectors():
+    """Every layout in contracts/packets/layouts.yaml packs its vectors' decoded
+    values to their bytes (struct formats from the YAML, no copies here)."""
+    sys.path.insert(0, str(CONTRACTS / "codegen"))
+    from packet_codec import STRUCT_CHAR  # the generator's type table
+
+    doc = yaml.safe_load(open(CONTRACTS / "packets" / "layouts.yaml"))
     pkt = CONTRACTS / "testvectors" / "packets"
-    for fname, fmt, pkt_t in [("probe_v1.json", ">BBIQQ", 0x01), ("realtime_v1.json", ">BBIQQQ", 0x02)]:
-        doc = json.load(open(pkt / fname))
-        for c in doc["cases"]:
+    for lay in doc["layouts"]:
+        fmt = ">BB" + "".join(STRUCT_CHAR[f["type"]] for f in lay["fields"])
+        vec = json.load(open(pkt / lay["vectors"]))
+        for c in vec["cases"]:
             d = c["decoded"]
-            if pkt_t == 0x01:
-                head = struct.pack(fmt, pkt_t, 1, d["flow_id"], d["sequence_number"], d["send_mono_ns"])
-            else:
-                head = struct.pack(fmt, pkt_t, 1, d["flow_id"], d["sequence_number"], d["send_mono_ns"], d["send_utc_ns"])
-            head += b"\x00" * c.get("trailing_pad_bytes", 0)
-            status = "OK" if head.hex() == c["hex"] else "FAIL"
-            print(f"  {fname}:{c['name']:38s} {status}")
-            if head.hex() != c["hex"]:
-                failures.append(f"{fname}:{c['name']}: hex mismatch")
+            vals = [0 if f["name"].startswith("_") else d[f["name"]] for f in lay["fields"]]
+            head = struct.pack(fmt, lay["pkt_t"], lay["ver"], *vals) + b"\x00" * c.get("trailing_pad_bytes", 0)
+            ok = head.hex() == c["hex"]
+            print(f"  {lay['vectors']}:{c['name']:38s} {'OK' if ok else 'FAIL'}")
+            if not ok:
+                failures.append(f"{lay['vectors']}:{c['name']}: hex mismatch")
 
 
 def _resolve(node, doc, files):

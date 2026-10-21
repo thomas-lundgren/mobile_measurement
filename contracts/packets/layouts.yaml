@@ -1,0 +1,87 @@
+# Wire packet layouts — the single source.
+#
+# Every framed packet is pkt_t (u8), ver (u8), then a fixed core of the
+# fields below, in order, big-endian (README.md "Framing"). Generated from
+# this file by contracts/codegen/packet_codec.py (CI runs it with --check):
+#   - core/src/packet/layouts.rs: the Rust codec both nodes use (structs,
+#     to_bytes / decode, sizes, the pkt_t and ver constants) and a golden test
+#     per layout against its vectors;
+#   - the layout tables in the *.md specs and the registry table in README.md
+#     (between the GENERATED markers).
+# ci/validate_contracts.py packs every layout's vectors from this file too.
+# The vectors (../testvectors/packets/) stay hand-authored: an independent
+# check of the generator and of this file.
+#
+# Field types: u8 u16 u32 u64 i64. A field whose name starts with "_" is
+# reserved: 0 on send, ignored on receive, not in the struct.
+# Changing a layout means a new (pkt_t, ver) entry (README.md "Growth").
+
+types:
+  - { pkt_t: 0x01, const: PKT_PROBE,       name: Probe,       spec: probe.md }
+  - { pkt_t: 0x02, const: PKT_REALTIME,    name: Realtime,    spec: realtime.md }
+  - { pkt_t: 0x03, const: PKT_DSCP_PROBE,  name: DscpProbe,   spec: dscp_probe.md }
+  - { pkt_t: 0x04, const: PKT_APP_REQUEST, name: AppRequest,  spec: app_request.md }
+
+layouts:
+  - struct: ProbePacket
+    pkt_t: 0x01
+    ver: 1
+    vectors: probe_v1.json
+    doc: UDP probe, echoed by its peer (RTT, loss, jitter).
+    fields:
+      - { name: flow_id,         type: u32, doc: "Server-assigned per `RUN_TEST`." }
+      - { name: sequence_number, type: u64, doc: "Monotonic per `(flow_id, sender)`; starts at 0." }
+      - { name: send_mono_ns,    type: u64, doc: "Sender's `CLOCK_MONOTONIC` at transmit." }
+
+  - struct: RealtimePacket
+    pkt_t: 0x02
+    ver: 1
+    vectors: realtime_v1.json
+    doc: Realtime UDP stream packet; padded with zero bytes to the flow's packet size.
+    fields:
+      - { name: flow_id,         type: u32, doc: "Server-assigned per `RUN_TEST`." }
+      - { name: sequence_number, type: u64, doc: "Monotonic per `(flow_id, sender)`; starts at 0." }
+      - { name: send_mono_ns,    type: u64, doc: "Sender's `CLOCK_MONOTONIC` at transmit." }
+      - { name: send_utc_ns,     type: u64, doc: "Sender's `CLOCK_REALTIME` at transmit." }
+
+  - struct: DscpProbePacket
+    pkt_t: 0x03
+    ver: 1
+    vectors: dscp_probe_v1.json
+    doc: DSCP transparency probe; 0xFF (DSCP_UNKNOWN) where the remote has not filled a field yet.
+    fields:
+      - { name: flow_id,          type: u32, doc: "Server-assigned per `RUN_TEST`." }
+      - { name: sequence_number,  type: u64, doc: "Monotonic per `(flow_id, sender)`." }
+      - { name: send_mono_ns,     type: u64, doc: "Sender's `CLOCK_MONOTONIC` at transmit." }
+      - { name: dscp_intended_ul, type: u8,  doc: "DSCP value (0–63) the UE set on the uplink socket." }
+      - { name: dscp_actual_ul,   type: u8,  doc: "DSCP the server received (IP TOS via `IP_RECVTOS`); `0xFF` in the UE's first send." }
+      - { name: dscp_intended_dl, type: u8,  doc: "DSCP the server set on the echo socket; `0xFF` in the UE's first send." }
+      - { name: _pad,             type: u8 }
+
+  - struct: AppRequest
+    pkt_t: 0x04
+    ver: 1
+    vectors: app_request_v1.json
+    doc: "App-traffic object request, v1: a plain download (kind 0: the server answers with `size` bytes) or upload (kind 1: `size` bytes follow; the server echoes this header once it has them)."
+    fields:
+      - { name: kind,      type: u8,  doc: "`0` = download, `1` = upload." }
+      - { name: activity,  type: u8,  doc: "What the object is for (`enums.yaml` app_activities, code = index). Logged by both nodes." }
+      - { name: flow_id,   type: u32, doc: "Server-assigned per `RUN_TEST`." }
+      - { name: object_id, type: u64, doc: "`agent << 48 \\| episode << 20 \\| object`; the `sequence_number` of every row of this object." }
+      - { name: size,      type: u64, doc: "Object size in bytes." }
+
+  - struct: AppExchange
+    pkt_t: 0x04
+    ver: 2
+    vectors: app_exchange_v2.json
+    doc: "App-traffic exchange, v2: `up_bytes` follow the header; then the server waits `delay_ms` and answers with `down_bytes` (paced at `rate_bps` in `chunk_bytes` writes when `rate_bps > 0`), or with `down_bytes = 0` echoes the header."
+    fields:
+      - { name: activity,    type: u8,  doc: "Activity code (`enums.yaml` app_activities)." }
+      - { name: _reserved,   type: u8 }
+      - { name: flow_id,     type: u32, doc: "Server-assigned per `RUN_TEST`." }
+      - { name: object_id,   type: u64, doc: "As v1." }
+      - { name: up_bytes,    type: u64, doc: "Bytes that follow the header (request body, LLM context, upload)." }
+      - { name: down_bytes,  type: u64, doc: "Response size; `0` = no response, only the acknowledgement." }
+      - { name: delay_ms,    type: u32, doc: "Server think time after the upload, before the first response byte." }
+      - { name: rate_bps,    type: u32, doc: "Pace the response at this rate (bit/s); `0` = as fast as TCP takes it." }
+      - { name: chunk_bytes, type: u32, doc: "Paced: bytes per write (an SSE event); `0` = 5 ms worth, at most 64 KiB." }

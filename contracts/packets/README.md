@@ -1,9 +1,14 @@
 # Wire packets — framing & versioning
 
 This directory pins the bytes that travel between the data-generator on one
-node and the traffic engine on the other. Layouts are hand-authored;
-cross-language conformance is enforced by the golden vectors in
-`../testvectors/packets/`.
+node and the traffic engine on the other. Every fixed layout is defined once,
+in [`layouts.yaml`](layouts.yaml): `contracts/codegen/packet_codec.py`
+generates the Rust codec both nodes use (`core/src/packet/layouts.rs`), the
+layout tables in the specs and the registry below (CI runs it with
+`--check`). The golden vectors in `../testvectors/packets/` stay
+hand-authored, an independent check of the generator: the generated codec
+and `ci/validate_contracts.py` (packing from the YAML) both reproduce them.
+The `*.md` specs keep the protocol and semantics around the tables.
 
 Packets are expected to grow. Growth happens by **bumping the per-type
 format version**, not by runtime-extensible field encoding.
@@ -32,12 +37,16 @@ opaque bytes with a transport-level sequence).
 
 ## Packet-type registry
 
-| `pkt_t` | Name | Core size (v1) | Spec |
+<!-- BEGIN GENERATED: registry (contracts/packets/layouts.yaml; contracts/codegen/packet_codec.py) -->
+| `pkt_t` | Name | Layouts (`ver`: core size) | Spec |
 |---|---|---|---|
-| `0x01` | `Probe` | 20 bytes | [`probe.md`](probe.md) |
-| `0x02` | `Realtime` | 28 bytes | [`realtime.md`](realtime.md) |
-| `0x03` – `0x7F` | reserved | — | — |
-| `0x80` – `0xFF` | private | — | — |
+| `0x01` | `Probe` | v1: 20 B (`ProbePacket`) | [`probe.md`](probe.md) |
+| `0x02` | `Realtime` | v1: 28 B (`RealtimePacket`) | [`realtime.md`](realtime.md) |
+| `0x03` | `DscpProbe` | v1: 24 B (`DscpProbePacket`) | [`dscp_probe.md`](dscp_probe.md) |
+| `0x04` | `AppRequest` | v1: 22 B (`AppRequest`), v2: 42 B (`AppExchange`) | [`app_request.md`](app_request.md) |
+| `0x05` – `0x7f` | reserved | — | — |
+| `0x80` – `0xff` | private | — | — |
+<!-- END GENERATED: registry -->
 
 ## Growth: bump `ver`
 

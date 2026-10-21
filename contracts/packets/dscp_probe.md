@@ -10,17 +10,21 @@ one round trip.
 
 Core size: **24 bytes**. On-wire size: **26 bytes** (2-byte header + core).
 
-| Offset | Width | Field              | Type   | Notes |
-|--------|-------|--------------------|--------|-------|
-| 0      | 1     | `pkt_t`            | u8     | Always `0x03`. |
-| 1      | 1     | `ver`              | u8     | `0x01` for this layout. |
-| 2      | 4     | `flow_id`          | u32 BE | Server-assigned per `RUN_TEST`. |
-| 6      | 8     | `sequence_number`  | u64 BE | Monotonic per `(flow_id, sender)`. |
-| 14     | 8     | `send_mono_ns`     | u64 BE | Sender's `CLOCK_MONOTONIC` at transmit. |
-| 22     | 1     | `dscp_intended_ul` | u8     | DSCP value (0–63) UE set on the uplink socket. |
-| 23     | 1     | `dscp_actual_ul`   | u8     | DSCP actually received by the server (from IP TOS via `IP_RECVTOS`). Set to `0xFF` in UE's first send; filled by server in echo. |
-| 24     | 1     | `dscp_intended_dl` | u8     | DSCP the server set on the echo socket. Set to `0xFF` in UE's first send; filled by server in echo. |
-| 25     | 1     | `_pad`             | u8     | Reserved, always `0x00`. |
+<!-- BEGIN GENERATED: DscpProbePacket v1 (contracts/packets/layouts.yaml; contracts/codegen/packet_codec.py) -->
+| Offset | Width | Field | Type | Notes |
+|--------|-------|-------|------|-------|
+| 0 | 1 | `pkt_t` | u8 | Always `0x03`. |
+| 1 | 1 | `ver` | u8 | `0x01` for this layout. |
+| 2 | 4 | `flow_id` | u32 BE | Server-assigned per `RUN_TEST`. |
+| 6 | 8 | `sequence_number` | u64 BE | Monotonic per `(flow_id, sender)`. |
+| 14 | 8 | `send_mono_ns` | u64 BE | Sender's `CLOCK_MONOTONIC` at transmit. |
+| 22 | 1 | `dscp_intended_ul` | u8 | DSCP value (0–63) the UE set on the uplink socket. |
+| 23 | 1 | `dscp_actual_ul` | u8 | DSCP the server received (IP TOS via `IP_RECVTOS`); `0xFF` in the UE's first send. |
+| 24 | 1 | `dscp_intended_dl` | u8 | DSCP the server set on the echo socket; `0xFF` in the UE's first send. |
+| 25 | 1 | `_pad` | u8 | Reserved, `0`. |
+
+Core: 24 bytes; 26 on the wire.
+<!-- END GENERATED: DscpProbePacket v1 -->
 
 ## Protocol
 

@@ -8,7 +8,8 @@ rows, `exchange::Pool`, `core/tests/layering.rs`); **B1 done** (2026-10-21: mode
 on the findings page); **C1 done** (2026-10-21: `app_traffic/graph.rs`,
 `executor::run_graph`, profile `websearch`); **C2 done** (2026-10-21: `loop`,
 `task_interval_s`, `max_open_tasks`; `Agent::next_task`, `executor::run_timed`;
-lateness and dropped tasks on the page). Next: D. Supersedes the step order in
+lateness and dropped tasks on the page); **D0 done** (2026-10-21: packet
+layouts generated from `contracts/packets/layouts.yaml`). Next: D1. Supersedes the step order in
 `ai_traffic_implementation_plan.md` (see its "Order" section).
 
 ## 1. The proposal (summary)
@@ -217,14 +218,47 @@ separately).
 
 ### D — Engine per operation
 
-- `engine: exchange | bulk | udp_burst` per operation; default `exchange`
-  (today's behaviour).
-- `udp_burst`: paced datagrams of a given size/count, server-side counterpart
-  in the data-generator (receive and/or send bursts on request), its rows
-  tagged with the operation.
-- DSCP per operation: `set_tos` on that operation's socket; observed DSCP
-  needs the receiving side's `IP_RECVTOS` (already in `udp_timing`).
-- Experiment: the same video workload over TCP segments vs paced UDP.
+Each app operation picks how its bytes move; the models stay transport-free
+(the test plan maps activity → engine). Each engine is also a building block
+for the generic scenario layer (a bounded bulk segment is a timed load step).
+
+**D0 — packet layouts generated from one source (first).** Today the
+layouts are hand-written Markdown, the Rust codec hand-written to match,
+`validate_contracts.py` packs vectors with its own struct formats, and the
+README's type registry had drifted (0x03, 0x04 missing). Instead:
+`contracts/packets/layouts.yaml` (the type registry and every layout:
+`pkt_t`, `ver`, ordered fields with type and doc); `contracts/codegen/packet_codec.py`
+generates the Rust codec (structs, encode/decode, sizes, type constants) and
+the Markdown layout tables, with `--check` in CI; the CI vector check builds
+its struct formats from the YAML. Golden vectors stay hand-authored, so they
+remain an independent oracle. The existing fixed-layout packets (probe,
+realtime, dscp_probe, app_request v1, app_exchange v2) move first — their
+vectors prove the generated codec equals the hand-written one. Reach and
+time sync (text line, unframed reply) keep their own vectors.
+
+**D1 — engine per operation, bulk segment (no wire change).** Flow field
+`engines` (activity → `exchange` | `bulk` | `udp_burst`, default
+`exchange`); `app_events.engine`; `enums.yaml` `app_engines`. `bulk`: one
+bounded transfer on its own connection (not the pool), uplink paced on the
+phone; same wire and server handler as `exchange`.
+
+**D2 — paced UDP burst.** Packets (YAML → generated codec, vectors): burst
+request (object id, direction, count, size, rate, DSCP), data (object id,
+index, send mono/utc), end, ack (count received). Engine `core/src/burst.rs`
+(engine layer, layering gate): downlink — the phone's request (retried),
+the server sends `count` paced datagrams to the phone's address; uplink —
+paced datagrams, an end marker, the server's ack. The app flow's port also
+opens for UDP; the server does what each request says. Both nodes log every
+datagram (kernel receive time, `packets.app_packet_index`); a burst that
+ended is `ok`, loss shows as `app_events.packets` against `plan_packets`.
+
+**D3 — DSCP per operation, analysis, experiments.** Flow field `dscp`
+(activity → 0–63): UDP bursts marked both ways and the received marking
+logged on both nodes; TCP marked on the phone's uplink only (downlink marking
+and TCP observation need a wire change and capture: E). Analysis and page:
+per engine completion; bursts' loss, inter-arrival jitter against the
+planned spacing, DSCP sent vs received; same-seed comparison. Phases
+`app-video-tcp`, `app-video-udp`, `app-video-udp-ef`.
 
 ### E — As planned
 

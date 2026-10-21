@@ -16,19 +16,23 @@ token stream) and a tool call (request body, latency, result) need.
 
 Core size: **42 bytes**. On-wire size: **44 bytes**.
 
-| Offset | Width | Field         | Type   | Notes |
-|--------|-------|---------------|--------|-------|
-| 0      | 1     | `pkt_t`       | u8     | Always `0x04`. |
-| 1      | 1     | `ver`         | u8     | `0x02` for this layout. |
-| 2      | 1     | `activity`    | u8     | Activity code (table below). |
-| 3      | 1     | reserved      | u8     | `0`. |
-| 4      | 4     | `flow_id`     | u32 BE | Server-assigned per `RUN_TEST`. |
-| 8      | 8     | `object_id`   | u64 BE | As v1. |
-| 16     | 8     | `up_bytes`    | u64 BE | Bytes that follow the header (request body, LLM context, upload). |
-| 24     | 8     | `down_bytes`  | u64 BE | Response size; `0` = no response, only the acknowledgement. |
-| 32     | 4     | `delay_ms`    | u32 BE | Server think time after the upload, before the first response byte. |
-| 36     | 4     | `rate_bps`    | u32 BE | Pace the response at this rate (bit/s); `0` = as fast as TCP takes it. |
-| 40     | 4     | `chunk_bytes` | u32 BE | Paced: bytes per write (an SSE event); `0` = 5 ms worth, at most 64 KiB. |
+<!-- BEGIN GENERATED: AppExchange v2 (contracts/packets/layouts.yaml; contracts/codegen/packet_codec.py) -->
+| Offset | Width | Field | Type | Notes |
+|--------|-------|-------|------|-------|
+| 0 | 1 | `pkt_t` | u8 | Always `0x04`. |
+| 1 | 1 | `ver` | u8 | `0x02` for this layout. |
+| 2 | 1 | `activity` | u8 | Activity code (`enums.yaml` app_activities). |
+| 3 | 1 | `_reserved` | u8 | Reserved, `0`. |
+| 4 | 4 | `flow_id` | u32 BE | Server-assigned per `RUN_TEST`. |
+| 8 | 8 | `object_id` | u64 BE | As v1. |
+| 16 | 8 | `up_bytes` | u64 BE | Bytes that follow the header (request body, LLM context, upload). |
+| 24 | 8 | `down_bytes` | u64 BE | Response size; `0` = no response, only the acknowledgement. |
+| 32 | 4 | `delay_ms` | u32 BE | Server think time after the upload, before the first response byte. |
+| 36 | 4 | `rate_bps` | u32 BE | Pace the response at this rate (bit/s); `0` = as fast as TCP takes it. |
+| 40 | 4 | `chunk_bytes` | u32 BE | Paced: bytes per write (an SSE event); `0` = 5 ms worth, at most 64 KiB. |
+
+Core: 42 bytes; 44 on the wire.
+<!-- END GENERATED: AppExchange v2 -->
 
 Protocol: the server reads `up_bytes`, waits `delay_ms`, then sends
 `down_bytes`. Paced, chunk *k* is due *k* · `chunk_bytes` · 8 / `rate_bps`
@@ -46,15 +50,19 @@ Golden vectors: `contracts/testvectors/packets/app_exchange_v2.json`.
 
 Core size: **22 bytes**. On-wire size: **24 bytes** (2-byte header + core).
 
-| Offset | Width | Field       | Type   | Notes |
-|--------|-------|-------------|--------|-------|
-| 0      | 1     | `pkt_t`     | u8     | Always `0x04`. |
-| 1      | 1     | `ver`       | u8     | `0x01` for this layout. |
-| 2      | 1     | `kind`      | u8     | `0` = download, `1` = upload. |
-| 3      | 1     | `activity`  | u8     | What the object is for (table below). Logged by both nodes. |
-| 4      | 4     | `flow_id`   | u32 BE | Server-assigned per `RUN_TEST`. |
-| 8      | 8     | `object_id` | u64 BE | `agent << 48 \| episode << 20 \| object`; the `sequence_number` of every row of this object. |
-| 16     | 8     | `size`      | u64 BE | Object size in bytes. |
+<!-- BEGIN GENERATED: AppRequest v1 (contracts/packets/layouts.yaml; contracts/codegen/packet_codec.py) -->
+| Offset | Width | Field | Type | Notes |
+|--------|-------|-------|------|-------|
+| 0 | 1 | `pkt_t` | u8 | Always `0x04`. |
+| 1 | 1 | `ver` | u8 | `0x01` for this layout. |
+| 2 | 1 | `kind` | u8 | `0` = download, `1` = upload. |
+| 3 | 1 | `activity` | u8 | What the object is for (`enums.yaml` app_activities, code = index). Logged by both nodes. |
+| 4 | 4 | `flow_id` | u32 BE | Server-assigned per `RUN_TEST`. |
+| 8 | 8 | `object_id` | u64 BE | `agent << 48 \| episode << 20 \| object`; the `sequence_number` of every row of this object. |
+| 16 | 8 | `size` | u64 BE | Object size in bytes. |
+
+Core: 22 bytes; 24 on the wire.
+<!-- END GENERATED: AppRequest v1 -->
 
 ## Protocol
 
