@@ -50,6 +50,16 @@ its impact on the realtime streams). Rebuilt every 5 minutes by
 (`planning/ota_and_versioning_plan.md`, parked); the user's AI-traffic plan
 (`planning/mobile_ai_traffic_generator_development_plan.md`).
 
+**Ideas (todo):**
+- Area/position-based measurement trigger: start a test plan when the phone
+  enters a defined area (geofence: centre + radius, or a polygon / route
+  segment), so the same places are measured on every pass and results can be
+  compared by location over time. Today's triggers are time windows and the
+  commute watcher (Wi-Fi left / cells seen). Open points: where it is decided
+  (the server from a position in the device status, or the Logger itself, which
+  also works without coverage), areas defined as a contract type, a cooldown
+  per area, and a data budget.
+
 
 ## Summary
 
