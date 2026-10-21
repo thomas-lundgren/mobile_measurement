@@ -273,6 +273,7 @@ public final class Contract {
         public static final String WEB_FETCH = "web_fetch";
         public static final String CLOUD_TOOL = "cloud_tool";
         public static final String LLM_RESUME = "llm_resume";
+        public static final String WEB_SEARCH = "web_search";
     }
 
     /** enums.yaml app_step_kinds */
@@ -289,6 +290,8 @@ public final class Contract {
         public static final String VIDEO_SEGMENT = "video_segment";
         public static final String FEED = "feed";
         public static final String SCRIPT_ACTION = "script_action";
+        public static final String SEARCH = "search";
+        public static final String FETCH = "fetch";
     }
 
     /** enums.yaml app_outcomes */
@@ -300,6 +303,7 @@ public final class Contract {
         public static final String STOPPED = "stopped";
         public static final String ERROR = "error";
         public static final String SKIPPED = "skipped";
+        public static final String DEP_FAILED = "dep_failed";
     }
 
     /** OpenAPI AppActionKind (a Rust enum on the server) */
@@ -320,6 +324,7 @@ public final class Contract {
         public static final String SOCIAL = "social";
         public static final String MIXED = "mixed";
         public static final String AGENT = "agent";
+        public static final String WEBSEARCH = "websearch";
         public static final String SCRIPT = "script";
     }
 

@@ -143,6 +143,7 @@ APP_EVENTS = [
     "activity",
     "episode",
     "after_episode",
+    "after_objects",
     "parallel",
     "plan_up_bytes",
     "plan_down_bytes",

@@ -88,19 +88,13 @@ impl Pool {
         }
     }
 
-    /// All pooled connections, topped up to at least `want` with new ones
-    /// (fewer when the server can't be reached; empty when none can be
-    /// opened), each with whether it was opened just now. Hand the ones
-    /// still usable back with `put_back`.
-    pub fn take(&mut self, want: usize) -> Vec<(TcpStream, bool)> {
-        let mut out: Vec<(TcpStream, bool)> = self.conns.drain(..).map(|c| (c, false)).collect();
-        while out.len() < want {
-            match connect(&self.server) {
-                Ok(c) => out.push((c, true)),
-                Err(_) => break,
-            }
+    /// An idle pooled connection, or a new one (`true`: opened just now);
+    /// none when the server can't be reached. Hand it back with `put_back`.
+    pub fn take_one(&mut self) -> Option<(TcpStream, bool)> {
+        if let Some(c) = self.conns.pop() {
+            return Some((c, false));
         }
-        out
+        connect(&self.server).ok().map(|c| (c, true))
     }
 
     pub fn put_back(&mut self, conns: Vec<TcpStream>) {

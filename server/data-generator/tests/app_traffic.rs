@@ -272,7 +272,7 @@ impl Ev {
 }
 
 fn app_events(path: &std::path::Path) -> Vec<Ev> {
-    use arrow::array::{Array, BooleanArray, StringArray, UInt32Array, UInt64Array};
+    use arrow::array::{Array, BooleanArray, ListArray, StringArray, UInt32Array, UInt64Array};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     let reader = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(path).unwrap())
         .unwrap()
@@ -294,6 +294,10 @@ fn app_events(path: &std::path::Path) -> Vec<Ev> {
                     json!(a.value(i))
                 } else if let Some(a) = col.as_any().downcast_ref::<BooleanArray>() {
                     json!(a.value(i))
+                } else if let Some(a) = col.as_any().downcast_ref::<ListArray>() {
+                    let v = a.value(i);
+                    let v = v.as_any().downcast_ref::<UInt64Array>().unwrap();
+                    json!(v.values().to_vec())
                 } else {
                     json!(null)
                 };
@@ -303,6 +307,90 @@ fn app_events(path: &std::path::Path) -> Vec<Ev> {
         }
     }
     out
+}
+
+/// A websearch agent's first task runs as a graph against the object
+/// server: plan → search → parallel fetches → read, in dependency order,
+/// each node logged with the object ids it waited for.
+#[tokio::test(flavor = "multi_thread")]
+async fn websearch_task_runs_as_a_graph() {
+    let st = AppState::default();
+    let dir = tempfile::tempdir().unwrap();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let prep = send(&st, "POST", "/internal/generators", Some(json!({
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X8", "device_id": "dev_x", "session_id": "ses_x",
+        "flow": {"flow_id": 5, "type": "app_traffic", "profile": "websearch"},
+        "server_port": port, "node_log_dir": dir.path().to_str().unwrap()
+    }))).await;
+    let gid = prep["generator_id"].as_str().unwrap().to_string();
+    let cfg = AppTraffic {
+        server: format!("127.0.0.1:{port}"),
+        flow_id: 5,
+        profile: "websearch".into(),
+        workers: 1,
+        seed: 2,
+        scale: 0.2,
+        actions: vec![],
+        placement: app_traffic::Placement::Device,
+        log: Some(app_log(dir.path())),
+    };
+    let (sink, _rx, _) = packet_channel(1 << 18);
+    let stop = AtomicBool::new(false);
+    let tally = Counters::default();
+    std::thread::scope(|s| {
+        s.spawn(|| app_traffic::run(&cfg, sink, &tally, &stop));
+        // the first task ends when the user starts reading (>= 5 s idle)
+        let t0 = std::time::Instant::now();
+        let (mut last, mut since) = (0, std::time::Instant::now());
+        loop {
+            let moved = tally.bytes_received.load(Ordering::Relaxed)
+                + tally.bytes_sent.load(Ordering::Relaxed);
+            if moved != last {
+                (last, since) = (moved, std::time::Instant::now());
+            } else if last > 0 && since.elapsed() > Duration::from_millis(4500) {
+                break;
+            }
+            assert!(
+                t0.elapsed() < Duration::from_secs(60),
+                "the task did not finish"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        stop.store(true, Ordering::Release);
+    });
+    let ev = app_events(&dir.path().join("app_events_0005.parquet"));
+    let task: Vec<&Ev> = ev.iter().filter(|r| r.u("task") == 1).collect();
+    assert!(
+        task.iter().all(|r| r.s("outcome") == "ok"),
+        "every node of the task ok"
+    );
+    let acts: Vec<&str> = task.iter().map(|r| r.s("activity")).collect();
+    assert_eq!((acts[0], acts[1]), ("llm_call", "web_search"));
+    // the first round: search (step 2), its fetches (3), the read (4)
+    let fetches: Vec<&&Ev> = task.iter().filter(|r| r.u("step") == 3).collect();
+    assert!(fetches.len() >= 2 && fetches.iter().all(|r| r.s("activity") == "web_fetch"));
+    let search = task[1].u("object_id");
+    let read = task.iter().find(|r| r.u("step") == 4).unwrap();
+    assert_eq!(read.s("activity"), "llm_call");
+    for f in &fetches {
+        assert_eq!(f.0["after_objects"], json!([search]));
+        assert!(f.u("start_mono_ns") >= task[1].u("done_mono_ns"));
+        assert!(
+            read.u("start_mono_ns") >= f.u("done_mono_ns"),
+            "the read waits for every fetch"
+        );
+    }
+    send(
+        &st,
+        "POST",
+        &format!("/internal/generators/{gid}/stop"),
+        None,
+    )
+    .await;
 }
 
 /// A test that ends mid-object logs it as `stopped`: started, never done.

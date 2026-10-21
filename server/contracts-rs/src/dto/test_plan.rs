@@ -112,10 +112,13 @@ pub enum AppProfile {
     /// An AI agent: LLM calls (context up, streamed reply) and tool calls
     /// (MCP, web fetch) in task loops.
     Agent,
+    /// An AI agent answering by web search: per task a graph of an LLM plan
+    /// call, a search, parallel page fetches and an LLM synthesis call.
+    Websearch,
     Script,
 }
 
-/// Where an AI agent's tools run (app_traffic profile "agent").
+/// Where an AI agent's tools run (app_traffic profiles "agent", "websearch").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum AppToolPlacement {

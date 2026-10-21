@@ -820,7 +820,11 @@ and how the apps themselves fare (page load time, video segment time).
   reply, between them parallel MCP calls and web fetches; `placement` puts the
   tools on the phone, in the provider's cloud inside the call — the reply
   pauses and carries the result text, no tool traffic — or MCP on the phone
-  and web fetches in the cloud) and `script` (an
+  and web fetches in the cloud), `websearch` (an AI agent answering by web
+  search, each task a graph: an LLM call plans the search, a search API call,
+  2–6 page fetches in parallel, an LLM call that waits for all of them and
+  reads their text — sometimes a second round; the same placements) and
+  `script` (an
   explicit timeline of actions, so an AI agent playing a user can write the
   plan). `workers` runs several users at once, `seed` makes their choices
   reproducible, `scale` shrinks every object to save data.
@@ -837,7 +841,9 @@ and how the apps themselves fare (page load time, video segment time).
   kind) → object — the plan (bytes up and down, think time, pacing), when it
   was planned, started, got its first byte and finished, the bytes moved,
   the outcome (`ok`, `timeout`, `stopped`, `error`, `skipped`) and whether it
-  paid for a new connection. Workloads are layered: the model emits steps,
+  paid for a new connection; in a task graph also the objects it waited for
+  (`after_objects`) — a node whose dependency failed is `dep_failed` and
+  never runs. Workloads are layered: the model emits steps,
   the scheduler turns them into operations, the executor runs them through
   the request/response engine (`planning/app_workload_layering.md`).
 

@@ -5,7 +5,8 @@
 rows, `exchange::Pool`, `core/tests/layering.rs`); **B1 done** (2026-10-21: model
 `StepMeta`, `scheduler` / `executor`, `app_events` log); **B2 done**
 (2026-10-21: `app.tasks` / `app.intent`, Tasks and planned-vs-observed tables
-on the findings page). Next: C. Supersedes the step order in
+on the findings page); **C1 done** (2026-10-21: `app_traffic/graph.rs`,
+`executor::run_graph`, profile `websearch`). Next: C2 (open loop). Supersedes the step order in
 `ai_traffic_implementation_plan.md` (see its "Order" section).
 
 ## 1. The proposal (summary)
@@ -168,10 +169,49 @@ tab.
 - Analysis and page: Tasks table, planned vs observed per activity (AI plan
   §1.5).
 
-### C — Open loop and graphs
+### C — Task graphs and open loop
 
-As AI plan step 3: dependency graphs from generators (`agentic_websearch`
-first), `loop: closed | open`, completion vs schedule in a fixed duration.
+As AI plan step 3, in two parts. Built for the agent workloads now, but kept
+free of app types (`app_traffic/graph.rs`: nodes, dependencies, the ready
+set) so it can become the generic scenario layer for every test later
+(timed load segments, ramps now driven by shell scripts — evaluated
+separately).
+
+**C1 — graphs, closed loop.**
+- Models may emit a task as a graph: nodes (a fetch, its step meta) with
+  dependencies. Existing profiles keep emitting bursts; a burst is a graph
+  without dependencies, so there is one execution path.
+- The executor runs a graph: at most `parallel` in flight, a node starts when
+  all its dependencies ended `ok`; a node whose dependency failed is logged
+  `dep_failed` and never runs. Connections are taken from the pool per
+  worker as work arrives (not all up front).
+- Profile `websearch` (`agentic_websearch`): an LLM plan call → a search API
+  call → 2–6 page fetches in parallel → an LLM synthesis call that waits for
+  all fetches (their text goes up as context); 30 % a second search round;
+  5–60 s between tasks. Cloud placement: the search and fetches run at the
+  provider (a `cloud_tool` pause and `llm_resume`); hybrid: search at the
+  provider, fetches on the phone. Sizes and times are estimates marked
+  unverified until the registry (E).
+- Contract: `app_activities` + `web_search` (appended, wire code 14);
+  `app_step_kinds` + `search`, `fetch`; `app_outcomes` + `dep_failed`;
+  `app_events.after_objects` (list of the object ids a node waited for);
+  profile `websearch`.
+- Checks: graph shape and determinism (unit); existing profiles' fetch hash
+  unchanged; executor dependency order and `dep_failed` (unit, local
+  server); data-generator end-to-end with `websearch`; live phase
+  `app-websearch`.
+
+**C2 — open loop.**
+- Flow field `loop: closed | open` (default closed). Open: tasks arrive at
+  random with a mean interval (`task_interval_s`), whatever is still
+  running; inside a task each node is due at the task start plus its planned
+  offset (think time + transfer at a nominal rate) and starts then, late
+  dependencies or not. A full backlog (unfinished tasks per agent) drops the
+  arriving task as `skipped`, so offered load stays visible.
+- `app_events.due_mono_ns` (open loop): lateness = start − due.
+- Analysis: lateness, offered vs carried load, tasks finished in the fixed
+  duration; closed vs open on the same seed side by side. Phase
+  `app-websearch-open`.
 
 ### D — Engine per operation
 

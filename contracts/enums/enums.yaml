@@ -276,6 +276,7 @@ app_activities:
   - web_fetch        # 11 page fetched by an agent's tool
   - cloud_tool       # 12 tool result in a cloud-tool reply (see app_request.md)
   - llm_resume       # 13 the reply's next turn after a cloud tool
+  - web_search       # 14 a search API call by an agent's tool (websearch)
 
 # ---------------------------------------------------------------------------
 # App workload steps (app_events.parquet step_kind): what a burst of a task
@@ -292,6 +293,8 @@ app_step_kinds:
   - video_segment    # one segment when due
   - feed             # a feed scroll's images (and a photo upload)
   - script_action    # one action of a scripted timeline
+  - search           # a search API call (websearch graph)
+  - fetch            # page fetches of a search result (websearch graph)
 
 # ---------------------------------------------------------------------------
 # How an app object ended (app_events.parquet outcome).
@@ -301,4 +304,5 @@ app_outcomes:
   - timeout          # no completion within the object timeout
   - stopped          # the test ended first (started or not)
   - error            # the connection failed mid-object
-  - skipped          # no connection could be opened for its burst
+  - skipped          # no connection for it (none could be opened, or the burst's failed)
+  - dep_failed       # a node it depends on did not end ok: never ran

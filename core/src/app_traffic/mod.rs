@@ -25,6 +25,7 @@
 //! instead — the hook for an AI agent that plays a user and writes the plan.
 
 mod executor;
+pub mod graph;
 mod model;
 mod scheduler;
 

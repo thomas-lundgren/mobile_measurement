@@ -25,8 +25,18 @@ const MCP_CALL: u8 = 10;
 const WEB_FETCH: u8 = 11;
 const CLOUD_TOOL: u8 = 12;
 const LLM_RESUME: u8 = 13;
+const WEB_SEARCH: u8 = 14;
 
-pub const PROFILES: [&str; 7] = ["web", "mail", "video", "social", "mixed", "agent", "script"];
+pub const PROFILES: [&str; 8] = [
+    "web",
+    "mail",
+    "video",
+    "social",
+    "mixed",
+    "agent",
+    "websearch",
+    "script",
+];
 
 /// Where an AI agent's tools run (profile "agent").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,7 +163,7 @@ impl Fetch {
 }
 
 /// Kinds of burst (`enums.yaml` app_step_kinds, in order).
-pub const STEP_KINDS: [&str; 10] = [
+pub const STEP_KINDS: [&str; 12] = [
     "llm_turn",
     "tools",
     "cloud_tools",
@@ -164,6 +174,8 @@ pub const STEP_KINDS: [&str; 10] = [
     "video_segment",
     "feed",
     "script_action",
+    "search",
+    "fetch",
 ];
 
 /// Where a burst belongs: the agent's `task` (one unit of user intent, from
@@ -186,10 +198,25 @@ pub enum Step {
         parallel: usize,
         meta: StepMeta,
     },
+    /// Run a task graph: each node once the nodes it depends on have ended
+    /// ok, at most `parallel` at a time (`graph::Tracker`).
+    Graph {
+        nodes: Vec<GraphNode>,
+        parallel: usize,
+    },
     /// Stay idle until this long after the agent started.
     Until(Duration),
     /// Nothing more to do (script finished).
     Done,
+}
+
+/// One node of a task graph: an object, where it sits in the task, and the
+/// nodes (earlier in the list) it waits for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphNode {
+    pub fetch: Fetch,
+    pub meta: StepMeta,
+    pub deps: Vec<usize>,
 }
 
 /// splitmix64: small, seedable, good enough for traffic models.
@@ -236,6 +263,7 @@ enum Mode {
     Video,
     Social,
     Agent,
+    WebSearch,
 }
 
 /// Queued plan item; Think turns into an absolute `Until` when reached.
@@ -273,6 +301,8 @@ pub struct Agent {
     tasks: u32,
     task: u32,
     step: u32,
+    /// websearch: a task has run; the user reads the answer next.
+    answered: bool,
 }
 
 impl Agent {
@@ -283,6 +313,7 @@ impl Agent {
             "video" => Mode::Video,
             "social" => Mode::Social,
             "agent" => Mode::Agent,
+            "websearch" => Mode::WebSearch,
             _ => Mode::Web,
         };
         let mail_at = Duration::from_secs_f64(rng.uniform(5.0, 60.0));
@@ -305,6 +336,7 @@ impl Agent {
             tasks: 0,
             task: 0,
             step: 0,
+            answered: false,
         }
     }
 
@@ -434,6 +466,7 @@ impl Agent {
             Mode::Video => self.video(now),
             Mode::Social => self.feed(),
             Mode::Agent => self.agent(now),
+            Mode::WebSearch => self.websearch(now),
         }
     }
 
@@ -530,6 +563,134 @@ impl Agent {
             fetches: vec![llm],
             parallel: 1,
             meta,
+        }
+    }
+
+    /// An LLM call's reply stream after `ttft_s` (time to first token):
+    /// `tokens` at 40–90 tokens/s in server-sent events, `up` bytes sent
+    /// first (the context; 0 for a resumed reply).
+    fn llm(&mut self, activity: u8, up: u64, ttft_s: f64, tokens: f64) -> Fetch {
+        let tokens_per_s = self.rng.uniform(40.0, 90.0);
+        Fetch {
+            up: if up == 0 {
+                0
+            } else {
+                ((up as f64 * self.scale) as u64).max(1)
+            },
+            delay_ms: (ttft_s * 1000.0) as u32,
+            down: (((tokens * SSE_BYTES_PER_TOKEN + 1200.0) * self.scale) as u64).max(1),
+            rate_bps: (tokens_per_s * SSE_BYTES_PER_TOKEN * 8.0) as u32,
+            chunk: SSE_EVENT,
+            ..Fetch::download(activity, 0)
+        }
+    }
+
+    /// An AI agent answering by web search: per task one graph — an LLM call
+    /// that plans the search, a search API call, 2–6 page fetches in
+    /// parallel, an LLM call that reads them (their text goes up with the
+    /// context) and streams the answer; 30 % of tasks search a second round
+    /// first. Placement: device runs the search and the fetches on the
+    /// phone; cloud runs both at the provider inside the call (a pause, then
+    /// their text down: `cloud_tool`, and the reply resumes: `llm_resume`);
+    /// hybrid searches at the provider and fetches the pages on the phone.
+    /// Between tasks the user reads the answer (5–60 s).
+    fn websearch(&mut self, now: Duration) -> Step {
+        if self.answered {
+            self.answered = false;
+            return Step::Until(now + self.rng.secs(15.0, 0.7, 5.0, 60.0));
+        }
+        self.answered = true;
+        self.new_task();
+        let mut nodes: Vec<GraphNode> = Vec::new();
+        let add = |nodes: &mut Vec<GraphNode>, fetch, meta, deps: Vec<usize>| {
+            nodes.push(GraphNode { fetch, meta, deps });
+            nodes.len() - 1
+        };
+        let mut context = self.rng.lognormal(8e3, 0.4).clamp(3e3, 30e3) as u64;
+        let ttft = self.rng.lognormal(0.9, 0.5).clamp(0.25, 10.0);
+        let tokens = self.rng.lognormal(120.0, 0.5).clamp(30.0, 600.0);
+        let plan = self.llm(LLM_CALL, context, ttft, tokens);
+        context += tokens as u64 * CONTEXT_BYTES_PER_TOKEN;
+        let m = self.meta("llm_turn");
+        let mut last = add(&mut nodes, plan, m, vec![]);
+        let rounds = if self.rng.chance(0.3) { 2 } else { 1 };
+        for round in 0..rounds {
+            let search = Fetch {
+                up: 600,
+                delay_ms: (self.rng.lognormal(0.6, 0.5).clamp(0.15, 4.0) * 1000.0) as u32,
+                ..Fetch::download(WEB_SEARCH, self.bytes(30e3, 0.5, 5e3, 200e3))
+            };
+            let n = 2 + (self.rng.next() % 5) as usize;
+            let pages: Vec<Fetch> = (0..n)
+                .map(|_| Fetch {
+                    up: 600,
+                    delay_ms: (self.rng.lognormal(0.25, 0.6).clamp(0.03, 3.0) * 1000.0) as u32,
+                    ..Fetch::download(WEB_FETCH, self.bytes(150e3, 1.0, 5e3, 3e6))
+                })
+                .collect();
+            let text = |f: &Fetch| f.down.min(TOOL_RESULT_MAX) + 300;
+            let found = text(&search) + pages.iter().map(text).sum::<u64>();
+            let final_round = round + 1 == rounds;
+            let ttft = self.rng.lognormal(1.2, 0.5).clamp(0.3, 12.0);
+            let tokens = if final_round {
+                self.rng.lognormal(400.0, 0.6).clamp(50.0, 3000.0)
+            } else {
+                self.rng.lognormal(100.0, 0.5).clamp(20.0, 600.0)
+            };
+            let slowest = pages.iter().map(|p| p.delay_ms).max().unwrap_or(0);
+            match self.placement {
+                Placement::Device => {
+                    let m = self.meta("search");
+                    let s = add(&mut nodes, search, m, vec![last]);
+                    let m = self.meta("fetch");
+                    let fetched: Vec<usize> = pages
+                        .into_iter()
+                        .map(|p| add(&mut nodes, p, m, vec![s]))
+                        .collect();
+                    context += found;
+                    let read = self.llm(LLM_CALL, context, ttft, tokens);
+                    let m = self.meta("llm_turn");
+                    last = add(&mut nodes, read, m, fetched);
+                }
+                Placement::Cloud => {
+                    // the provider searches and fetches inside the call
+                    let result = Fetch {
+                        delay_ms: search.delay_ms + slowest,
+                        ..Fetch::download(CLOUD_TOOL, found)
+                    };
+                    let m = self.meta("cloud_tools");
+                    let r = add(&mut nodes, result, m, vec![last]);
+                    let resume = Fetch {
+                        activity: LLM_RESUME,
+                        ..self.llm(LLM_CALL, 0, ttft * 0.5, tokens)
+                    };
+                    let m = self.meta("llm_turn");
+                    last = add(&mut nodes, resume, m, vec![r]);
+                }
+                Placement::Hybrid => {
+                    // the provider searches; the phone fetches the pages
+                    let result = Fetch {
+                        delay_ms: search.delay_ms,
+                        ..Fetch::download(CLOUD_TOOL, text(&search))
+                    };
+                    let m = self.meta("cloud_tools");
+                    let r = add(&mut nodes, result, m, vec![last]);
+                    let m = self.meta("fetch");
+                    let fetched: Vec<usize> = pages
+                        .into_iter()
+                        .map(|p| add(&mut nodes, p, m, vec![r]))
+                        .collect();
+                    context += found;
+                    let read = self.llm(LLM_CALL, context, ttft, tokens);
+                    let m = self.meta("llm_turn");
+                    last = add(&mut nodes, read, m, fetched);
+                }
+            }
+            context += tokens as u64 * CONTEXT_BYTES_PER_TOKEN;
+        }
+        Step::Graph {
+            nodes,
+            parallel: MAX_PARALLEL,
         }
     }
 
@@ -666,6 +827,13 @@ mod tests {
                     for f in fetches {
                         up += f.up;
                         down += f.down;
+                    }
+                }
+                Step::Graph { nodes, parallel } => {
+                    assert!(!nodes.is_empty() && *parallel >= 1 && *parallel <= MAX_PARALLEL);
+                    for n in nodes {
+                        up += n.fetch.up;
+                        down += n.fetch.down;
                     }
                 }
                 Step::Done => break,
@@ -812,6 +980,7 @@ mod tests {
                         now += f.server_time();
                     }
                 }
+                Step::Graph { .. } => unreachable!("agent emits bursts"),
                 Step::Until(t) => now = t,
                 Step::Done => unreachable!(),
             }
@@ -888,6 +1057,7 @@ mod tests {
                     calls = 0;
                     last_up = 0;
                 }
+                Step::Graph { .. } => unreachable!("agent emits bursts"),
                 Step::Done => panic!(),
             }
         }
@@ -907,11 +1077,105 @@ mod tests {
         steps(profile, seed, secs)
             .2
             .into_iter()
-            .filter_map(|s| match s {
-                Step::Burst { meta, .. } => Some(meta),
-                _ => None,
+            .flat_map(|s| match s {
+                Step::Burst { meta, .. } => vec![meta],
+                Step::Graph { nodes, .. } => nodes.iter().map(|n| n.meta).collect(),
+                _ => vec![],
             })
             .collect()
+    }
+
+    /// The task graphs of a websearch agent with tools placed `p`.
+    fn graphs(p: Placement, seed: u64, n: usize) -> Vec<Vec<GraphNode>> {
+        let mut a = Agent::new("websearch", seed, 1.0, &[]).with_placement(p);
+        let (mut now, mut out) = (Duration::ZERO, vec![]);
+        while out.len() < n {
+            match a.next_step(now) {
+                Step::Graph { nodes, parallel } => {
+                    assert_eq!(parallel, MAX_PARALLEL);
+                    out.push(nodes);
+                }
+                Step::Until(t) => now = t,
+                s => panic!("websearch emitted {s:?}"),
+            }
+        }
+        out
+    }
+
+    /// Device: plan → search → 2–6 fetches (each only after the search) →
+    /// a reading call that waits for every fetch and sends their text up.
+    #[test]
+    fn websearch_is_a_search_graph() {
+        let gs = graphs(Placement::Device, 3, 40);
+        assert_eq!(gs, graphs(Placement::Device, 3, 40), "seeded");
+        let mut second_rounds = 0;
+        for g in &gs {
+            assert_eq!(
+                (g[0].fetch.activity, g[0].meta.kind),
+                (LLM_CALL, "llm_turn")
+            );
+            assert!(g[0].deps.is_empty());
+            let mut i = 1;
+            let mut last = 0;
+            while i < g.len() {
+                assert_eq!(
+                    (g[i].fetch.activity, g[i].deps.as_slice()),
+                    (WEB_SEARCH, [last].as_slice())
+                );
+                let s = i;
+                i += 1;
+                let fetches: Vec<usize> = (i..g.len())
+                    .take_while(|&k| g[k].fetch.activity == WEB_FETCH)
+                    .collect();
+                assert!(
+                    (2..=6).contains(&fetches.len()),
+                    "{} fetches",
+                    fetches.len()
+                );
+                assert!(fetches
+                    .iter()
+                    .all(|&k| g[k].deps == [s] && g[k].meta.kind == "fetch"));
+                i += fetches.len();
+                let read = &g[i];
+                assert_eq!((read.fetch.activity, &read.deps), (LLM_CALL, &fetches));
+                // the pages' text goes up with the context
+                assert!(read.fetch.up > g[0].fetch.up + 5_000);
+                last = i;
+                i += 1;
+                if i < g.len() {
+                    second_rounds += 1;
+                }
+            }
+            // steps count up through the graph, one task per graph
+            assert!(g
+                .windows(2)
+                .all(|w| w[1].meta.step >= w[0].meta.step && w[1].meta.task == w[0].meta.task));
+        }
+        assert!(
+            (4..=24).contains(&second_rounds),
+            "{second_rounds} second rounds of 40"
+        );
+    }
+
+    /// Cloud: no search or fetch traffic from the phone — the provider's
+    /// result text comes down inside the call, which then resumes.
+    #[test]
+    fn websearch_in_the_cloud_and_split() {
+        for g in graphs(Placement::Cloud, 5, 20) {
+            assert!(g
+                .iter()
+                .all(|n| ![WEB_SEARCH, WEB_FETCH].contains(&n.fetch.activity)));
+            assert_eq!(g[1].fetch.activity, CLOUD_TOOL);
+            assert_eq!((g[2].fetch.activity, g[2].fetch.up), (LLM_RESUME, 0));
+            assert!(g.iter().skip(1).all(|n| n.deps.len() == 1));
+        }
+        for g in graphs(Placement::Hybrid, 5, 20) {
+            assert!(g.iter().all(|n| n.fetch.activity != WEB_SEARCH));
+            assert_eq!(g[1].fetch.activity, CLOUD_TOOL);
+            assert!(g
+                .iter()
+                .any(|n| n.fetch.activity == WEB_FETCH && n.deps == [1]));
+        }
     }
 
     /// Tasks and steps are reproducible, and attaching them changed nothing

@@ -1,8 +1,8 @@
 //! Scheduling: each agent asks its model for the next step, waits when told
-//! to, and turns a burst into operations — the exchanges with their place in
-//! the task (agent → task → step → object) and the burst they waited for —
-//! which the executor runs. Closed loop: a burst starts once the previous one
-//! has ended. Every operation becomes a row of the intended-operations log
+//! to, and turns a burst or a task graph into operations — the exchanges
+//! with their place in the task (agent → task → step → object), the burst
+//! they waited for and, in a graph, the operations they depend on — which the
+//! executor runs. Closed loop: a step starts once the previous one has ended. Every operation becomes a row of the intended-operations log
 //! (`contracts/parquet/app_events.parquet.yaml`), written when the flow stops.
 
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use super::executor::{self, Exec};
-use super::{activity_name, Agent, AppAction, Fetch, Placement, Step, StepMeta};
+use super::{activity_name, Agent, AppAction, Fetch, GraphNode, Placement, Step, StepMeta};
 use crate::aux_log::{self, AppEventRow, AuxContext};
 use crate::endpoint::Counters;
 use crate::exchange::Pool;
@@ -59,6 +59,9 @@ pub struct Operation {
     pub agent: u32,
     pub episode: u64,
     pub after_episode: Option<u64>,
+    /// Task graphs: the operations (object ids) this one waits for; `None`
+    /// for a plain burst.
+    pub after: Option<Vec<u64>>,
     pub meta: StepMeta,
     pub fetch: Fetch,
     pub parallel: usize,
@@ -118,28 +121,24 @@ fn agent(cfg: &AppTraffic, exec: &Exec, rows: &Mutex<Vec<AppEventRow>>, w: u32, 
                 parallel,
                 meta,
             } => {
-                episode += 1;
-                let planned = Timestamp::now();
-                // object_id: agent | episode (page, sync, segment...) | object
-                let base = ((w as u64) << 48) | ((episode & 0x0FFF_FFFF) << 20);
-                let ops: Vec<Operation> = fetches
-                    .iter()
-                    .enumerate()
-                    .map(|(i, f)| Operation {
-                        id: base | i as u64,
-                        agent: w,
-                        episode,
-                        after_episode: (episode > 1).then(|| episode - 1),
+                let nodes = fetches
+                    .into_iter()
+                    .map(|fetch| GraphNode {
+                        fetch,
                         meta,
-                        fetch: *f,
-                        parallel,
-                        planned,
+                        deps: vec![],
                     })
                     .collect();
-                let done = executor::run_burst(exec, &mut pool, &ops, parallel);
-                rows.lock()
-                    .unwrap()
-                    .extend(ops.iter().zip(done).map(|(op, d)| row(cfg.flow_id, op, d)));
+                episode += 1;
+                run_step(
+                    cfg, exec, rows, &mut pool, w, episode, nodes, parallel, false,
+                );
+            }
+            Step::Graph { nodes, parallel } => {
+                episode += 1;
+                run_step(
+                    cfg, exec, rows, &mut pool, w, episode, nodes, parallel, true,
+                );
             }
             Step::Done => {
                 while !exec.stop.load(Ordering::Acquire) {
@@ -148,6 +147,44 @@ fn agent(cfg: &AppTraffic, exec: &Exec, rows: &Mutex<Vec<AppEventRow>>, w: u32, 
             }
         }
     }
+}
+
+/// One burst or task graph: its operations, run, then logged.
+#[allow(clippy::too_many_arguments)]
+fn run_step(
+    cfg: &AppTraffic,
+    exec: &Exec,
+    rows: &Mutex<Vec<AppEventRow>>,
+    pool: &mut Pool,
+    w: u32,
+    episode: u64,
+    nodes: Vec<GraphNode>,
+    parallel: usize,
+    graph: bool,
+) {
+    let planned = Timestamp::now();
+    // object_id: agent | episode (page, sync, segment, task graph...) | object
+    let base = ((w as u64) << 48) | ((episode & 0x0FFF_FFFF) << 20);
+    let ops: Vec<Operation> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| Operation {
+            id: base | i as u64,
+            agent: w,
+            episode,
+            after_episode: (episode > 1).then(|| episode - 1),
+            after: graph.then(|| n.deps.iter().map(|&j| base | j as u64).collect()),
+            meta: n.meta,
+            fetch: n.fetch,
+            parallel,
+            planned,
+        })
+        .collect();
+    let deps = nodes.into_iter().map(|n| n.deps).collect();
+    let done = executor::run_graph(exec, pool, &ops, deps, parallel);
+    rows.lock()
+        .unwrap()
+        .extend(ops.iter().zip(done).map(|(op, d)| row(cfg.flow_id, op, d)));
 }
 
 fn row(flow_id: u32, op: &Operation, d: executor::Done) -> AppEventRow {
@@ -162,6 +199,7 @@ fn row(flow_id: u32, op: &Operation, d: executor::Done) -> AppEventRow {
         activity: activity_name(f.activity),
         episode: op.episode,
         after_episode: op.after_episode,
+        after_objects: op.after.clone(),
         parallel: op.parallel as u32,
         plan_up_bytes: f.up,
         plan_down_bytes: f.down,

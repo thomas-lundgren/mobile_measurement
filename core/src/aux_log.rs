@@ -14,7 +14,7 @@ use std::sync::Arc;
 use arrow::array::{
     Array, ArrayRef, BooleanArray, Float32Array, Float64Array, Int32Array, Int32Builder,
     Int64Array, ListBuilder, RecordBatch, StringArray, StructBuilder, UInt32Array, UInt32Builder,
-    UInt64Array,
+    UInt64Array, UInt64Builder,
 };
 use arrow::datatypes::{DataType, Field, Fields, Schema};
 use parquet::arrow::ArrowWriter;
@@ -504,6 +504,7 @@ pub struct AppEventRow {
     pub activity: &'static str,
     pub episode: u64,
     pub after_episode: Option<u64>,
+    pub after_objects: Option<Vec<u64>>,
     pub parallel: u32,
     pub plan_up_bytes: u64,
     pub plan_down_bytes: u64,
@@ -538,6 +539,11 @@ fn app_events_schema() -> Schema {
         utf8("activity"),
         u64n("episode", false),
         u64n("after_episode", true),
+        Field::new(
+            "after_objects",
+            DataType::List(Arc::new(Field::new("item", DataType::UInt64, true))),
+            true,
+        ),
         u32n("parallel"),
         u64n("plan_up_bytes", false),
         u64n("plan_down_bytes", false),
@@ -594,6 +600,19 @@ pub fn write_app_events(
             strs(&|r| r.activity),
             u64s(&|r| r.episode),
             opt64(&|r| r.after_episode),
+            {
+                let mut b = ListBuilder::new(UInt64Builder::new());
+                for r in rows {
+                    match &r.after_objects {
+                        Some(ids) => {
+                            b.values().append_slice(ids);
+                            b.append(true);
+                        }
+                        None => b.append(false),
+                    }
+                }
+                Arc::new(b.finish()) as _
+            },
             u32s(&|r| r.parallel),
             u64s(&|r| r.plan_up_bytes),
             u64s(&|r| r.plan_down_bytes),

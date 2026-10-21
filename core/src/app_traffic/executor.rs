@@ -1,16 +1,17 @@
-//! Execution: runs one burst's operations through the request/response
-//! engine (`crate::exchange`) over the agent's connection pool, at most
-//! `parallel` in flight, logging a packet row per request, chunk and
-//! acknowledgement, and reports how each operation ended. When and what to
-//! run is the scheduler's business (`scheduler`).
+//! Execution: runs one burst or task graph of operations through the
+//! request/response engine (`crate::exchange`) over the agent's connection
+//! pool — at most `parallel` in flight, each when the operations it depends
+//! on have ended ok (`graph::Tracker`) — logging a packet row per request,
+//! chunk and acknowledgement, and reports how each operation ended. When and
+//! what to run is the scheduler's business (`scheduler`).
 
-use std::collections::VecDeque;
 use std::io;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
+use super::graph::{State, Tracker};
 use super::scheduler::Operation;
 use super::MAX_PARALLEL;
 use crate::endpoint::Counters;
@@ -27,15 +28,17 @@ pub enum Outcome {
     Stopped,
     Error,
     Skipped,
+    DepFailed,
 }
 
 impl Outcome {
-    pub const ALL: [Outcome; 5] = [
+    pub const ALL: [Outcome; 6] = [
         Self::Ok,
         Self::Timeout,
         Self::Stopped,
         Self::Error,
         Self::Skipped,
+        Self::DepFailed,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -45,6 +48,7 @@ impl Outcome {
             Self::Stopped => "stopped",
             Self::Error => "error",
             Self::Skipped => "skipped",
+            Self::DepFailed => "dep_failed",
         }
     }
 }
@@ -58,7 +62,7 @@ pub struct Done {
     pub bytes_up: u64,
     pub bytes_down: u64,
     pub outcome: Outcome,
-    /// The first object on a connection opened for this burst.
+    /// The object opened its connection (handshake and slow start).
     pub new_connection: Option<bool>,
 }
 
@@ -84,56 +88,98 @@ pub struct Exec<'a> {
     pub stop: &'a AtomicBool,
 }
 
-/// Run `ops` over up to `parallel` pooled connections; the connections still
-/// usable go back to the pool. One `Done` per operation, in order.
-pub fn run_burst(x: &Exec, pool: &mut Pool, ops: &[Operation], parallel: usize) -> Vec<Done> {
-    let want = parallel.clamp(1, MAX_PARALLEL).min(ops.len().max(1));
-    let conns = pool.take(want);
-    if conns.is_empty() {
-        // no route to the server right now: skip this burst, don't spin
-        std::thread::sleep(Duration::from_secs(1));
-        return ops
-            .iter()
-            .map(|_| Done::not_started(Outcome::Skipped))
-            .collect();
-    }
-    let queue = Mutex::new((0..ops.len()).collect::<VecDeque<_>>());
-    let results: Mutex<Vec<Option<Done>>> = Mutex::new(vec![None; ops.len()]);
-    let kept = Mutex::new(Vec::new());
+/// Run `ops` — `deps[i]`: the operations `i` waits for, none for a plain
+/// burst — with up to `parallel` workers. Each operation takes a connection
+/// from the pool (an idle one if any, as a browser or app reuses its
+/// connections) and gives it back when it ends ok. A worker whose operation
+/// fails drops that connection and stops; the others go on. One `Done` per
+/// operation, in order.
+pub fn run_graph(
+    x: &Exec,
+    pool: &mut Pool,
+    ops: &[Operation],
+    deps: Vec<Vec<usize>>,
+    parallel: usize,
+) -> Vec<Done> {
+    let workers = parallel.clamp(1, MAX_PARALLEL).min(ops.len().max(1));
+    let state = Mutex::new((Tracker::new(deps), vec![None::<Done>; ops.len()]));
+    let changed = Condvar::new();
+    let pool = Mutex::new(pool);
+    let connected = AtomicBool::new(false);
     std::thread::scope(|s| {
-        for (mut conn, mut fresh) in conns {
-            let (queue, results, kept) = (&queue, &results, &kept);
-            s.spawn(move || loop {
-                if x.stop.load(Ordering::Acquire) {
-                    return;
-                }
-                let next = queue.lock().unwrap().pop_front();
-                let Some(i) = next else {
-                    kept.lock().unwrap().push(conn);
-                    return;
-                };
-                let d = transfer(x, &mut conn, &ops[i], fresh);
-                fresh = false;
-                let ok = d.outcome == Outcome::Ok;
-                results.lock().unwrap()[i] = Some(d);
-                if !ok {
-                    return; // connection unusable; others finish the queue
+        for _ in 0..workers {
+            let (state, changed, pool, connected) = (&state, &changed, &pool, &connected);
+            s.spawn(move || {
+                loop {
+                    // the next ready operation; wait while others may unlock one
+                    let i = {
+                        let mut g = state.lock().unwrap();
+                        loop {
+                            if x.stop.load(Ordering::Acquire) {
+                                break None;
+                            }
+                            if let Some(i) = g.0.next_ready() {
+                                break Some(i);
+                            }
+                            if g.0.stuck_or_done() {
+                                break None;
+                            }
+                            g = changed
+                                .wait_timeout(g, Duration::from_millis(100))
+                                .unwrap()
+                                .0;
+                        }
+                    };
+                    let Some(i) = i else { break };
+                    let taken = pool.lock().unwrap().take_one();
+                    let d = match taken {
+                        Some((mut c, fresh)) => {
+                            connected.store(true, Ordering::Release);
+                            let d = transfer(x, &mut c, &ops[i], fresh);
+                            if d.outcome == Outcome::Ok {
+                                pool.lock().unwrap().put_back(vec![c]);
+                            }
+                            d
+                        }
+                        None => Done::not_started(Outcome::Skipped),
+                    };
+                    let ok = d.outcome == Outcome::Ok;
+                    {
+                        let mut g = state.lock().unwrap();
+                        g.0.finish(i, ok);
+                        g.1[i] = Some(d);
+                    }
+                    changed.notify_all();
+                    if !ok {
+                        return; // connection unusable (or none); others go on
+                    }
                 }
             });
         }
     });
-    pool.put_back(kept.into_inner().unwrap());
-    // never started: the test ended, or every connection of the burst failed
+    if !connected.load(Ordering::Acquire) && !x.stop.load(Ordering::Acquire) {
+        // no route to the server right now: don't spin
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    let (tracker, results) = state.into_inner().unwrap();
+    // never started: a dependency failed, the test ended, or no connection
     let left = if x.stop.load(Ordering::Acquire) {
         Outcome::Stopped
     } else {
         Outcome::Skipped
     };
     results
-        .into_inner()
-        .unwrap()
         .into_iter()
-        .map(|d| d.unwrap_or_else(|| Done::not_started(left)))
+        .enumerate()
+        .map(|(i, d)| {
+            d.unwrap_or_else(|| {
+                Done::not_started(if tracker.state(i) == State::DepFailed {
+                    Outcome::DepFailed
+                } else {
+                    left
+                })
+            })
+        })
         .collect()
 }
 
@@ -183,5 +229,129 @@ fn transfer(x: &Exec, conn: &mut TcpStream, op: &Operation, fresh: bool) -> Done
         bytes_down: down,
         outcome,
         new_connection: Some(fresh),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_traffic::{Fetch, StepMeta};
+    use crate::log_writer::packet_channel;
+    use std::net::TcpListener;
+
+    fn op(i: u64, down: u64, delay_ms: u32) -> Operation {
+        Operation {
+            id: i,
+            agent: 0,
+            episode: 1,
+            after_episode: None,
+            after: None,
+            meta: StepMeta {
+                task: 1,
+                step: 1,
+                kind: "fetch",
+            },
+            fetch: Fetch {
+                delay_ms,
+                ..Fetch::download(11, down)
+            },
+            parallel: 6,
+            planned: Timestamp::now(),
+        }
+    }
+
+    /// Run a plan → search → 3 fetches → read graph against `serve`, or a
+    /// server that drops every connection after `drop_after` requests.
+    fn run(drop_after: Option<usize>) -> Vec<Done> {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let (sink, _rx, _) = packet_channel(1 << 14);
+        let (sink, counters, stop) = (
+            Mutex::new(sink),
+            Counters::default(),
+            AtomicBool::new(false),
+        );
+        let ops: Vec<Operation> = (0..6).map(|i| op(i, 20_000, 50)).collect();
+        let deps = vec![vec![], vec![0], vec![1], vec![1], vec![1], vec![2, 3, 4]];
+        std::thread::scope(|s| {
+            let stop = &stop;
+            s.spawn(move || {
+                listener.set_nonblocking(true).unwrap();
+                let served = std::sync::atomic::AtomicUsize::new(0);
+                std::thread::scope(|s| {
+                    while !stop.load(Ordering::Acquire) {
+                        match listener.accept() {
+                            Ok((c, _)) => {
+                                let served = &served;
+                                s.spawn(move || match drop_after {
+                                    None => exchange::serve(c, stop, |_, _, _, _| {}),
+                                    // answer the first `n` downloads (on any
+                                    // connection), then drop mid-request
+                                    Some(n) => {
+                                        use std::io::{Read, Write};
+                                        let mut c = c;
+                                        let mut head = [0u8; AppExchange::WIRE_LEN];
+                                        while c.read_exact(&mut head).is_ok() {
+                                            if served.fetch_add(1, Ordering::AcqRel) >= n {
+                                                return;
+                                            }
+                                            let x = AppExchange::decode(&head).unwrap();
+                                            c.write_all(&vec![0u8; x.down_bytes as usize]).unwrap();
+                                        }
+                                    }
+                                });
+                            }
+                            Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                        }
+                    }
+                });
+            });
+            let x = Exec {
+                flow_id: 1,
+                sink: &sink,
+                counters: &counters,
+                stop,
+            };
+            let mut pool = Pool::new(&addr, Duration::from_secs(20));
+            let done = run_graph(&x, &mut pool, &ops, deps, 6);
+            stop.store(true, Ordering::Release);
+            done
+        })
+    }
+
+    #[test]
+    fn graph_nodes_start_after_their_dependencies() {
+        let d = run(None);
+        assert!(d.iter().all(|d| d.outcome == Outcome::Ok), "{d:?}");
+        let start = |i: usize| d[i].start.unwrap().mono_ns;
+        let end = |i: usize| d[i].done.unwrap().mono_ns;
+        assert!(start(1) >= end(0));
+        assert!((2..5).all(|i| start(i) >= end(1)));
+        assert!(
+            (2..5).all(|i| start(5) >= end(i)),
+            "the read waits for every fetch"
+        );
+        // the three fetches overlap: they ran in parallel
+        assert!((3..5).all(|i| start(i) < end(2)));
+        // the plan's connection was reused for the search
+        assert_eq!(d[0].new_connection, Some(true));
+        assert_eq!(d[1].new_connection, Some(false));
+    }
+
+    /// The search's connection is dropped: the search fails, and everything
+    /// that waited for it is `dep_failed` and never runs.
+    #[test]
+    fn a_failed_node_fails_its_dependants() {
+        let d = run(Some(1));
+        assert_eq!(d[0].outcome, Outcome::Ok);
+        assert!(
+            matches!(d[1].outcome, Outcome::Error | Outcome::Timeout),
+            "{:?}",
+            d[1].outcome
+        );
+        for (i, d) in d.iter().enumerate().skip(2) {
+            assert_eq!(d.outcome, Outcome::DepFailed, "node {i}");
+            assert!(d.start.is_none());
+        }
     }
 }

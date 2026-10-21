@@ -173,6 +173,7 @@ fn write_all(dir: &Path) -> Vec<(&'static str, PathBuf)> {
         activity: "llm_call",
         episode: 1,
         after_episode: None,
+        after_objects: Some(vec![1 << 20]),
         parallel: 1,
         plan_up_bytes: 12_000,
         plan_down_bytes: 9_000,

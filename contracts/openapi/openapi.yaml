@@ -529,10 +529,11 @@ components:
       - social
       - mixed
       - agent
+      - websearch
       - script
     AppToolPlacement:
       type: string
-      description: Where an AI agent's tools run (app_traffic profile "agent").
+      description: Where an AI agent's tools run (app_traffic profiles "agent", "websearch").
       enum:
       - device
       - cloud

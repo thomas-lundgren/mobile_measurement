@@ -27,6 +27,11 @@ columns:
   - { name: activity,  type: utf8,   nullable: false, doc: "enums.yaml app_activities (as packets app_activity)." }
   - { name: episode,   type: uint64, nullable: false, doc: "The burst, per agent, from 1 (object_id's middle bits)." }
   - { name: after_episode, type: uint64, nullable: true, doc: "The burst this one waited for (closed loop: the agent's previous burst); null for the first." }
+  - name: after_objects
+    type: list
+    nullable: true
+    doc: "Task graphs: the object_ids (same episode) this node waited for; null for a plain burst."
+    item: { type: uint64 }
   - { name: parallel,  type: uint32, nullable: false, doc: "Objects of the burst allowed in flight at once." }
   - { name: plan_up_bytes,    type: uint64, nullable: false, doc: "As the model asked (after scale)." }
   - { name: plan_down_bytes,  type: uint64, nullable: false, doc: "0: an upload, acknowledged by the server." }
@@ -43,5 +48,5 @@ columns:
   - { name: done_utc_ns,      type: uint64, nullable: true }
   - { name: bytes_up,   type: uint64, nullable: false, doc: "Bytes written, request header included." }
   - { name: bytes_down, type: uint64, nullable: false, doc: "Bytes read, acknowledgement included." }
-  - { name: outcome,    type: utf8,   nullable: false, doc: "enums.yaml app_outcomes." }
-  - { name: new_connection, type: bool, nullable: true, doc: "The object ran on a connection opened for its burst (handshake and slow start); null when it never started." }
+  - { name: outcome,    type: utf8,   nullable: false, doc: "enums.yaml app_outcomes (dep_failed: a node it waited for did not end ok)." }
+  - { name: new_connection, type: bool, nullable: true, doc: "The object opened its connection (handshake and slow start) rather than reusing an idle one from the pool; null when it never started." }

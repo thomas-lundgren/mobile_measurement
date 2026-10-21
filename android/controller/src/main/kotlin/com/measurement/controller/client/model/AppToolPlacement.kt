@@ -19,7 +19,7 @@ package com.measurement.controller.client.model
 import com.google.gson.annotations.SerializedName
 
 /**
- * Where an AI agent's tools run (app_traffic profile \"agent\").
+ * Where an AI agent's tools run (app_traffic profiles \"agent\", \"websearch\").
  *
  * Values: device,cloud,hybrid
  */

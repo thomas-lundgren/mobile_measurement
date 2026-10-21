@@ -245,7 +245,7 @@ impl AppRequest {
 /// Activity codes on the wire (the `activity` byte of `AppRequest` and
 /// `AppExchange`: the index) and the names both nodes log for them
 /// (`enums.yaml` app_activities, in order).
-pub const APP_ACTIVITIES: [&str; 14] = [
+pub const APP_ACTIVITIES: [&str; 15] = [
     "other",
     "web_page",
     "web_object",
@@ -260,6 +260,7 @@ pub const APP_ACTIVITIES: [&str; 14] = [
     "web_fetch",
     "cloud_tool",
     "llm_resume",
+    "web_search",
 ];
 
 pub fn app_activity_code(name: &str) -> u8 {
