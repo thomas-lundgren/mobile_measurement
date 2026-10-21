@@ -76,6 +76,29 @@ public class WireTest {
         assertFalse(Uploader.isHeld(new java.io.IOException((String) null)));
     }
 
+    /** A test cut off by process death: its complete files are queued, the
+     *  open segment (no footer yet) and the markers are not. */
+    @Test
+    public void interruptedTestQueuesItsCompleteFiles() throws Exception {
+        java.nio.file.Path root = java.nio.file.Files.createTempDirectory("tst_");
+        java.io.File mobile = new java.io.File(root.toFile(), "mobile");
+        mobile.mkdirs();
+        byte[] parquet = "PAR1 rows footer PAR1".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        java.nio.file.Files.write(root.resolve("header.json"), "{}".getBytes());
+        java.nio.file.Files.write(root.resolve("gps.parquet"), parquet);
+        java.nio.file.Files.write(mobile.toPath().resolve("packets_0000.parquet"), parquet);
+        java.nio.file.Files.write(mobile.toPath().resolve("packets_0001.parquet"), new byte[0]);
+        java.nio.file.Files.write(mobile.toPath().resolve("packets_0002.parquet"), "PAR1 half-writ".getBytes());
+        java.nio.file.Files.write(root.resolve("upload_pending.json.tmp"), "{}".getBytes());
+
+        JSONArray got = Uploader.orphanFiles(root.toFile());
+        java.util.List<String> names = new java.util.ArrayList<>();
+        for (int i = 0; i < got.length(); i++) {
+            names.add(root.relativize(java.nio.file.Paths.get(got.getString(i))).toString());
+        }
+        assertEquals(java.util.Arrays.asList("gps.parquet", "header.json", "mobile/packets_0000.parquet"), names);
+    }
+
     /** contracts/testvectors/core/stop_summary_examples.json: a ring overflow
      *  makes the upload PARTIAL. */
     @Test

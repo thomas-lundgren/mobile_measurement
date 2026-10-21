@@ -105,14 +105,20 @@ public final class LoggerService extends Service {
         }
         final String s = server;
         final String t = token;
+        if (uploads == null) {
+            // A new process: no test is running yet, so any started test
+            // without a marker was cut off by the last one's death.
+            uploads = new Uploader(getFilesDir(), s, this::setState);
+            int recovered = uploads.recoverOrphans(this::isHandled);
+            if (recovered > 0) {
+                setState("queued " + recovered + " interrupted test(s) for upload as PARTIAL");
+            }
+        }
         // A duplicate start / resume leaves live threads alone, but restarts
         // either one that has died.
         if (worker == null || !worker.isAlive()) {
             worker = new Thread(() -> run(s, t), "logger-worker");
             worker.start();
-        }
-        if (uploads == null) {
-            uploads = new Uploader(getFilesDir(), s, this::setState);
         }
         uploads.start();
         watchDefaultNetwork();

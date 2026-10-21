@@ -29,6 +29,9 @@ import java.util.function.Consumer;
  * base files (header, GPS, radio, clock, events; contracts/upload/README.md
  * "Held uploads"): a held test is skipped, not retried in a loop, and the
  * queue waits for a network change (home Wi-Fi lifts the hold).
+ *
+ * A test cut off by the process dying has no marker; {@link #recoverOrphans}
+ * queues what it recorded as PARTIAL on the next start.
  */
 final class Uploader {
     private static final String UPLOAD_PENDING = "upload_pending.json";
@@ -115,6 +118,73 @@ final class Uploader {
             report.accept("ERROR: could not queue upload for " + testId + ": " + e.getMessage());
         }
         wake();
+    }
+
+    /** Tests the Logger started but never sealed (the process died mid-test:
+     *  a crash, a kill, an app update) have files and no marker. Queue what
+     *  they recorded as PARTIAL so no measured data is stranded on the
+     *  device. Call before any test starts. Returns how many were queued. */
+    int recoverOrphans(java.util.function.Predicate<String> started) {
+        int n = 0;
+        File[] sessions = filesDir.listFiles(File::isDirectory);
+        for (File s : sessions == null ? new File[0] : sessions) {
+            File[] tests = s.listFiles(File::isDirectory);
+            for (File t : tests == null ? new File[0] : tests) {
+                if (!started.test(t.getName()) || hasMarker(t)) {
+                    continue;
+                }
+                JSONArray files = orphanFiles(t);
+                if (files.length() > 0) {
+                    queue(t, t.getName(), files, Contract.TestResults.PARTIAL);
+                    n++;
+                }
+            }
+        }
+        return n;
+    }
+
+    private static boolean hasMarker(File testRoot) {
+        for (String m : new String[] {UPLOAD_PENDING, UPLOAD_DONE, UPLOAD_REJECTED}) {
+            if (new File(testRoot, m).exists()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The complete files of an unsealed test: header.json and every Parquet
+     *  file with its footer (the segment open when the process died has
+     *  none and is skipped), at the root and in mobile/. */
+    static JSONArray orphanFiles(File testRoot) {
+        JSONArray out = new JSONArray();
+        for (File dir : new File[] {testRoot, new File(testRoot, "mobile")}) {
+            File[] fs = dir.listFiles(File::isFile);
+            if (fs == null) {
+                continue;
+            }
+            java.util.Arrays.sort(fs);
+            for (File f : fs) {
+                if ((dir == testRoot && f.getName().equals("header.json") && f.length() > 0)
+                        || (f.getName().endsWith(".parquet") && hasParquetFooter(f))) {
+                    out.put(f.getAbsolutePath());
+                }
+            }
+        }
+        return out;
+    }
+
+    private static boolean hasParquetFooter(File f) {
+        if (f.length() < 12) {
+            return false;
+        }
+        try (java.io.RandomAccessFile r = new java.io.RandomAccessFile(f, "r")) {
+            byte[] tail = new byte[4];
+            r.seek(f.length() - 4);
+            r.readFully(tail);
+            return new String(tail, StandardCharsets.US_ASCII).equals("PAR1");
+        } catch (java.io.IOException e) {
+            return false;
+        }
     }
 
     /** Tests waiting for upload. */

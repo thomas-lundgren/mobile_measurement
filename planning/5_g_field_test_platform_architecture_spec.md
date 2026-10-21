@@ -1389,6 +1389,13 @@ packet logs and mp-probe records wait for the home network. A measurement
 therefore always shows where it ran and on which radio, even before the rest
 arrives. Protocol: contracts/upload/README.md "Held uploads".
 
+**Interrupted tests.** If the Logger's process dies mid-test (crash, kill,
+app update), the test is never sealed and has no upload marker. On its next
+start, before any test runs, the Logger queues every test it started that has
+no marker, with the files it can read in full (`header.json` and Parquet files
+with a footer; the segment that was open is skipped), as `PARTIAL`. Recorded
+data is never left stranded on the device.
+
 ---
 
 # 14. Failure Handling
