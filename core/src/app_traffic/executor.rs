@@ -9,7 +9,7 @@ use std::io;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::graph::{State, Tracker};
 use super::scheduler::Operation;
@@ -67,7 +67,7 @@ pub struct Done {
 }
 
 impl Done {
-    fn not_started(outcome: Outcome) -> Self {
+    pub fn not_started(outcome: Outcome) -> Self {
         Self {
             start: None,
             first_byte: None,
@@ -96,7 +96,7 @@ pub struct Exec<'a> {
 /// operation, in order.
 pub fn run_graph(
     x: &Exec,
-    pool: &mut Pool,
+    pool: &Mutex<Pool>,
     ops: &[Operation],
     deps: Vec<Vec<usize>>,
     parallel: usize,
@@ -104,7 +104,6 @@ pub fn run_graph(
     let workers = parallel.clamp(1, MAX_PARALLEL).min(ops.len().max(1));
     let state = Mutex::new((Tracker::new(deps), vec![None::<Done>; ops.len()]));
     let changed = Condvar::new();
-    let pool = Mutex::new(pool);
     let connected = AtomicBool::new(false);
     std::thread::scope(|s| {
         for _ in 0..workers {
@@ -183,6 +182,47 @@ pub fn run_graph(
         .collect()
 }
 
+/// Open loop: start every operation when it is due, whatever has happened
+/// to the others (offered load, not paced by completions), each taking a
+/// pooled connection and returning it when it ends ok. One `Done` per
+/// operation, in order; one not yet due when the test ends is `stopped`.
+pub fn run_timed(x: &Exec, pool: &Mutex<Pool>, ops: &[Operation], due: &[Instant]) -> Vec<Done> {
+    std::thread::scope(|s| {
+        let runs: Vec<_> = ops
+            .iter()
+            .zip(due)
+            .map(|(op, &due)| {
+                s.spawn(move || {
+                    while Instant::now() < due {
+                        if x.stop.load(Ordering::Acquire) {
+                            return Done::not_started(Outcome::Stopped);
+                        }
+                        std::thread::sleep(
+                            due.saturating_duration_since(Instant::now())
+                                .min(Duration::from_millis(50)),
+                        );
+                    }
+                    if x.stop.load(Ordering::Acquire) {
+                        return Done::not_started(Outcome::Stopped);
+                    }
+                    let taken = pool.lock().unwrap().take_one();
+                    match taken {
+                        Some((mut c, fresh)) => {
+                            let d = transfer(x, &mut c, op, fresh);
+                            if d.outcome == Outcome::Ok {
+                                pool.lock().unwrap().put_back(vec![c]);
+                            }
+                            d
+                        }
+                        None => Done::not_started(Outcome::Skipped),
+                    }
+                })
+            })
+            .collect();
+        runs.into_iter().map(|r| r.join().unwrap()).collect()
+    })
+}
+
 fn transfer(x: &Exec, conn: &mut TcpStream, op: &Operation, fresh: bool) -> Done {
     let f = op.fetch;
     let ex = AppExchange {
@@ -246,6 +286,7 @@ mod tests {
             episode: 1,
             after_episode: None,
             after: None,
+            due: None,
             meta: StepMeta {
                 task: 1,
                 step: 1,
@@ -312,8 +353,8 @@ mod tests {
                 counters: &counters,
                 stop,
             };
-            let mut pool = Pool::new(&addr, Duration::from_secs(20));
-            let done = run_graph(&x, &mut pool, &ops, deps, 6);
+            let pool = Mutex::new(Pool::new(&addr, Duration::from_secs(20)));
+            let done = run_graph(&x, &pool, &ops, deps, 6);
             stop.store(true, Ordering::Release);
             done
         })

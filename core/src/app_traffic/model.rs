@@ -220,10 +220,10 @@ pub struct GraphNode {
 }
 
 /// splitmix64: small, seedable, good enough for traffic models.
-struct Rng(u64);
+pub(crate) struct Rng(pub(crate) u64);
 
 impl Rng {
-    fn next(&mut self) -> u64 {
+    pub(crate) fn next(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -231,8 +231,13 @@ impl Rng {
         z ^ (z >> 31)
     }
 
-    fn unit(&mut self) -> f64 {
+    pub(crate) fn unit(&mut self) -> f64 {
         (self.next() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Exponential with this mean: the gaps of a random (Poisson) arrival.
+    pub(crate) fn exponential(&mut self, mean: f64) -> f64 {
+        -mean * (1.0 - self.unit()).max(1e-12).ln()
     }
 
     fn uniform(&mut self, lo: f64, hi: f64) -> f64 {
@@ -391,6 +396,52 @@ impl Agent {
         } else {
             Fetch::download(activity, bytes)
         }
+    }
+
+    /// The whole next task as one graph, for open loop: the steps up to the
+    /// user's next idle pause (which is dropped — in open loop the task's
+    /// arrival replaces it). A burst's objects wait for every object of the
+    /// burst before (closed loop runs them that way too); a graph keeps its
+    /// own dependencies. Same seed, same tasks as closed loop. `None` when
+    /// the model has nothing more (a finished script).
+    pub fn next_task(&mut self, now: Duration) -> Option<Vec<GraphNode>> {
+        let mut nodes: Vec<GraphNode> = Vec::new();
+        let mut prev: Vec<usize> = Vec::new();
+        for _ in 0..1000 {
+            match self.next_step(now) {
+                Step::Until(_) if nodes.is_empty() => continue,
+                Step::Until(_) => break,
+                Step::Done => break,
+                Step::Burst { fetches, meta, .. } => {
+                    let first = nodes.len();
+                    for fetch in fetches {
+                        nodes.push(GraphNode {
+                            fetch,
+                            meta,
+                            deps: prev.clone(),
+                        });
+                    }
+                    prev = (first..nodes.len()).collect();
+                }
+                Step::Graph { nodes: g, .. } => {
+                    let first = nodes.len();
+                    let sinks: Vec<usize> = (0..g.len())
+                        .filter(|i| !g.iter().any(|n| n.deps.contains(i)))
+                        .map(|i| first + i)
+                        .collect();
+                    for n in g {
+                        let deps = if n.deps.is_empty() {
+                            prev.clone()
+                        } else {
+                            n.deps.iter().map(|d| first + d).collect()
+                        };
+                        nodes.push(GraphNode { deps, ..n });
+                    }
+                    prev = sinks;
+                }
+            }
+        }
+        (!nodes.is_empty()).then_some(nodes)
     }
 
     pub fn next_step(&mut self, now: Duration) -> Step {
@@ -1155,6 +1206,52 @@ mod tests {
             (4..=24).contains(&second_rounds),
             "{second_rounds} second rounds of 40"
         );
+    }
+
+    /// Open loop takes whole tasks: the same objects in the same order as
+    /// closed loop's steps (same seed), a burst waiting for the one before.
+    #[test]
+    fn next_task_is_closed_loops_task_as_one_graph() {
+        for (profile, p) in [
+            ("agent", Placement::Device),
+            ("agent", Placement::Cloud),
+            ("websearch", Placement::Hybrid),
+        ] {
+            let mut closed = Agent::new(profile, 8, 1.0, &[]).with_placement(p);
+            let mut open = Agent::new(profile, 8, 1.0, &[]).with_placement(p);
+            let mut now = Duration::ZERO;
+            for _ in 0..30 {
+                // closed loop: the steps up to the next idle pause
+                let mut want: Vec<(Fetch, StepMeta)> = vec![];
+                loop {
+                    match closed.next_step(now) {
+                        Step::Until(t) if want.is_empty() => now = t,
+                        Step::Until(t) => {
+                            now = t;
+                            break;
+                        }
+                        Step::Burst { fetches, meta, .. } => {
+                            want.extend(fetches.into_iter().map(|f| (f, meta)))
+                        }
+                        Step::Graph { nodes, .. } => {
+                            want.extend(nodes.into_iter().map(|n| (n.fetch, n.meta)))
+                        }
+                        Step::Done => unreachable!(),
+                    }
+                }
+                let got = open.next_task(now).unwrap();
+                let got_pairs: Vec<(Fetch, StepMeta)> =
+                    got.iter().map(|n| (n.fetch, n.meta)).collect();
+                assert_eq!(got_pairs, want, "{profile}");
+                // every node after the first waits for something earlier
+                assert!(
+                    got[0].deps.is_empty()
+                        && got[1..]
+                            .iter()
+                            .all(|n| !n.deps.is_empty() && n.deps.iter().all(|&d| d < got.len()))
+                );
+            }
+        }
     }
 
     /// Cloud: no search or fetch traffic from the phone — the provider's

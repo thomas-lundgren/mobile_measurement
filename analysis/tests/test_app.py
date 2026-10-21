@@ -188,3 +188,26 @@ def test_intent_planned_against_observed():
 
 def test_no_app_events_no_tasks():
     assert app.tasks(synthetic_test()) is None and app.intent(synthetic_test()) is None
+
+
+def test_open_loop_lateness_and_dropped_tasks():
+    """Open loop: objects carry a due time. Task 1 ran (its objects 30 and
+    50 ms late), task 2 arrived with the backlog full and was dropped."""
+    rows = []
+    for task, start, outcome in ((1, 30, "ok"), (1, 50, "ok"), (2, None, "skipped")):
+        due = 1000 * task
+        rows.append({
+            "flow_id": 4, "object_id": len(rows), "agent": 0, "task": task, "step": 1, "step_kind": "llm_turn",
+            "activity": "llm_call", "plan_up_bytes": 0, "plan_down_bytes": 100, "plan_delay_ms": 0, "plan_rate_bps": 0,
+            "planned_mono_ns": due * MS, "due_mono_ns": due * MS,
+            "start_mono_ns": None if start is None else (due + start) * MS,
+            "first_byte_mono_ns": None if start is None else (due + start + 5) * MS,
+            "done_mono_ns": None if start is None else (due + start + 10) * MS,
+            "bytes_down": 100 if start else 0, "outcome": outcome, "new_connection": False,
+        })  # fmt: skip
+    td = synthetic_test()
+    td.app_events = pd.DataFrame(rows)
+    (t,) = app.tasks(td)
+    assert (t["loop"], t["started"], t["dropped"]) == ("open", 2, 1)
+    (i,) = app.intent(td)
+    assert i["late_ms"]["p50"] == 40 and i["conn_wait_ms"] is None

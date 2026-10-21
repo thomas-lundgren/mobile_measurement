@@ -128,6 +128,12 @@
           "enum": ["device", "cloud", "hybrid"],
           "description": "profiles agent and websearch: where the tools run (default device). device: tool calls are phone traffic, and the next LLM call sends their results up with the context. cloud: the LLM provider runs them inside the call (server-side tools); the reply stream pauses for the slowest tool, carries the results' text down (cloud_tool) and resumes with the next turn (llm_resume) without a new request, so the context goes up once per call chain. hybrid: MCP calls on the phone, web fetches in the cloud (websearch: the search in the cloud, the page fetches on the phone). Each resume costs the phone a 44-byte request a real provider would not need (a protocol artifact, outside app_up_bytes)."
         },
+        "loop": {
+          "enum": ["closed", "open"],
+          "description": "profiles agent and websearch: how work arrives (default closed). closed: a user starts the next task only after the last one ended and they read the answer, so a slow network makes them ask for less. open: tasks arrive at random (exponential gaps, mean task_interval_s) whatever is still running, and every object of a task starts when it is due (the task's arrival plus its planned offset: the dependencies' think times and transfers at a nominal 20 Mbit/s), finished dependencies or not; a task arriving while max_open_tasks are unfinished is dropped (logged skipped), so the offered load stays visible. Other profiles run closed."
+        },
+        "task_interval_s": { "type": "number", "exclusiveMinimum": 0, "description": "loop open: mean time between task arrivals per user (default 30 s)." },
+        "max_open_tasks": { "type": "integer", "minimum": 1, "maximum": 16, "description": "loop open: unfinished tasks per user before an arriving one is dropped (default 4)." },
         "actions": {
           "type": "array",
           "description": "profile script only: the timeline, e.g. written by an AI agent playing a user.",

@@ -181,6 +181,7 @@ fn write_all(dir: &Path) -> Vec<(&'static str, PathBuf)> {
         plan_rate_bps: 24_000,
         plan_chunk_bytes: 140,
         planned: ts,
+        due: Some(ts),
         start: Some(ts),
         first_byte: None,
         done: None,

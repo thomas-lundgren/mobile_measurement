@@ -16,6 +16,7 @@
 package com.measurement.controller.client.model
 
 import com.measurement.controller.client.model.AppAction
+import com.measurement.controller.client.model.AppLoop
 import com.measurement.controller.client.model.AppProfile
 import com.measurement.controller.client.model.AppToolPlacement
 
@@ -28,9 +29,12 @@ import com.google.gson.annotations.SerializedName
  * @param profile User model: web | mail | video | social | mixed | script.
  * @param type 
  * @param actions profile \"script\" only: the timeline to run.
- * @param placement profile \"agent\" only: where the tools run (default device).
+ * @param loop profiles \"agent\", \"websearch\": closed (default) or open loop.
+ * @param maxOpenTasks loop open: unfinished tasks per user before an arriving one is dropped (default 4).
+ * @param placement profiles \"agent\", \"websearch\": where the tools run (default device).
  * @param scale Multiplies every object size (default 1.0); < 1 saves data.
  * @param seed Seed of the users' choices (default 1): same seed, same requests.
+ * @param taskIntervalS loop open: mean seconds between task arrivals per user (default 30).
  * @param workers Concurrent users (1–16, default 1). A script runs on one.
  */
 
@@ -51,7 +55,15 @@ data class FlowOneOf5 (
     @SerializedName("actions")
     val actions: kotlin.collections.List<AppAction>? = null,
 
-    /* profile \"agent\" only: where the tools run (default device). */
+    /* profiles \"agent\", \"websearch\": closed (default) or open loop. */
+    @SerializedName("loop")
+    val loop: AppLoop? = null,
+
+    /* loop open: unfinished tasks per user before an arriving one is dropped (default 4). */
+    @SerializedName("max_open_tasks")
+    val maxOpenTasks: kotlin.Int? = null,
+
+    /* profiles \"agent\", \"websearch\": where the tools run (default device). */
     @SerializedName("placement")
     val placement: AppToolPlacement? = null,
 
@@ -62,6 +74,10 @@ data class FlowOneOf5 (
     /* Seed of the users' choices (default 1): same seed, same requests. */
     @SerializedName("seed")
     val seed: kotlin.Long? = null,
+
+    /* loop open: mean seconds between task arrivals per user (default 30). */
+    @SerializedName("task_interval_s")
+    val taskIntervalS: kotlin.Double? = null,
 
     /* Concurrent users (1–16, default 1). A script runs on one. */
     @SerializedName("workers")

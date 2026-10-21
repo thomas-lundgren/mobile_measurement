@@ -31,4 +31,4 @@ mod scheduler;
 
 pub use executor::Outcome;
 pub use model::*;
-pub use scheduler::{run, AppLog, AppTraffic, Operation};
+pub use scheduler::{run, AppLog, AppTraffic, OpenLoop, Operation};

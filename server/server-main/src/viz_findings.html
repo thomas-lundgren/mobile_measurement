@@ -210,10 +210,14 @@
         (LLM turns and tool calls until the answer), a page view, a mail sync, a video session — made of
         <b>steps</b> (bursts). It counts as <b>finished</b> when every object completed and the user went on to the
         next one; the last task of each user was still running when the test ended. <b>Task time</b> runs from
-        planning its first step to the last byte of its last.</p>
+        planning its first step to the last byte of its last. <b>Closed loop</b>: a user starts the next task
+        after the last one ended, so a slow network makes them ask for less. <b>Open loop</b>: tasks arrive on
+        their own schedule and every object starts when due, whatever is still running; a task arriving with the
+        backlog full is <b>dropped</b>, so the offered load stays visible.</p>
       <div class="scroll"><table id="appTasks"></table></div>
       <h2>Planned against observed</h2>
-      <p class="intro">Per activity: how long objects <b>waited for a connection</b> (planned → request sent), the
+      <p class="intro">Per activity: how long objects <b>waited for a connection</b> (closed loop: planned → request
+        sent) or started <b>late</b> (open loop: due → request sent), the
         server's <b>planned think time</b> (an LLM's time to first token, a tool's latency) against the observed
         <b>first byte</b> — what lies <b>beyond the think time</b> is network and upload — and for paced streams
         (token streams) their planned length against the observed one. <b>Outcomes</b>: ok, timeout, stopped (the
@@ -397,17 +401,19 @@ function renderApp() {
     ts.flatMap((t) => t.app.impact.map((i) => [when(t), `${esc(i.direction)} flow ${i.flow_id}`, pct(i.active.share),
       ex(i.active), ex(i.idle), `${pct(i.active.loss)} / ${pct(i.idle.loss)}`])), "No realtime streams beside the app traffic.");
   const withLog = ts.filter((t) => t.app.tasks);
-  table($("appTasks"), [["Time"], ["Test"], ["Task"], ["Finished / started", "num"], ["Task time p50 / p90 ms", "num"],
-    ["Steps p50 / p90", "num"], ["Objects not ok", "num"]],
-    withLog.flatMap((t) => t.app.tasks.map((k) => [when(t), esc(t.plan || t.test_id), esc(k.kind),
-      `${k.finished} / ${k.started}`, ms(k.ms), ms(k.steps), pct(k.objects_not_ok)])),
+  table($("appTasks"), [["Time"], ["Test"], ["Task"], ["Loop"], ["Finished / started", "num"], ["Dropped", "num"],
+    ["Task time p50 / p90 ms", "num"], ["Steps p50 / p90", "num"], ["Objects not ok", "num"]],
+    withLog.flatMap((t) => t.app.tasks.map((k) => [when(t), esc(t.plan || t.test_id), esc(k.kind), esc(k.loop || "closed"),
+      `${k.finished} / ${k.started}`, k.loop === "open" ? num(k.dropped) : '<span class="muted">–</span>',
+      ms(k.ms), ms(k.steps), pct(k.objects_not_ok)])),
     "No tests with the phone's task record this day.");
   const one = (p) => (p ? num(p.p50) : '<span class="muted">–</span>');
   const outs = (o) => Object.entries(o).map(([k, n]) => (k === "ok" ? `${n}` : `<span class="muted">${esc(k)}</span> ${n}`)).join(", ");
   table($("appIntent"), [["Time"], ["Activity"], ["Outcomes"], ["Wait for connection p50 / p90 ms", "num"],
+    ["Late p50 / p90 ms", "num"],
     ["Think planned p50 / p90 ms", "num"], ["First byte p50 / p90 ms", "num"], ["Beyond think p50 / p90 ms", "num"],
     ["Stream planned / observed p50 ms", "num"], ["New connection", "num"], ["MB planned / moved", "num"]],
-    withLog.flatMap((t) => t.app.intent.map((a) => [when(t), esc(a.activity), outs(a.outcomes), ms(a.conn_wait_ms),
+    withLog.flatMap((t) => t.app.intent.map((a) => [when(t), esc(a.activity), outs(a.outcomes), ms(a.conn_wait_ms), ms(a.late_ms),
       ms(a.think_plan_ms), ms(a.first_byte_ms), ms(a.beyond_think_ms),
       a.stream_ms ? `${one(a.stream_plan_ms)} / ${one(a.stream_ms)}` : '<span class="muted">–</span>',
       pct(a.new_conn_share), `${num(a.mbytes_plan, 2)} / ${num(a.mbytes_moved, 2)}`])),

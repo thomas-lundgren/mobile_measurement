@@ -314,6 +314,14 @@ public final class Contract {
         public static final String UP = "up";
     }
 
+    /** OpenAPI AppLoop (a Rust enum on the server) */
+    public static final class AppLoop {
+        private AppLoop() {}
+
+        public static final String CLOSED = "closed";
+        public static final String OPEN = "open";
+    }
+
     /** OpenAPI AppProfile (a Rust enum on the server) */
     public static final class AppProfile {
         private AppProfile() {}

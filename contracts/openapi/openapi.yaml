@@ -519,6 +519,12 @@ components:
       enum:
       - down
       - up
+    AppLoop:
+      type: string
+      description: How an app_traffic flow's work arrives.
+      enum:
+      - closed
+      - open
     AppProfile:
       type: string
       description: Built-in user models of an app_traffic flow.
@@ -1039,11 +1045,25 @@ components:
             type: integer
             format: int32
             minimum: 0
+          loop:
+            oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/AppLoop'
+              description: 'profiles "agent", "websearch": closed (default) or open loop.'
+          max_open_tasks:
+            type:
+            - integer
+            - 'null'
+            format: int32
+            description: |-
+              loop open: unfinished tasks per user before an arriving one is
+              dropped (default 4).
+            minimum: 0
           placement:
             oneOf:
             - type: 'null'
             - $ref: '#/components/schemas/AppToolPlacement'
-              description: 'profile "agent" only: where the tools run (default device).'
+              description: 'profiles "agent", "websearch": where the tools run (default device).'
           profile:
             $ref: '#/components/schemas/AppProfile'
             description: 'User model: web | mail | video | social | mixed | script.'
@@ -1060,6 +1080,12 @@ components:
             format: int64
             description: 'Seed of the users'' choices (default 1): same seed, same requests.'
             minimum: 0
+          task_interval_s:
+            type:
+            - number
+            - 'null'
+            format: double
+            description: 'loop open: mean seconds between task arrivals per user (default 30).'
           type:
             type: string
             enum:

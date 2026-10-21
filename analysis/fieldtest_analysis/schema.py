@@ -152,6 +152,8 @@ APP_EVENTS = [
     "plan_chunk_bytes",
     "planned_mono_ns",
     "planned_utc_ns",
+    "due_mono_ns",
+    "due_utc_ns",
     "start_mono_ns",
     "start_utc_ns",
     "first_byte_mono_ns",

@@ -190,15 +190,25 @@ def _ms(a, b) -> pd.Series:
     return (pd.to_numeric(b, errors="coerce") - pd.to_numeric(a, errors="coerce")) / 1e6
 
 
+def _app_events(td) -> pd.DataFrame | None:
+    """The test's app_events with every canonical column (older logs lack
+    the newer ones: read as null), or None."""
+    ev = td.app_events
+    if ev is None or ev.empty:
+        return None
+    return ev.reindex(columns=list(dict.fromkeys([*ev.columns, *schema.APP_EVENTS])))
+
+
 def tasks(td) -> list[dict] | None:
     """Per kind of task: how many started and finished, and for the finished
     ones the task time (planned → last byte) and steps. A task finished when
     every object was ``ok`` and the agent went on to another task (the last
-    task of each agent was still running when the test ended)."""
-    ev = td.app_events
-    if ev is None or ev.empty:
+    task of each agent was still running when the test ended). Open loop
+    (objects carry a due time): ``started`` counts every task that arrived,
+    ``dropped`` those that arrived with the backlog full and never ran."""
+    ev = _app_events(td)
+    if ev is None:
         return None
-    ev = ev.copy()
     ev["ok"] = ev["outcome"] == "ok"
     key = ["flow_id", "agent", "task"]
     g = ev.groupby(key, sort=True)
@@ -213,14 +223,18 @@ def tasks(td) -> list[dict] | None:
     last = t.groupby(["flow_id", "agent"])["task"].transform("max")
     t["finished"] = t["all_ok"] & (t["task"] < last)
     t["kind"] = t["first_kind"].map(TASK_KINDS).fillna(t["first_kind"])
+    # open loop: a task that arrived with the backlog full never ran
+    never = g.apply(lambda x: bool((x["outcome"] == "skipped").all() and x["start_mono_ns"].isna().all()), include_groups=False)
+    t["dropped"] = never.values & bool(ev["due_mono_ns"].notna().any())
     t["ms"] = _ms(t["t0"], t["t1"])
     # task numbers are per agent: join the objects to their task's kind
     ev = ev.merge(t[key + ["kind"]], on=key, how="left")
+    loop = "open" if ev["due_mono_ns"].notna().any() else "closed"
     out = []
     for kind, k in t.groupby("kind"):
         f = k[k["finished"]]
         out.append({
-            "kind": kind, "started": len(k), "finished": len(f),
+            "kind": kind, "loop": loop, "started": len(k), "finished": len(f), "dropped": int(k["dropped"].sum()),
             "ms": stats.pcts(f["ms"], (50, 90), with_max=True, nd=0),
             "steps": stats.pcts(f["steps"], (50, 90), nd=0),
             "objects_not_ok": round(float((~ev[ev["kind"] == kind]["ok"]).mean()), 3),
@@ -230,11 +244,12 @@ def tasks(td) -> list[dict] | None:
 
 def intent(td) -> list[dict] | None:
     """Per activity, planned against observed: how long objects waited for a
-    connection (planned → start), the server's planned think time against
-    the observed wait for the first byte (the rest is network and upload),
-    and for paced streams their planned length against the observed one."""
-    ev = td.app_events
-    if ev is None or ev.empty:
+    connection (planned → start; closed loop), how late they started (due →
+    start; open loop), the server's planned think time against the observed
+    wait for the first byte (the rest is network and upload), and for paced
+    streams their planned length against the observed one."""
+    ev = _app_events(td)
+    if ev is None:
         return None
     out = []
     for act, a in ev.groupby("activity"):
@@ -248,7 +263,9 @@ def intent(td) -> list[dict] | None:
         out.append({
             "activity": act, "objects": len(a),
             "outcomes": {k: int(v) for k, v in a["outcome"].value_counts().items()},
-            "conn_wait_ms": stats.pcts(_ms(started["planned_mono_ns"], started["start_mono_ns"]), (50, 90), nd=0),
+            "conn_wait_ms": stats.pcts(_ms(started["planned_mono_ns"], started["start_mono_ns"]), (50, 90), nd=0)
+            if started["due_mono_ns"].isna().all() else None,
+            "late_ms": stats.pcts(_ms(started["due_mono_ns"], started["start_mono_ns"]), (50, 90), nd=0),
             "think_plan_ms": stats.pcts(think, (50, 90), nd=0),
             "first_byte_ms": stats.pcts(first, (50, 90), nd=0),
             "beyond_think_ms": stats.pcts(first - think, (50, 90), nd=0),

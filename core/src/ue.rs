@@ -94,6 +94,13 @@ pub struct UeFlow {
     pub actions: Option<Vec<crate::app_traffic::AppAction>>,
     #[serde(default)]
     pub placement: Option<String>,
+    /// app_traffic "closed" (default) | "open".
+    #[serde(default, rename = "loop")]
+    pub loop_mode: Option<String>,
+    #[serde(default)]
+    pub task_interval_s: Option<f64>,
+    #[serde(default)]
+    pub max_open_tasks: Option<u32>,
 }
 
 /// Per-flow result counters (for status / summary).
@@ -298,6 +305,12 @@ fn spawn_flow(
                             flow.placement.as_deref().unwrap_or("device"),
                         ),
                         log: Some(app_log.clone()),
+                        open: (flow.loop_mode.as_deref() == Some("open")).then(|| {
+                            crate::app_traffic::OpenLoop {
+                                task_interval_s: flow.task_interval_s.unwrap_or(30.0),
+                                max_open_tasks: flow.max_open_tasks.unwrap_or(4),
+                            }
+                        }),
                     };
                     Ok(thread::spawn(move || {
                         crate::app_traffic::run(&app, sink, &counters, &stop)

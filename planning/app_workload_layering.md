@@ -6,7 +6,9 @@ rows, `exchange::Pool`, `core/tests/layering.rs`); **B1 done** (2026-10-21: mode
 `StepMeta`, `scheduler` / `executor`, `app_events` log); **B2 done**
 (2026-10-21: `app.tasks` / `app.intent`, Tasks and planned-vs-observed tables
 on the findings page); **C1 done** (2026-10-21: `app_traffic/graph.rs`,
-`executor::run_graph`, profile `websearch`). Next: C2 (open loop). Supersedes the step order in
+`executor::run_graph`, profile `websearch`); **C2 done** (2026-10-21: `loop`,
+`task_interval_s`, `max_open_tasks`; `Agent::next_task`, `executor::run_timed`;
+lateness and dropped tasks on the page). Next: D. Supersedes the step order in
 `ai_traffic_implementation_plan.md` (see its "Order" section).
 
 ## 1. The proposal (summary)

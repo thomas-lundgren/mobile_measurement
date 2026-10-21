@@ -38,8 +38,10 @@ columns:
   - { name: plan_delay_ms,    type: uint32, nullable: false, doc: "Server think time before the first byte." }
   - { name: plan_rate_bps,    type: uint32, nullable: false, doc: "Paced response rate; 0 = as fast as TCP takes it." }
   - { name: plan_chunk_bytes, type: uint32, nullable: false, doc: "Bytes per paced write; 0 = the server's default." }
-  - { name: planned_mono_ns,  type: uint64, nullable: false, doc: "When the model emitted the burst." }
+  - { name: planned_mono_ns,  type: uint64, nullable: false, doc: "When the model emitted the burst (open loop: when the task arrived)." }
   - { name: planned_utc_ns,   type: uint64, nullable: false }
+  - { name: due_mono_ns,      type: uint64, nullable: true,  doc: "Open loop: when the object was due (arrival + planned offset); start - due is its lateness. Null in closed loop." }
+  - { name: due_utc_ns,       type: uint64, nullable: true }
   - { name: start_mono_ns,    type: uint64, nullable: true,  doc: "Request write began (after any wait for a connection). Null when the object never started." }
   - { name: start_utc_ns,     type: uint64, nullable: true }
   - { name: first_byte_mono_ns, type: uint64, nullable: true, doc: "First response byte, or the acknowledgement." }

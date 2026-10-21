@@ -94,9 +94,19 @@ pub enum Flow {
         /// profile "script" only: the timeline to run.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         actions: Option<Vec<AppAction>>,
-        /// profile "agent" only: where the tools run (default device).
+        /// profiles "agent", "websearch": where the tools run (default device).
         #[serde(skip_serializing_if = "Option::is_none", default)]
         placement: Option<AppToolPlacement>,
+        /// profiles "agent", "websearch": closed (default) or open loop.
+        #[serde(rename = "loop", skip_serializing_if = "Option::is_none", default)]
+        loop_mode: Option<AppLoop>,
+        /// loop open: mean seconds between task arrivals per user (default 30).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        task_interval_s: Option<f64>,
+        /// loop open: unfinished tasks per user before an arriving one is
+        /// dropped (default 4).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        max_open_tasks: Option<u32>,
     },
 }
 
@@ -116,6 +126,16 @@ pub enum AppProfile {
     /// call, a search, parallel page fetches and an LLM synthesis call.
     Websearch,
     Script,
+}
+
+/// How an app_traffic flow's work arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AppLoop {
+    /// The next task starts after the last one ended (and the user read it).
+    Closed,
+    /// Tasks arrive on a schedule; objects start when due.
+    Open,
 }
 
 /// Where an AI agent's tools run (app_traffic profiles "agent", "websearch").

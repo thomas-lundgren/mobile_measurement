@@ -94,6 +94,7 @@ async fn scripted_user_downloads_and_uploads_objects() {
         ],
         placement: app_traffic::Placement::Device,
         log: Some(app_log(dir.path())),
+        open: None,
     };
     let (sink, mut rx, _) = packet_channel(1 << 16);
     let stop = AtomicBool::new(false);
@@ -337,6 +338,7 @@ async fn websearch_task_runs_as_a_graph() {
         actions: vec![],
         placement: app_traffic::Placement::Device,
         log: Some(app_log(dir.path())),
+        open: None,
     };
     let (sink, _rx, _) = packet_channel(1 << 18);
     let stop = AtomicBool::new(false);
@@ -393,6 +395,81 @@ async fn websearch_task_runs_as_a_graph() {
     .await;
 }
 
+/// Open loop: websearch tasks arrive on their own schedule — every object
+/// starts at its due time — and with two tasks unfinished, an arriving one
+/// is dropped and logged `skipped`, never run.
+#[tokio::test(flavor = "multi_thread")]
+async fn open_loop_tasks_start_when_due_and_overflow_is_dropped() {
+    let st = AppState::default();
+    let dir = tempfile::tempdir().unwrap();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let prep = send(&st, "POST", "/internal/generators", Some(json!({
+        "test_id": "tst_01HZ8R9F0J2YK3P5Q7S9V1W3X9", "device_id": "dev_x", "session_id": "ses_x",
+        "flow": {"flow_id": 6, "type": "app_traffic", "profile": "websearch"},
+        "server_port": port, "node_log_dir": dir.path().to_str().unwrap()
+    }))).await;
+    let gid = prep["generator_id"].as_str().unwrap().to_string();
+    let cfg = AppTraffic {
+        server: format!("127.0.0.1:{port}"),
+        flow_id: 6,
+        profile: "websearch".into(),
+        workers: 1,
+        seed: 4,
+        scale: 0.1,
+        actions: vec![],
+        placement: app_traffic::Placement::Device,
+        log: Some(app_log(dir.path())),
+        // a task every ~0.7 s, each taking several seconds: the backlog fills
+        open: Some(app_traffic::OpenLoop {
+            task_interval_s: 0.7,
+            max_open_tasks: 2,
+        }),
+    };
+    let (sink, _rx, _) = packet_channel(1 << 18);
+    let stop = AtomicBool::new(false);
+    let tally = Counters::default();
+    std::thread::scope(|s| {
+        s.spawn(|| app_traffic::run(&cfg, sink, &tally, &stop));
+        std::thread::sleep(Duration::from_secs(8));
+        stop.store(true, Ordering::Release);
+    });
+    let ev = app_events(&dir.path().join("app_events_0006.parquet"));
+    let tasks: std::collections::BTreeSet<u64> = ev.iter().map(|r| r.u("task")).collect();
+    assert!(tasks.len() >= 5, "{} tasks arrived in 8 s", tasks.len());
+    for r in &ev {
+        assert!(
+            r.opt("due_mono_ns").is_some(),
+            "open loop: every object has a due time"
+        );
+        if let Some(start) = r.opt("start_mono_ns") {
+            let late = (start as i64 - r.u("due_mono_ns") as i64) as f64 / 1e6;
+            assert!((-1.0..250.0).contains(&late), "started {late} ms after due");
+        }
+    }
+    // a dropped task: every object skipped, none started
+    let dropped = tasks
+        .iter()
+        .filter(|t| {
+            ev.iter()
+                .filter(|r| r.u("task") == **t)
+                .all(|r| r.s("outcome") == "skipped" && r.opt("start_mono_ns").is_none())
+        })
+        .count();
+    assert!(dropped >= 1, "the backlog never filled");
+    assert!(ev.iter().any(|r| r.s("outcome") == "ok"));
+    send(
+        &st,
+        "POST",
+        &format!("/internal/generators/{gid}/stop"),
+        None,
+    )
+    .await;
+}
+
 /// A test that ends mid-object logs it as `stopped`: started, never done.
 #[tokio::test(flavor = "multi_thread")]
 async fn stopping_mid_object_logs_stopped() {
@@ -426,6 +503,7 @@ async fn stopping_mid_object_logs_stopped() {
         }],
         placement: app_traffic::Placement::Device,
         log: Some(app_log(dir.path())),
+        open: None,
     };
     let (sink, _rx, _) = packet_channel(1 << 16);
     let stop = AtomicBool::new(false);

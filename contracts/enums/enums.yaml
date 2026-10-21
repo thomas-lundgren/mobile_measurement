@@ -304,5 +304,5 @@ app_outcomes:
   - timeout          # no completion within the object timeout
   - stopped          # the test ended first (started or not)
   - error            # the connection failed mid-object
-  - skipped          # no connection for it (none could be opened, or the burst's failed)
+  - skipped          # no connection for it (none could be opened, or the burst's failed); open loop: its task arrived with the backlog full
   - dep_failed       # a node it depends on did not end ok: never ran

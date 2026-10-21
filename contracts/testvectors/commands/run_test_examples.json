@@ -281,6 +281,9 @@
               "profile": "agent",
               "workers": 2,
               "placement": "hybrid",
+              "loop": "open",
+              "task_interval_s": 30,
+              "max_open_tasks": 3,
               "seed": 20261021,
               "scale": 1.0
             }

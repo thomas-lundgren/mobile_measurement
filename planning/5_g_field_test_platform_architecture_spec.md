@@ -832,6 +832,12 @@ and how the apps themselves fare (page load time, video segment time).
   (`sequence_number`), tagged `app_activity`, `app_object_bytes` and
   `app_up_bytes`: request → first byte → completion per object, the gaps
   inside a stream, and per episode (a page view, a sync, an agent task step).
+- `loop` (agent, websearch): `closed` (default) — a user starts the next
+  task after the last one ended, so a slow network makes them ask for less —
+  or `open`: tasks arrive at random (mean `task_interval_s`) whatever is still
+  running, every object starts when due (the task's arrival plus its planned
+  offset), and a task arriving with `max_open_tasks` unfinished is dropped
+  and logged, so the offered load stays visible.
 - Intent and observation stay apart. The packet rows are what the sockets
   saw; the mobile's scheduler also writes what the model meant to do, one row
   per object in `mobile/app_events_<flow>.parquet`
@@ -841,7 +847,8 @@ and how the apps themselves fare (page load time, video segment time).
   kind) → object — the plan (bytes up and down, think time, pacing), when it
   was planned, started, got its first byte and finished, the bytes moved,
   the outcome (`ok`, `timeout`, `stopped`, `error`, `skipped`) and whether it
-  paid for a new connection; in a task graph also the objects it waited for
+  paid for a new connection; in open loop when it was due; in a task graph
+  also the objects it waited for
   (`after_objects`) — a node whose dependency failed is `dep_failed` and
   never runs. Workloads are layered: the model emits steps,
   the scheduler turns them into operations, the executor runs them through

@@ -4,6 +4,7 @@
 #   app-base, app-web, app-video, app-social, app-mixed3   (default PHASES)
 #   app-agent, app-agent4, app-agent-device/-cloud/-hybrid (AI agents)
 #   app-websearch, app-websearch-cloud/-hybrid (an agent answering by web search: task graphs)
+#   app-websearch-open, app-agent-open (open loop: tasks arrive every ~TASK_S s, default 20)
 # PHASE_SEC (default 90), SCALE (object size factor, default 1.0), SEED.
 # Data per default cycle: roughly 100-200 MB.
 # One cycle per run; appends to ~/mp-data/logs/app.log. Each phase waits (up
@@ -17,8 +18,10 @@ source "$(dirname "$0")/lib.sh"
 PHASE=${PHASE_SEC:-90}
 SCALE=${SCALE:-1.0}
 SEED=${SEED:-$(date +%s)}
-# users PROFILE WORKERS [PLACEMENT] — PLACEMENT (agent, websearch): device, cloud or hybrid
-users() { echo '{"type":"app_traffic","flow_id":4,"profile":"'"$1"'","workers":'"$2"',"seed":'"$SEED"',"scale":'"$SCALE"${3:+',"placement":"'"$3"'"'}'}'; }
+# users PROFILE WORKERS [PLACEMENT [EXTRA]] — PLACEMENT (agent, websearch): device, cloud or
+# hybrid; EXTRA: more flow fields, e.g. the open loop's
+users() { echo '{"type":"app_traffic","flow_id":4,"profile":"'"$1"'","workers":'"$2"',"seed":'"$SEED"',"scale":'"$SCALE"${3:+',"placement":"'"$3"'"'}${4:+,$4}'}'; }
+OPEN='"loop":"open","task_interval_s":'"${TASK_S:-20}"',"max_open_tasks":4'
 
 phase app-base   "$PHASE" "[$UDP]"
 phase app-web    "$PHASE" "[$UDP, $(users web 1)]"
@@ -34,4 +37,7 @@ phase app-agent-hybrid "$PHASE" "[$UDP, $(users agent 2 hybrid)]"
 phase app-websearch        "$PHASE" "[$UDP, $(users websearch 2 device)]"
 phase app-websearch-cloud  "$PHASE" "[$UDP, $(users websearch 2 cloud)]"
 phase app-websearch-hybrid "$PHASE" "[$UDP, $(users websearch 2 hybrid)]"
+# the same users (same SEED) in open loop: work arrives whatever the network does
+phase app-websearch-open   "$PHASE" "[$UDP, $(users websearch 2 device "$OPEN")]"
+phase app-agent-open       "$PHASE" "[$UDP, $(users agent 2 device "$OPEN")]"
 log "app cycle done"

@@ -109,6 +109,9 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale: None,
                 actions: None,
                 placement: None,
+                loop_mode: None,
+                task_interval_s: None,
+                max_open_tasks: None,
             },
             Flow::RealtimeUdp {
                 flow_id,
@@ -133,6 +136,9 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale: None,
                 actions: None,
                 placement: None,
+                loop_mode: None,
+                task_interval_s: None,
+                max_open_tasks: None,
             },
             Flow::BulkTcp {
                 flow_id,
@@ -156,6 +162,9 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale: None,
                 actions: None,
                 placement: None,
+                loop_mode: None,
+                task_interval_s: None,
+                max_open_tasks: None,
             },
             Flow::GatewayPing { flow_id, .. } => UeFlow {
                 flow_id: *flow_id,
@@ -174,6 +183,9 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale: None,
                 actions: None,
                 placement: None,
+                loop_mode: None,
+                task_interval_s: None,
+                max_open_tasks: None,
             },
             Flow::AppTraffic {
                 flow_id,
@@ -183,6 +195,9 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale,
                 actions,
                 placement,
+                loop_mode,
+                task_interval_s,
+                max_open_tasks,
             } => UeFlow {
                 flow_id: *flow_id,
                 flow_type: "app_traffic".into(),
@@ -212,6 +227,15 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                         .unwrap()
                         .to_string()
                 }),
+                loop_mode: loop_mode.map(|l| {
+                    serde_json::to_value(l)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_string()
+                }),
+                task_interval_s: *task_interval_s,
+                max_open_tasks: *max_open_tasks,
             },
             Flow::DscpProbe {
                 flow_id,
@@ -235,6 +259,9 @@ fn to_ue_config(p: &RunTestPayload, device_id: &str, log_dir: &str) -> UeTestCon
                 scale: None,
                 actions: None,
                 placement: None,
+                loop_mode: None,
+                task_interval_s: None,
+                max_open_tasks: None,
             },
         })
         .collect();
