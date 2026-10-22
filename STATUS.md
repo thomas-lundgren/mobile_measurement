@@ -59,6 +59,22 @@ its impact on the realtime streams). Rebuilt every 5 minutes by
   (the server from a position in the device status, or the Logger itself, which
   also works without coverage), areas defined as a contract type, a cooldown
   per area, and a data budget.
+- QoS beyond DSCP (2026-10-22 DSCP sweeps: the phone's uplink markings
+  arrive bleached to 0; downlink EF/CS5 → CS5 and AF4x/AF3x/CS3 → CS4, kept
+  at voice rate, policed to ~0.5 Mbit/s and partly dropped at 8 Mbit/s; no
+  delay benefit). An app cannot request a dedicated bearer (VoLTE's QCI/5QI
+  1 and 5 come from the operator's IMS core), but:
+  - log QoS the network applies to our sockets: `ConnectivityManager.
+    registerQosCallback()` (Android 12+, read-only: QCI/5QI, GBR/MBR) on the
+    measurement sockets, as events (contract first);
+  - check 5G slicing: `TelephonyManager.isPremiumCapabilityAvailableForPurchase
+    (PREMIUM_CAPABILITY_PRIORITIZE_LATENCY)` (Android 14+; purchasing and
+    `NET_CAPABILITY_PRIORITIZE_LATENCY` only if the operator offers it);
+  - operator Quality on Demand (3GPP exposure / CAMARA QoD): the server asks
+    for QoS on a flow; observable with the QoS callback above.
+- DSCP: confirm the phone's uplink markings leave the phone intact
+  (`MODE=voice` sweep over home Wi-Fi), and find who polices the downlink
+  (a sweep from another Wi-Fi network: home ISP vs mobile operator).
 
 
 ## Summary
