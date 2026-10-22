@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 from . import schema, stats
+from .loader import realtime_received
 
 REQUEST_BYTES = 24  # v1 request and acknowledgement
 #: An app burst affects packets around it too; treat this much after the last
@@ -132,9 +133,7 @@ def impact(td, obj: pd.DataFrame) -> list[dict]:
     """Realtime streams' excess delay and loss: apps active vs idle."""
     pk = td.packets
     out = []
-    rt = pk[pk["sender_utc_ns"].notna() & (pk["direction"] == schema.DIR_RECEIVED)]
-    if "app_activity" in pk:
-        rt = rt[rt["app_activity"].isna()]
+    rt = realtime_received(pk)
     for (node, flow), g in rt.groupby(["node", "flow_id"]):
         direction = "uplink" if node == "server" else "downlink"
         send = pd.to_numeric(g["sender_utc_ns"], errors="coerce").astype("float")
@@ -269,7 +268,8 @@ def intent(td) -> list[dict] | None:
 
     def ready(r):
         deps = r["after_objects"]
-        if deps is None or isinstance(deps, float) or len(deps) == 0:
+        # null (None, NaN or pd.NA, by how the column was read): no graph
+        if not isinstance(deps, (list, tuple, np.ndarray)) or len(deps) == 0:
             return r["planned_mono_ns"]
         return max(done.get(d, np.nan) for d in deps)
 

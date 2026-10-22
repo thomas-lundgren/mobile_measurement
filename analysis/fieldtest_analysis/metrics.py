@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from . import schema
-from .loader import TestData
+from .loader import TestData, realtime_received
 
 
 def _pct(series: pd.Series, ps=(50, 90, 95, 99)) -> dict:
@@ -63,7 +63,7 @@ def realtime_owd(td: TestData, offset=None) -> pd.DataFrame:
             "owd_ns", "owd_corrected_ns", "uncertainty_ns", "mono_ns", "utc_ns"]
     if pk.empty:
         return pd.DataFrame(columns=cols)
-    recv = pk[(pk["direction"] == schema.DIR_RECEIVED) & pk["sender_utc_ns"].notna()].copy()
+    recv = realtime_received(pk).copy()
     if recv.empty:
         return pd.DataFrame(columns=cols)
     recv["owd_ns"] = recv["utc_ns"].astype("Int64") - recv["sender_utc_ns"].astype("Int64")

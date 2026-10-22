@@ -228,6 +228,10 @@ def test_graph_wait_counts_from_the_last_dependency():
     td.app_events = pd.DataFrame(rows)
     i = {x["activity"]: x for x in app.intent(td)}
     assert i["web_fetch"]["conn_wait_ms"]["p50"] == 10
+    # a missing list read as pd.NA (no graph) counts from the planned time
+    rows[0]["after_objects"] = pd.NA
+    td.app_events = pd.DataFrame(rows)
+    assert {x["activity"] for x in app.intent(td)} == {"web_fetch", "web_search"}
 
 
 def test_udp_bursts_loss_delay_and_dscp():

@@ -39,7 +39,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-from .loader import TestData, load_test, receive_times
+from .loader import TestData, load_test, realtime_received, receive_times
 
 #: Arrivals closer than this were delivered together (one batch).
 BATCH_GAP_US = 100.0
@@ -218,7 +218,7 @@ def analyze(td: TestData) -> list[dict]:
     pk = td.packets
     if pk.empty:
         return []
-    rx = pk[(pk["direction"] == "RECEIVED") & pk["sender_utc_ns"].notna()]
+    rx = realtime_received(pk)
     out = []
     for (node, flow_id), recv in rx.groupby(["node", "flow_id"]):
         sender_node = "mobile" if node == "server" else "server"

@@ -34,7 +34,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .loader import TestData, load_test, receive_times
+from .loader import TestData, load_test, realtime_received, receive_times
 
 #: Arrival-spectrum grid (Hz) and the minimum peak height over the median.
 ARRIVAL_F_MAX = 2500.0
@@ -174,7 +174,7 @@ def analyze(td: TestData) -> list[dict]:
     pk = td.packets
     if pk.empty:
         return []
-    rx_all = pk[(pk["direction"] == "RECEIVED") & pk["sender_utc_ns"].notna()]
+    rx_all = realtime_received(pk)
     out = []
     for (node, flow_id), recv in rx_all.groupby(["node", "flow_id"]):
         t_rx, clock = receive_times(recv)

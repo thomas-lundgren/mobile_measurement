@@ -105,6 +105,17 @@ def receive_times(recv: pd.DataFrame) -> tuple[pd.Series, str]:
     return read.astype("float64"), "app"
 
 
+def realtime_received(pk: pd.DataFrame) -> pd.DataFrame:
+    """Received packets of the realtime streams (realtime UDP, probe echo):
+    rows with the sender's timestamps that are not app traffic. App UDP
+    bursts carry sender times too, but they are objects, not streams
+    (``app.bursts`` analyses them)."""
+    rx = pk[(pk["direction"] == schema.DIR_RECEIVED) & pk["sender_utc_ns"].notna()]
+    if "app_activity" in rx:
+        rx = rx[rx["app_activity"].isna()]
+    return rx
+
+
 @dataclass
 class TestData:
     """All recordings for one test, normalized. Frames may be empty but the

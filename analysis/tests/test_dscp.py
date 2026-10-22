@@ -45,3 +45,24 @@ def test_rows_sweeps_and_outcomes():
 def test_mixed_when_no_value_dominates():
     s = dscp.summary([_test("t", 0, "CELLULAR", 46, {0: 600, 40: 400}, 0.0)])
     assert s["by_marking"][0]["outcome"] == "mixed"
+
+
+def test_bursts_are_not_realtime_streams():
+    """A burst's datagrams share their object id as sequence number and carry
+    sender times: the realtime analyses (delay, delivery timing, spectra)
+    must not take them for a stream."""
+    import pandas as pd
+    from conftest import make_packets, synthetic_test
+
+    from fieldtest_analysis import delivery, metrics
+
+    rows = []
+    for i in range(200):  # one burst, one object id
+        rows.append({"node": "mobile", "flow_id": 4, "sequence_number": 1 << 20, "direction": "RECEIVED",
+                     "protocol": "UDP", "utc_ns": 1_000_000 * i + 5_000_000, "mono_ns": 0,
+                     "sender_utc_ns": 1_000_000 * i, "app_activity": "video_chunk", "app_packet_index": i,
+                     "payload_size": 1200})  # fmt: skip
+    td = synthetic_test(packets=make_packets(rows))
+    assert delivery.analyze(td) == []
+    assert metrics.realtime_owd(td).empty
+    assert isinstance(td.packets, pd.DataFrame)
