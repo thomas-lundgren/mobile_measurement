@@ -1217,12 +1217,14 @@ session_2026_05_20/
       packets.parquet        # all flows, server's view
       events.parquet
       clock.parquet
+      capture.pcap.gz        # headers of the bulk / app flows (test-control, tcpdump), when it can capture
 ```
 
 Notes:
 
 - A test may contain **many data flows**; all flows share the one `gps.parquet` and the one `radio.parquet`. Per-flow packet rows are distinguished by `flow_id` inside each node's `packets.parquet`.
 - Only the mobile has GPS and radio/cell metrics, so there are no `server/gps.parquet` or `server/radio.parquet`.
+- `server/capture.pcap.gz` (spec addition, Oct 2026): test-control runs `tcpdump` for the test's bulk and app ports — headers only (128 B snap length), at most 2 M packets or one hour, compressed after the test — so analysis sees what TCP put on the wire (segment and ACK sizes, retransmissions, server-side RTT, DSCP that arrived). Best-effort: without `CAP_NET_RAW` on the binary, or with `MP_CAPTURE=off`, the test runs without it. The phone side has no capture (a VPN capture would perturb the traffic).
 - The server assembles this tree: it already holds its own `server/` recordings and drops the UE's uploaded files into the same `test_id` directory (see §13).
 
 ---

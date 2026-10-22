@@ -235,6 +235,13 @@
         datagrams of a burst changed on the way) and the <b>DSCP</b>: what the sender marked, and the share that
         arrived still marked (<b>kept</b>) — a network that ignores or bleaches the marking shows here.</p>
       <div class="scroll"><table id="appBursts"></table></div>
+      <h2>TCP on the wire</h2>
+      <p class="intro">From the server's packet capture (headers only, bulk and app flows): per flow and direction
+        (<b>down</b> = server → phone), the <b>data segments</b> and their size, <b>pure ACKs</b> (their share of the
+        TCP packets and IP size: 40 B, or 52 B with timestamps; 54 / 66 B on Ethernet), <b>retransmitted</b> segments
+        (uplink counts include segments the network reordered), the <b>DSCP</b> values seen at the server, and the
+        server's <b>RTT</b>: a downlink segment's send to the phone's ACK covering it (delayed ACKs included).</p>
+      <div class="scroll"><table id="capture"></table></div>
     </section>
   </div>
 
@@ -441,6 +448,18 @@ function renderApp() {
     ts.flatMap((t) => (t.app.bursts || []).map((b) => [when(t), esc(b.activity), esc(b.direction), num(b.bursts),
       `${b.arrived} / ${b.planned}`, pct(b.loss), p99(b.extra_delay_ms), p99(b.ipdv_ms), mark(b)])),
     "No UDP bursts this day.");
+  const marks = (d) => Object.entries(d || {}).map(([v, n]) => `${v}×${n}`).join(", ");
+  const seg = (s) => (s ? `${num(s.p50)} / ${num(s.p99)}` : '<span class="muted">–</span>');
+  table($("capture"), [["Time"], ["Test"], ["Flow"], ["Direction"], ["Packets", "num"], ["MB", "num"], ["Data segments", "num"],
+    ["Segment p50 / p99 B", "num"], ["Pure ACKs (share)", "num"], ["ACK size B", "num"], ["Retransmitted", "num"],
+    ["DSCP", "num"], ["RTT p50 / p99 ms", "num"]],
+    (data.tests || []).filter((t) => t.capture).flatMap((t) => Object.entries(t.capture).flatMap(([flow, f]) =>
+      ["down", "up"].filter((d) => f[d]).map((d) => [chartsLink(hm(t.start), t.start - 1, t.end + 1), esc(t.plan || t.test_id),
+        esc(flow), d, num(f[d].packets), num(f[d].bytes / 1e6, 1), num(f[d].data_segments),
+        seg(f[d].segment_bytes), `${num(f[d].pure_acks)} (${pct(f[d].ack_share)})`, num(f[d].ack_ip_bytes),
+        `${num(f[d].retransmitted)}${f[d].retrans_rate ? ` <span class="muted">(${pct(f[d].retrans_rate)})</span>` : ""}`,
+        marks(f[d].dscp), d === "down" ? `${p99(f.rtt_ms)} <span class="muted">(${num(f.rtt_samples)})</span>` : ""]))),
+    "No captured tests this day (the server captures when its capture binary holds CAP_NET_RAW).");
 }
 
 const KIND_CLASS = {

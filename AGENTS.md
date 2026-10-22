@@ -233,6 +233,7 @@ session_2026_05_20/
       packets.parquet        # all flows, server's view
       events.parquet
       clock.parquet
+      capture.pcap.gz        # headers of the bulk / app flows (test-control, tcpdump), when it can capture
 ```
 
 ### File Purposes

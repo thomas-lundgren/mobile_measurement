@@ -105,7 +105,7 @@ session_<date>/test_NNN/
   gps.parquet            # mobile only, 1/test
   radio.parquet          # mobile only, 1/test
   mobile/  { packets, events, clock .parquet; app_events_NNNN.parquet per app flow; probe.jsonl.gz }
-  server/  { packets, events, clock .parquet }
+  server/  { packets, events, clock .parquet; capture.pcap.gz }
 ```
 
 See spec §12 for field-level schemas. Some `events.parquet` rows (HANDOVER, COVERAGE_GAP, BAND_CHANGE) are *derived in post-processing* from `radio.parquet`, not logged live.

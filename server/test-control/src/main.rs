@@ -1,5 +1,6 @@
 //! test-control binary — serves the internal control API on loopback.
 
+use mp_test_control::capture::CaptureConfig;
 use mp_test_control::{build_router, AppState, Config};
 
 #[tokio::main]
@@ -15,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         port_base: 41000,
         port_count: 100,
     };
-    let app = build_router(AppState::new(cfg));
+    let app = build_router(AppState::new(cfg).with_capture(CaptureConfig::from_env()));
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("test-control internal API on http://{bind}");
     axum::serve(listener, app).await?;

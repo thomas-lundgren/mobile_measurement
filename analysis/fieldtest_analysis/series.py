@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import app, clock, dscp, findings, metrics, schema, stalls, timing
+from . import app, capture, clock, dscp, findings, metrics, schema, stalls, timing
 from .loader import load_test
 from . import plans as plan_source
 from .stats import pcts
@@ -37,7 +37,7 @@ from .track import channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 22
+SERIES_VERSION = 23
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -259,6 +259,7 @@ def test_series(
         "timing": timing_streams,
         "_timing_detail": timing_detail,
         "app": app.analyze(td),
+        "capture": capture.analyze(td),
         "stats": stats,
         "peers": _peer_ips(td),
         "stalls": stalls.detect(td, off),
@@ -381,7 +382,7 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
                 cols[c].append(None)
         meta = [
             dict(
-                {k: t.get(k) for k in ("test_id", "plan", "start", "end", "stats", "timing", "app")},
+                {k: t.get(k) for k in ("test_id", "plan", "start", "end", "stats", "timing", "app", "capture")},
                 peers=[{"ip": ip, "host": hosts.get(ip)} for ip in t.get("peers", [])],
                 upload_mb=uploads_during(files, t["test_id"], t["start"], t["end"]),
             )

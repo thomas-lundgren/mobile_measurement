@@ -16,8 +16,10 @@ layouts generated from `contracts/packets/layouts.yaml`); **D1 done** (2026-10-2
 per activity, burst analysis and page table, video phases); **E1 done**
 (2026-10-22: parameter registry `contracts/app_traffic/parameters.yaml` →
 generated `params.rs`, version in header.json); **E2 done** (2026-10-22:
-profiles chat, visual, image_gen, video_understanding). Next: E3 (server
-packet capture). Supersedes the step order in
+profiles chat, visual, image_gen, video_understanding); **E3 done**
+(2026-10-22: test-control captures headers of bulk and app ports into
+`server/capture.pcap.gz`, `analysis/.../capture.py`, findings table "TCP on
+the wire"; needs `setcap cap_net_raw,cap_net_admin=eip` on tcpdump). Supersedes the step order in
 `ai_traffic_implementation_plan.md` (see its "Order" section).
 
 ## 1. The proposal (summary)

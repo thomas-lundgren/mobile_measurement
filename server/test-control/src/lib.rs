@@ -3,6 +3,7 @@
 //! client to data-generator(s). Loopback-only, no auth.
 //! (`contracts/internal/control_api.md`)
 
+pub mod capture;
 pub mod genclient;
 pub mod ports;
 
@@ -20,6 +21,7 @@ use mp_contracts::{
     InternalTestStatus, TestControlState, TestResult,
 };
 
+use capture::{Capture, CaptureConfig};
 use genclient::GenClient;
 use ports::PortAllocator;
 
@@ -41,10 +43,12 @@ struct TestEntry {
     generators: Vec<GeneratorRef>,
     result: Option<TestResult>,
     error: Option<String>,
+    capture: Option<Capture>,
 }
 
 struct Inner {
     cfg: Config,
+    capture: Option<CaptureConfig>,
     gen: GenClient,
     ports: Mutex<PortAllocator>,
     tests: Mutex<HashMap<String, Arc<Mutex<TestEntry>>>>,
@@ -59,10 +63,18 @@ impl AppState {
         let ports = Mutex::new(PortAllocator::new(cfg.port_base, cfg.port_count));
         AppState(Arc::new(Inner {
             cfg,
+            capture: None,
             gen,
             ports,
             tests: Mutex::new(HashMap::new()),
         }))
+    }
+
+    /// Capture each test's TCP flows on the server (`capture.rs`).
+    pub fn with_capture(self, capture: Option<CaptureConfig>) -> Self {
+        let mut inner = Arc::try_unwrap(self.0).unwrap_or_else(|_| panic!("state already shared"));
+        inner.capture = capture;
+        AppState(Arc::new(inner))
     }
 
     fn get(&self, test_id: &str) -> Option<Arc<Mutex<TestEntry>>> {
@@ -105,6 +117,7 @@ async fn start(
         generators: Vec::new(),
         result: None,
         error: None,
+        capture: None,
     }));
     st.0.tests
         .lock()
@@ -124,14 +137,13 @@ async fn drive(st: AppState, req: InternalStartTest) {
     let mut allocated: Vec<u16> = Vec::new();
     let mut bindings: Vec<FlowBinding> = Vec::new();
     let mut generators: Vec<GeneratorRef> = Vec::new();
-    let node_log_dir =
+    let server_dir =
         st.0.cfg
             .log_root
             .join(&req.session_id)
             .join(&req.test_id)
-            .join("server")
-            .to_string_lossy()
-            .to_string();
+            .join("server");
+    let node_log_dir = server_dir.to_string_lossy().to_string();
 
     for flow in &req.plan.flows {
         let flow_id = flow.flow_id();
@@ -182,8 +194,22 @@ async fn drive(st: AppState, req: InternalStartTest) {
         }
     }
 
+    // headers of the TCP flows, on file before the UE is told to connect
+    let bound: Vec<(&Flow, u16)> = req
+        .plan
+        .flows
+        .iter()
+        .zip(&bindings)
+        .filter_map(|(f, b)| Some((f, b.server_port?)))
+        .collect();
+    let capture = match (&st.0.capture, capture::filter(&bound)) {
+        (Some(cfg), Some(filter)) => capture::start(cfg, &server_dir, &filter).await,
+        _ => None,
+    };
+
     {
         let mut e = entry.lock().unwrap();
+        e.capture = capture;
         e.flow_bindings = bindings;
         e.generators = generators.clone();
         e.state = TestControlState::WaitingForGenerator;
@@ -229,6 +255,7 @@ fn fail(entry: &Arc<Mutex<TestEntry>>, st: &AppState, allocated: &[u16], msg: &s
     e.state = TestControlState::Failed;
     e.result = Some(TestResult::Failed);
     e.error = Some(msg.to_string());
+    e.capture = None; // dropping it stops the binary
 }
 
 async fn status(
@@ -287,6 +314,10 @@ async fn stop(
     };
     for g in &gens {
         let _ = st.0.gen.stop(&g.generator_id).await;
+    }
+    let capture = entry.lock().unwrap().capture.take();
+    if let Some(c) = capture {
+        c.stop().await;
     }
     {
         let mut ports = st.0.ports.lock().unwrap();
