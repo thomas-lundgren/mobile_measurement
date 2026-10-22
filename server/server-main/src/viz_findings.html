@@ -239,7 +239,7 @@
       <p class="intro">From the server's packet capture (headers only, bulk and app flows): per flow and direction
         (<b>down</b> = server → phone), the <b>data segments</b> and their size, <b>pure ACKs</b> (their share of the
         TCP packets and IP size: 40 B, or 52 B with timestamps; 54 / 66 B on Ethernet), <b>retransmitted</b> segments
-        (uplink counts include segments the network reordered), the <b>DSCP</b> values seen at the server, and the
+        (uplink counts include segments the network reordered), — the server's kernel merges arriving segments before the capture sees them (GRO), so <b>uplink segment sizes</b> run to several MSS; uplink bytes, packets and ACKs are exact — the <b>DSCP</b> values seen at the server, and the
         server's <b>RTT</b>: a downlink segment's send to the phone's ACK covering it (delayed ACKs included).</p>
       <div class="scroll"><table id="capture"></table></div>
     </section>

@@ -9,7 +9,9 @@ share), retransmitted segments, the DSCP values that arrived or left, UDP
 datagrams (app bursts share the app port), and RTT samples from the
 server's side — a downlink segment's send to the UE's ACK covering it,
 skipped across retransmissions (Karn). Uplink "retransmissions" include
-segments the network reordered (the capture sees arrivals).
+segments the network reordered (the capture sees arrivals). Arriving segments
+are merged by the server's kernel (GRO) before the capture, so uplink segment
+sizes reach several MSS; uplink bytes, packets and ACKs are exact.
 
 Sizes are IP sizes (header + payload, no link layer): a bare TCP ACK is 40 B
 over IPv4 (52 B with timestamps); on Ethernet that is the often quoted 54 B
