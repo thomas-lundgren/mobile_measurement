@@ -132,6 +132,23 @@ async fn series_days_and_day_file() {
     let (s, _) = get(&st, "/viz/findings", None).await;
     assert_eq!(s, StatusCode::OK);
 
+    // the DSCP page and its data (all days in one file)
+    let (s, _) = get(&st, "/api/v1/viz/dscp", Some(&jwt)).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "not written yet");
+    std::fs::write(
+        root.join("viz/dscp.json"),
+        r#"{"rows":[],"sweeps":[],"by_marking":[]}"#,
+    )
+    .unwrap();
+    let (s, body) = get(&st, "/api/v1/viz/dscp", Some(&jwt)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(serde_json::from_slice::<Value>(&body).unwrap()["sweeps"].is_array());
+    let (s, _) = get(&st, "/api/v1/viz/dscp", None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let (s, body) = get(&st, "/viz/dscp", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&body).contains("DSCP experiments"));
+
     for bad in ["..%2Fdays", "2026-10-1x", "20261019000"] {
         let (s, _) = get(&st, &format!("/api/v1/viz/series/{bad}"), Some(&jwt)).await;
         assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}");

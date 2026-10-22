@@ -348,12 +348,13 @@ def bursts(td) -> list[dict] | None:
             ipdv = ((g["at"].diff() - g["sent"].diff()).abs() / 1e6).dropna()
             rec["ipdv_ms"] = stats.pcts(ipdv, (50, 99), nd=2)
         marks = pd.to_numeric(tx.get("dscp_sent"), errors="coerce").dropna() if not tx.empty else pd.Series(dtype=float)
+        # what arrived, marked or not (unmarked traffic is the baseline)
+        got = pd.to_numeric(rx.get("dscp_recv"), errors="coerce").dropna() if not rx.empty else pd.Series(dtype=float)
+        rec["dscp_recv"] = {int(k): int(v) for k, v in got.value_counts().items()}
         if not marks.empty:
             mark = int(marks.mode().iloc[0])
             rec["dscp_sent"] = mark
-            got = pd.to_numeric(rx.get("dscp_recv"), errors="coerce").dropna() if not rx.empty else pd.Series(dtype=float)
             rec["dscp_kept"] = round(float((got == mark).mean()), 3) if not got.empty else None
-            rec["dscp_recv"] = {int(k): int(v) for k, v in got.value_counts().items()} if not got.empty else {}
         out.append(rec)
     return out or None
 

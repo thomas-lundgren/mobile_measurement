@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSCP Experiments</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<style>
+  :root { --bg:#ffffff; --fg:#1d1d1f; --muted:#6e6e73; --panel:#f5f5f7; --border:#d2d2d7; --accent:#0a66c2;
+    --row:#0000000a; --red:#d70015; --orange:#c75300; --green:#1a7f37; --blue:#0a66c2; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1c1c1e; --fg:#f2f2f7; --muted:#a1a1a6; --panel:#2c2c2e; --border:#3a3a3c; --accent:#4c9aff;
+      --row:#ffffff0d; --red:#ff6961; --orange:#ffb340; --green:#4cd964; --blue:#4c9aff; }
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--fg);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position:sticky; top:0; z-index:10; background:var(--panel); border-bottom:1px solid var(--border);
+    display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:8px 16px; }
+  header h1 { font-size:16px; margin:0 8px 0 0; }
+  a { color:var(--accent); }
+  button, input { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--border);
+    border-radius:6px; padding:4px 10px; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  #status { color:var(--muted); font-size:12px; }
+  main { padding:12px 16px 40px; max-width:1400px; }
+  section { margin:0 0 28px; }
+  h2 { font-size:15px; margin:0 0 6px; }
+  h3 { font-size:13px; margin:16px 0 4px; color:var(--muted); }
+  .intro { color:var(--muted); font-size:13px; margin:0 0 8px; max-width:980px; }
+  .callout { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:8px 12px;
+    font-size:13px; max-width:980px; margin:0 0 12px; }
+  .scroll { overflow-x:auto; }
+  table { border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+  th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--border); white-space:nowrap; vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; }
+  td.num, th.num { text-align:right; }
+  tbody tr:hover { background:var(--row); }
+  tr.group td { background:var(--panel); font-weight:600; }
+  .muted { color:var(--muted); }
+  .badge { display:inline-block; padding:1px 7px; border-radius:10px; font-size:12px; font-weight:600;
+    border:1px solid currentColor; }
+  .o-kept { color:var(--green); } .o-remarked { color:var(--orange); } .o-bleached { color:var(--red); }
+  .o-mixed { color:var(--blue); } .o-base { color:var(--muted); }
+  .empty { color:var(--muted); font-style:italic; }
+  #login { display:none; max-width:320px; margin:15vh auto; padding:16px; background:var(--panel);
+    border:1px solid var(--border); border-radius:10px; }
+  #login h2 { font-size:16px; margin:0 0 8px; }
+  #login input { width:100%; margin:4px 0; }
+  #login .err { color:var(--red); min-height:1.2em; font-size:12px; }
+  @media (max-width: 600px) { header, main { padding-left:16px; padding-right:16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>DSCP experiments</h1>
+  <button id="reload">Reload</button>
+  <a href="/viz">Map</a>
+  <a href="/viz/charts">Charts</a>
+  <a href="/viz/findings">Findings</a>
+  <span id="status"></span>
+</header>
+
+<form id="login">
+  <h2>Operator login</h2>
+  <input id="user" autocomplete="username" placeholder="Username" required>
+  <input id="pass" type="password" autocomplete="current-password" placeholder="Password" required>
+  <div class="err" id="loginErr"></div>
+  <button class="primary" type="submit">Log in</button>
+</form>
+
+<main id="main">
+  <section>
+    <p class="callout">Every test whose app traffic ran as paced UDP bursts (engine <code>udp_burst</code>), marked or
+      not, all days together. A <b>sweep</b> runs the same workload once per marking with everything else equal
+      (<code>scripts/fieldtest/dscp_sweep.sh MODE=video|upload|voice</code>). The sender marks each datagram; the
+      receiver logs the marking that <b>arrived</b> — downlink: the server marks, the phone reads; uplink: the phone
+      marks, the server reads. <b>Outcome</b>: <span class="badge o-kept">kept</span> the marking arrived unchanged,
+      <span class="badge o-remarked">re-marked</span> it arrived as another class,
+      <span class="badge o-bleached">bleached</span> it arrived as 0, <span class="badge o-mixed">mixed</span> no
+      single value in 90 % of datagrams. <b>Loss</b>: datagrams that never arrived; <b>extra delay</b>: above that
+      stream's own minimum (the clocks' offset cancels); <b>IPDV</b>: how much the spacing of consecutive datagrams
+      changed on the way.</p>
+  </section>
+  <section>
+    <h2>What each marking got</h2>
+    <p class="intro">All tests per path, workload, direction and marking: medians over the tests (loss also its
+      range).</p>
+    <div class="scroll"><table id="byMarking"></table></div>
+  </section>
+  <section>
+    <h2>Sweeps</h2>
+    <p class="intro">Each run of consecutive tests on one path and workload, newest first.</p>
+    <div id="sweeps"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function token() { try { return sessionStorage.getItem("mp_jwt"); } catch { return null; } }
+function setToken(t) { try { t ? sessionStorage.setItem("mp_jwt", t) : sessionStorage.removeItem("mp_jwt"); } catch {} }
+
+async function api(path) {
+  const r = await fetch(path, { headers: { authorization: "Bearer " + token() } });
+  if (r.status === 401) { setToken(null); showLogin(); throw new Error("login"); }
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const num = (v, d = 0) => v == null ? "–" : Number(v).toFixed(d);
+const pct = (v) => v == null ? "–" : (100 * v).toFixed(v > 0 && v < 0.01 ? 2 : 1) + " %";
+const when = (t) => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+// DSCP code points and their usual names (RFC 4594 classes)
+const NAMES = { 0: "CS0", 8: "CS1", 10: "AF11", 16: "CS2", 18: "AF21", 24: "CS3", 26: "AF31", 32: "CS4",
+  34: "AF41", 40: "CS5", 46: "EF", 48: "CS6", 56: "CS7" };
+const mark = (v) => v == null ? '<span class="muted">unmarked</span>'
+  : `${NAMES[v] || "DSCP"} <span class="muted">(${v})</span>`;
+const arrived = (a) => {
+  const e = Object.entries(a || {}).sort((x, y) => y[1] - x[1]);
+  if (!e.length) return '<span class="muted">–</span>';
+  const total = e.reduce((s, [, n]) => s + n, 0);
+  return e.map(([v, n]) => `${NAMES[v] || v} <span class="muted">${(100 * n / total).toFixed(n === total ? 0 : 1)} %</span>`).join(", ");
+};
+function outcome(o) {
+  const cls = o === "kept" ? "o-kept" : o === "bleached" ? "o-bleached" : o === "mixed" ? "o-mixed"
+    : o.startsWith("re-marked") ? "o-remarked" : "o-base";
+  return `<span class="badge ${cls}">${esc(o)}</span>`;
+}
+const p50p99 = (p, d = 1) => p ? `${num(p.p50, d)} / ${num(p.p99, d)}` : "–";
+
+function table(el, head, rows, empty) {
+  if (!rows.length) { el.innerHTML = `<tr><td class="empty">${empty}</td></tr>`; return; }
+  el.innerHTML = `<thead><tr>${head.map(([h, c]) => `<th class="${c || ""}">${h}</th>`).join("")}</tr></thead>`
+    + `<tbody>${rows.join("")}</tbody>`;
+}
+
+function render(d) {
+  // by marking, grouped by path / workload / direction
+  const rows = [];
+  let group = null;
+  for (const m of d.by_marking) {
+    const g = `${m.path} · ${m.workload} · ${m.direction}`;
+    if (g !== group) { group = g; rows.push(`<tr class="group"><td colspan="7">${esc(g)}</td></tr>`); }
+    const range = m.loss_range && m.tests > 1 && m.loss_range[0] !== m.loss_range[1]
+      ? ` <span class="muted">(${pct(m.loss_range[0])}–${pct(m.loss_range[1])})</span>` : "";
+    rows.push(`<tr><td>${mark(m.dscp_sent)}</td><td class="num">${m.tests}</td><td>${arrived(m.arrived_as)}</td>`
+      + `<td>${outcome(m.outcome)}</td><td class="num">${pct(m.loss)}${range}</td>`
+      + `<td class="num">${num(m.extra_delay_p99_ms, 1)}</td><td class="num">${num(m.ipdv_p99_ms, 1)}</td></tr>`);
+  }
+  table($("byMarking"), [["Marking sent"], ["Tests", "num"], ["Arrived as"], ["Outcome"], ["Loss", "num"],
+    ["Extra delay p99 ms", "num"], ["IPDV p99 ms", "num"]], rows, "No UDP-burst tests yet.");
+
+  // sweeps, newest first
+  const box = $("sweeps");
+  box.innerHTML = "";
+  for (const s of d.sweeps.slice().reverse()) {
+    const h = document.createElement("h3");
+    h.textContent = `${when(s.start)} — ${s.path}, ${s.workload}, ${s.tests} test${s.tests === 1 ? "" : "s"}`;
+    const wrap = document.createElement("div");
+    wrap.className = "scroll";
+    const t = document.createElement("table");
+    wrap.appendChild(t);
+    box.append(h, wrap);
+    table(t, [["Time"], ["Test"], ["Direction"], ["Marking sent"], ["Arrived as"], ["Outcome"],
+      ["Arrived / planned", "num"], ["Loss", "num"], ["Extra delay p50 / p99 ms", "num"], ["IPDV p50 / p99 ms", "num"],
+      ["Signal dBm", "num"]],
+      s.rows.map((r) => `<tr><td>${new Date(r.start * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>`
+        + `<td>${esc(r.plan || r.test_id)}</td><td>${esc(r.direction)}</td><td>${mark(r.dscp_sent)}</td>`
+        + `<td>${arrived(r.arrived_as)}</td><td>${outcome(r.outcome)}</td>`
+        + `<td class="num">${num(r.arrived)} / ${num(r.planned)}</td><td class="num">${pct(r.loss)}</td>`
+        + `<td class="num">${p50p99(r.extra_delay_ms)}</td><td class="num">${p50p99(r.ipdv_ms, 2)}</td>`
+        + `<td class="num">${num(r.signal_dbm)}</td></tr>`), "–");
+  }
+  if (!d.sweeps.length) box.innerHTML = '<p class="empty">No sweeps yet.</p>';
+}
+
+async function load() {
+  if (!token()) { showLogin(); return; }
+  $("status").textContent = "Loading…";
+  try {
+    render(await api("/api/v1/viz/dscp"));
+    $("status").textContent = "";
+  } catch (e) {
+    if (e.message !== "login") $("status").textContent = e.message === "HTTP 404" ? "No data yet (the next analysis rebuild writes it)" : "Error: " + e.message;
+  }
+}
+
+function showLogin() { $("main").style.display = "none"; $("login").style.display = "block"; $("user").focus(); }
+
+$("login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("loginErr").textContent = "";
+  const r = await fetch("/api/v1/auth/login", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: $("user").value, password: $("pass").value }),
+  });
+  if (!r.ok) { $("loginErr").textContent = "Login failed"; return; }
+  setToken((await r.json()).jwt);
+  $("pass").value = "";
+  $("login").style.display = "none";
+  $("main").style.display = "block";
+  load();
+});
+$("reload").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>

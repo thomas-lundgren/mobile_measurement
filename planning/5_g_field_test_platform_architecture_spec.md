@@ -526,11 +526,13 @@ The device checks on its own which ports/protocols toward the server get through
 GET /viz                         # map page (static, no data)
 GET /viz/charts                  # zoomable time-series page (static, no data)
 GET /viz/findings                # analysis findings page (static, no data)
+GET /viz/dscp                    # DSCP experiments page (static, no data)
 GET /api/v1/viz/track            # radio samples placed at GPS fixes
 GET /api/v1/viz/series           # {"days": [...]} with chart data
 GET /api/v1/viz/series/{day}     # 200 ms bins for one local day (YYYY-MM-DD)
 GET /api/v1/viz/findings/{day}   # per-test overview, regime changes, link pauses, gap episodes
 GET /api/v1/viz/reachability     # device reachability reports, newest first
+GET /api/v1/viz/dscp             # UDP-burst tests of all days: per marking what arrived, loss, delay (viz/dscp.json)
 ```
 
 The pages log in with the operator account and send its JWT; the data endpoints return 401 without it, since positions reveal where devices have been. server-main only serves files under `<upload_root>/viz/`; the analysis package writes them (`python -m fieldtest_analysis.track` and `.series`). Series bins hold probe RTT, clock-corrected one-way delay per direction (median and max), TCP throughput per direction, RSRP and `network_type`, all on the server clock.

@@ -22,6 +22,7 @@ use crate::AppState;
 const MAP_PAGE: &str = include_str!("viz.html");
 const CHARTS_PAGE: &str = include_str!("viz_charts.html");
 const FINDINGS_PAGE: &str = include_str!("viz_findings.html");
+const DSCP_PAGE: &str = include_str!("viz_dscp.html");
 const FAVICON: &[u8] = include_bytes!("favicon.png");
 
 pub fn routes() -> Router<AppState> {
@@ -29,6 +30,7 @@ pub fn routes() -> Router<AppState> {
         .route("/viz", get(map_page))
         .route("/viz/charts", get(charts_page))
         .route("/viz/findings", get(findings_page))
+        .route("/viz/dscp", get(dscp_page))
         .route("/favicon.png", get(favicon))
         .route("/favicon.ico", get(favicon))
         .route("/api/v1/viz/track", get(track))
@@ -38,6 +40,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/viz/timing/{test_id}", get(timing_test))
         .route("/api/v1/viz/spectrogram/{day}", get(spectrogram_day))
         .route("/api/v1/viz/reachability", get(reachability))
+        .route("/api/v1/viz/dscp", get(dscp))
 }
 
 async fn map_page() -> Html<&'static str> {
@@ -50,6 +53,18 @@ async fn charts_page() -> Html<&'static str> {
 
 async fn findings_page() -> Html<&'static str> {
     Html(FINDINGS_PAGE)
+}
+
+async fn dscp_page() -> Html<&'static str> {
+    Html(DSCP_PAGE)
+}
+
+/// The DSCP experiments across all days (analysis `dscp.summary`).
+async fn dscp(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    serve_json(&st, &headers, PathBuf::from("dscp.json")).await
 }
 
 async fn favicon() -> impl IntoResponse {

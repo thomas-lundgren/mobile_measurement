@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import app, clock, findings, metrics, schema, stalls, timing
+from . import app, clock, dscp, findings, metrics, schema, stalls, timing
 from .loader import load_test
 from . import plans as plan_source
 from .stats import pcts
@@ -37,7 +37,7 @@ from .track import channel_label
 
 BIN_NS = 200_000_000
 #: Bump when a test's cached series gains or changes fields (forces a rebuild).
-SERIES_VERSION = 21
+SERIES_VERSION = 22
 #: Radio is sampled at ~1 Hz; carry a sample across the 200 ms bins until the next.
 RADIO_FILL_BINS = 6
 
@@ -427,6 +427,8 @@ def build(root: str | Path, out_dir: str | Path, db: str | None = None) -> list[
         _write_json(out / "findings" / f"{day}.json", f)
     days = sorted(by_day)
     _write_json(out / "series" / "days.json", {"days": days})
+    # DSCP experiments across all days (the DSCP page)
+    _write_json(out / "dscp.json", dscp.summary(tests))
     return days
 
 
