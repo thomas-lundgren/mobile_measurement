@@ -117,9 +117,12 @@ pub fn run(cfg: &AppTraffic, sink: LogSink, counters: &Counters, stop: &AtomicBo
     } else {
         cfg.workers.clamp(1, 16)
     };
-    let open = cfg
-        .open
-        .filter(|_| matches!(cfg.profile.as_str(), "agent" | "websearch"));
+    let open = cfg.open.filter(|_| {
+        matches!(
+            cfg.profile.as_str(),
+            "agent" | "websearch" | "chat" | "image_gen" | "video_understanding"
+        )
+    });
     let start = Instant::now();
     std::thread::scope(|s| {
         for w in 0..workers {

@@ -132,6 +132,16 @@ pub enum AppProfile {
     /// An AI agent answering by web search: per task a graph of an LLM plan
     /// call, a search, parallel page fetches and an LLM synthesis call.
     Websearch,
+    /// Chat conversations: a prompt up, a streamed reply, per turn.
+    Chat,
+    /// A visual assistant: a camera frame up every few seconds, a short answer.
+    Visual,
+    /// Image generation: a prompt, previews and the image streamed.
+    #[serde(rename = "image_gen")]
+    ImageGen,
+    /// Video understanding: a clip uploaded with a question, the answer streamed.
+    #[serde(rename = "video_understanding")]
+    VideoUnderstanding,
     Script,
 }
 

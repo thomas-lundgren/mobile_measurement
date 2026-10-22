@@ -21,7 +21,7 @@ import com.google.gson.annotations.SerializedName
 /**
  * Built-in user models of an app_traffic flow.
  *
- * Values: web,mail,video,social,mixed,agent,websearch,script
+ * Values: web,mail,video,social,mixed,agent,websearch,chat,visual,image_gen,video_understanding,script
  */
 
 enum class AppProfile(val value: kotlin.String) {
@@ -46,6 +46,18 @@ enum class AppProfile(val value: kotlin.String) {
 
     @SerializedName(value = "websearch")
     websearch("websearch"),
+
+    @SerializedName(value = "chat")
+    chat("chat"),
+
+    @SerializedName(value = "visual")
+    visual("visual"),
+
+    @SerializedName(value = "image_gen")
+    image_gen("image_gen"),
+
+    @SerializedName(value = "video_understanding")
+    video_understanding("video_understanding"),
 
     @SerializedName(value = "script")
     script("script");

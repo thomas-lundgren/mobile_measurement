@@ -4,7 +4,7 @@
 
 /// The parameter set's version (a hash of parameters.yaml), written into
 /// header.json so a result names the numbers it ran with.
-pub const PARAMS_VERSION: &str = "c34e0af20e44";
+pub const PARAMS_VERSION: &str = "763fd6d16aff";
 
 /// Log-normal with this median and spread (sigma of ln x), clamped to
 /// `min..=max`.
@@ -431,3 +431,203 @@ pub const WEBSEARCH_INTERIM_TOKENS: LogNormal = LogNormal {
 ///
 /// `websearch.resume_ttft_factor` (×) — unverified: engineering estimate (2026-10).
 pub const WEBSEARCH_RESUME_TTFT_FACTOR: f64 = 0.5;
+
+/// Turns in a conversation.
+///
+/// `chat.turns` (turns) — unverified: engineering estimate (2026-10).
+pub const CHAT_TURNS: LogNormal = LogNormal {
+    median: 4.0,
+    sigma: 0.6,
+    min: 1.0,
+    max: 20.0,
+};
+
+/// System prompt of a new conversation.
+///
+/// `chat.context_start_bytes` (B) — unverified: engineering estimate (2026-10).
+pub const CHAT_CONTEXT_START_BYTES: LogNormal = LogNormal {
+    median: 2000.0,
+    sigma: 0.5,
+    min: 500.0,
+    max: 10000.0,
+};
+
+/// What the user types per turn (the plan: 0.3-4 kB).
+///
+/// `chat.prompt_bytes` (B) — unverified: engineering estimate (2026-10).
+pub const CHAT_PROMPT_BYTES: LogNormal = LogNormal {
+    median: 800.0,
+    sigma: 0.8,
+    min: 300.0,
+    max: 4000.0,
+};
+
+/// `chat.ttft_s` (s) — unverified: engineering estimate (2026-10).
+pub const CHAT_TTFT_S: LogNormal = LogNormal {
+    median: 0.7,
+    sigma: 0.5,
+    min: 0.2,
+    max: 8.0,
+};
+
+/// `chat.reply_tokens` (tokens) — unverified: engineering estimate (2026-10).
+pub const CHAT_REPLY_TOKENS: LogNormal = LogNormal {
+    median: 300.0,
+    sigma: 0.8,
+    min: 20.0,
+    max: 2000.0,
+};
+
+/// Reading the reply and typing the next prompt.
+///
+/// `chat.read_type_s` (s) — unverified: engineering estimate (2026-10).
+pub const CHAT_READ_TYPE_S: LogNormal = LogNormal {
+    median: 20.0,
+    sigma: 0.7,
+    min: 3.0,
+    max: 120.0,
+};
+
+/// Between conversations.
+///
+/// `chat.between_s` (s) — unverified: engineering estimate (2026-10).
+pub const CHAT_BETWEEN_S: LogNormal = LogNormal {
+    median: 120.0,
+    sigma: 0.8,
+    min: 20.0,
+    max: 900.0,
+};
+
+/// A frame goes up every period while the session lasts.
+///
+/// `visual.period_s` (s) — reported: planning/mobile_ai_traffic_generator_development_plan.md §11 (observations: visual.period_s; primary source to trace).
+pub const VISUAL_PERIOD_S: f64 = 3.9;
+
+/// `visual.frame_bytes` (B) — unverified: engineering estimate (2026-10).
+pub const VISUAL_FRAME_BYTES: LogNormal = LogNormal {
+    median: 150000.0,
+    sigma: 0.6,
+    min: 50000.0,
+    max: 500000.0,
+};
+
+/// `visual.ttft_s` (s) — unverified: engineering estimate (2026-10).
+pub const VISUAL_TTFT_S: LogNormal = LogNormal {
+    median: 0.6,
+    sigma: 0.5,
+    min: 0.2,
+    max: 5.0,
+};
+
+/// `visual.answer_tokens` (tokens) — unverified: engineering estimate (2026-10).
+pub const VISUAL_ANSWER_TOKENS: LogNormal = LogNormal {
+    median: 40.0,
+    sigma: 0.6,
+    min: 5.0,
+    max: 300.0,
+};
+
+/// `visual.session_s` (s) — unverified: engineering estimate (2026-10).
+pub const VISUAL_SESSION_S: Uniform = Uniform {
+    min: 30.0,
+    max: 180.0,
+};
+
+/// `visual.between_s` (s) — unverified: engineering estimate (2026-10).
+pub const VISUAL_BETWEEN_S: LogNormal = LogNormal {
+    median: 60.0,
+    sigma: 0.8,
+    min: 10.0,
+    max: 600.0,
+};
+
+/// `image.prompt_bytes` (B) — unverified: engineering estimate (2026-10).
+pub const IMAGE_PROMPT_BYTES: LogNormal = LogNormal {
+    median: 1000.0,
+    sigma: 0.5,
+    min: 200.0,
+    max: 5000.0,
+};
+
+/// Server time to the first preview.
+///
+/// `image.first_preview_s` (s) — unverified: engineering estimate (2026-10).
+pub const IMAGE_FIRST_PREVIEW_S: LogNormal = LogNormal {
+    median: 2.0,
+    sigma: 0.5,
+    min: 0.5,
+    max: 8.0,
+};
+
+/// Prompt to final image; previews and the image stream over it.
+///
+/// `image.generate_s` (s) — unverified: engineering estimate (2026-10).
+pub const IMAGE_GENERATE_S: LogNormal = LogNormal {
+    median: 12.0,
+    sigma: 0.5,
+    min: 5.0,
+    max: 30.0,
+};
+
+/// `image.previews` (previews) — unverified: engineering estimate (2026-10).
+pub const IMAGE_PREVIEWS: IntRange = IntRange { min: 3, max: 6 };
+
+/// `image.preview_bytes` (B) — unverified: engineering estimate (2026-10).
+pub const IMAGE_PREVIEW_BYTES: LogNormal = LogNormal {
+    median: 40000.0,
+    sigma: 0.5,
+    min: 10000.0,
+    max: 150000.0,
+};
+
+/// `image.final_bytes` (B) — unverified: engineering estimate (2026-10).
+pub const IMAGE_FINAL_BYTES: LogNormal = LogNormal {
+    median: 1200000.0,
+    sigma: 0.6,
+    min: 500000.0,
+    max: 3000000.0,
+};
+
+/// Looking at the image before the next prompt.
+///
+/// `image.view_s` (s) — unverified: engineering estimate (2026-10).
+pub const IMAGE_VIEW_S: LogNormal = LogNormal {
+    median: 30.0,
+    sigma: 0.7,
+    min: 5.0,
+    max: 180.0,
+};
+
+/// The clip uploaded with the question (the plan: 5-50 MB).
+///
+/// `videoq.clip_bytes` (B) — unverified: engineering estimate (2026-10).
+pub const VIDEOQ_CLIP_BYTES: LogNormal = LogNormal {
+    median: 20000000.0,
+    sigma: 0.6,
+    min: 5000000.0,
+    max: 50000000.0,
+};
+
+/// `videoq.ttft_s` (s) — unverified: engineering estimate (2026-10).
+pub const VIDEOQ_TTFT_S: LogNormal = LogNormal {
+    median: 3.0,
+    sigma: 0.5,
+    min: 1.0,
+    max: 20.0,
+};
+
+/// `videoq.answer_tokens` (tokens) — unverified: engineering estimate (2026-10).
+pub const VIDEOQ_ANSWER_TOKENS: LogNormal = LogNormal {
+    median: 300.0,
+    sigma: 0.7,
+    min: 30.0,
+    max: 2000.0,
+};
+
+/// `videoq.between_s` (s) — unverified: engineering estimate (2026-10).
+pub const VIDEOQ_BETWEEN_S: LogNormal = LogNormal {
+    median: 120.0,
+    sigma: 0.8,
+    min: 20.0,
+    max: 900.0,
+};

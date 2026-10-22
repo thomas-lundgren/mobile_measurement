@@ -109,6 +109,38 @@ parameters:
   - { id: websearch.interim_tokens,      lognormal: { median: 100.0, sigma: 0.5, min: 20.0, max: 600.0 }, unit: tokens, doc: "A round that leads to another search." }
   - { id: websearch.resume_ttft_factor,  fixed: 0.5, type: f64, unit: "×", doc: "Cloud placement: the resumed reply's first-token time against a new call's." }
 
+  # --- chat (F2): a conversation, one turn per task -------------------------------
+  - { id: chat.turns,               lognormal: { median: 4.0, sigma: 0.6, min: 1.0, max: 20.0 }, unit: turns, doc: "Turns in a conversation." }
+  - { id: chat.context_start_bytes, lognormal: { median: 2000.0, sigma: 0.5, min: 500.0, max: 10000.0 }, unit: B, doc: "System prompt of a new conversation." }
+  - { id: chat.prompt_bytes,        lognormal: { median: 800.0, sigma: 0.8, min: 300.0, max: 4000.0 }, unit: B, doc: "What the user types per turn (the plan: 0.3-4 kB)." }
+  - { id: chat.ttft_s,              lognormal: { median: 0.7, sigma: 0.5, min: 0.2, max: 8.0 }, unit: s }
+  - { id: chat.reply_tokens,        lognormal: { median: 300.0, sigma: 0.8, min: 20.0, max: 2000.0 }, unit: tokens }
+  - { id: chat.read_type_s,         lognormal: { median: 20.0, sigma: 0.7, min: 3.0, max: 120.0 }, unit: s, doc: "Reading the reply and typing the next prompt." }
+  - { id: chat.between_s,           lognormal: { median: 120.0, sigma: 0.8, min: 20.0, max: 900.0 }, unit: s, doc: "Between conversations." }
+
+  # --- visual assistant (F3): a camera session, a frame per period -------------
+  - { id: visual.period_s,       fixed: 3.9, type: f64, unit: s, status: reported, source: "planning/mobile_ai_traffic_generator_development_plan.md §11 (observations: visual.period_s; primary source to trace)", doc: "A frame goes up every period while the session lasts." }
+  - { id: visual.frame_bytes,    lognormal: { median: 150000.0, sigma: 0.6, min: 50000.0, max: 500000.0 }, unit: B }
+  - { id: visual.ttft_s,         lognormal: { median: 0.6, sigma: 0.5, min: 0.2, max: 5.0 }, unit: s }
+  - { id: visual.answer_tokens,  lognormal: { median: 40.0, sigma: 0.6, min: 5.0, max: 300.0 }, unit: tokens }
+  - { id: visual.session_s,      uniform: { min: 30.0, max: 180.0 }, unit: s }
+  - { id: visual.between_s,      lognormal: { median: 60.0, sigma: 0.8, min: 10.0, max: 600.0 }, unit: s }
+
+  # --- image generation (F4) ----------------------------------------------------
+  - { id: image.prompt_bytes,    lognormal: { median: 1000.0, sigma: 0.5, min: 200.0, max: 5000.0 }, unit: B }
+  - { id: image.first_preview_s, lognormal: { median: 2.0, sigma: 0.5, min: 0.5, max: 8.0 }, unit: s, doc: "Server time to the first preview." }
+  - { id: image.generate_s,      lognormal: { median: 12.0, sigma: 0.5, min: 5.0, max: 30.0 }, unit: s, doc: "Prompt to final image; previews and the image stream over it." }
+  - { id: image.previews,        int_range: { min: 3, max: 6 }, unit: previews }
+  - { id: image.preview_bytes,   lognormal: { median: 40000.0, sigma: 0.5, min: 10000.0, max: 150000.0 }, unit: B }
+  - { id: image.final_bytes,     lognormal: { median: 1200000.0, sigma: 0.6, min: 500000.0, max: 3000000.0 }, unit: B }
+  - { id: image.view_s,          lognormal: { median: 30.0, sigma: 0.7, min: 5.0, max: 180.0 }, unit: s, doc: "Looking at the image before the next prompt." }
+
+  # --- video understanding (F4) ---------------------------------------------------
+  - { id: videoq.clip_bytes,     lognormal: { median: 20000000.0, sigma: 0.6, min: 5000000.0, max: 50000000.0 }, unit: B, doc: "The clip uploaded with the question (the plan: 5-50 MB)." }
+  - { id: videoq.ttft_s,         lognormal: { median: 3.0, sigma: 0.5, min: 1.0, max: 20.0 }, unit: s }
+  - { id: videoq.answer_tokens,  lognormal: { median: 300.0, sigma: 0.7, min: 30.0, max: 2000.0 }, unit: tokens }
+  - { id: videoq.between_s,      lognormal: { median: 120.0, sigma: 0.8, min: 20.0, max: 900.0 }, unit: s }
+
 # Reported values not used by a model yet: anchors for calibration and for
 # the families still to come (planning/ai_traffic_implementation_plan.md
 # step 4). Trace each to its primary source before using it.

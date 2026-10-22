@@ -278,6 +278,10 @@ app_activities:
   - llm_resume       # 13 the reply's next turn after a cloud tool
   - web_search       # 14 a search API call by an agent's tool (websearch)
   - voice            # 15 a call's media frames (scripted; e.g. paced UDP at 64 kbit/s)
+  - chat_turn        # 16 a chat prompt up, the reply streamed (chat)
+  - visual_query     # 17 a camera frame up, a short answer streamed (visual)
+  - image_gen        # 18 a prompt up, previews and the image streamed over the generation (image_gen)
+  - video_query      # 19 a clip uploaded with a question, the answer streamed (video_understanding)
 
 # ---------------------------------------------------------------------------
 # App workload steps (app_events.parquet step_kind): what a burst of a task
@@ -296,6 +300,7 @@ app_step_kinds:
   - script_action    # one action of a scripted timeline
   - search           # a search API call (websearch graph)
   - fetch            # page fetches of a search result (websearch graph)
+  - generate         # an image generation (image_gen)
 
 # ---------------------------------------------------------------------------
 # How an app operation's bytes move (test plan `engines`, app_events.parquet

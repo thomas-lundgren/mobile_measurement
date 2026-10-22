@@ -6,6 +6,8 @@
 #   app-websearch, app-websearch-cloud/-hybrid (an agent answering by web search: task graphs)
 #   app-websearch-open, app-agent-open (open loop: tasks arrive every ~TASK_S s, default 20)
 #   app-video-tcp, app-video-udp, app-video-udp-ef (the same video over TCP, paced UDP, UDP marked EF)
+#   app-chat, app-visual, app-image, app-videoq (AI families: chat, visual assistant, image generation,
+#   video understanding — ~20 MB up per question; SCALE shrinks it)
 # PHASE_SEC (default 90), SCALE (object size factor, default 1.0), SEED.
 # Data per default cycle: roughly 100-200 MB.
 # One cycle per run; appends to ~/mp-data/logs/app.log. Each phase waits (up
@@ -45,4 +47,8 @@ phase app-agent-open       "$PHASE" "[$UDP, $(users agent 2 device "$OPEN")]"
 phase app-video-tcp    "$PHASE" "[$UDP, $(users video 1)]"
 phase app-video-udp    "$PHASE" "[$UDP, $(users video 1 "" '"engines":{"video_chunk":"udp_burst"}')]"
 phase app-video-udp-ef "$PHASE" "[$UDP, $(users video 1 "" '"engines":{"video_chunk":"udp_burst"},"dscp":{"video_chunk":46}')]"
+phase app-chat   "$PHASE" "[$UDP, $(users chat 2)]"
+phase app-visual "$PHASE" "[$UDP, $(users visual 1)]"
+phase app-image  "$PHASE" "[$UDP, $(users image_gen 1)]"
+phase app-videoq "$PHASE" "[$UDP, $(users video_understanding 1)]"
 log "app cycle done"

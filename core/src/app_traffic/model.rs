@@ -26,8 +26,12 @@ const WEB_FETCH: u8 = 11;
 const CLOUD_TOOL: u8 = 12;
 const LLM_RESUME: u8 = 13;
 const WEB_SEARCH: u8 = 14;
+const CHAT_TURN: u8 = 16;
+const VISUAL_QUERY: u8 = 17;
+const IMAGE_GEN: u8 = 18;
+const VIDEO_QUERY: u8 = 19;
 
-pub const PROFILES: [&str; 8] = [
+pub const PROFILES: [&str; 12] = [
     "web",
     "mail",
     "video",
@@ -35,6 +39,10 @@ pub const PROFILES: [&str; 8] = [
     "mixed",
     "agent",
     "websearch",
+    "chat",
+    "visual",
+    "image_gen",
+    "video_understanding",
     "script",
 ];
 
@@ -167,7 +175,7 @@ impl Fetch {
 }
 
 /// Kinds of burst (`enums.yaml` app_step_kinds, in order).
-pub const STEP_KINDS: [&str; 12] = [
+pub const STEP_KINDS: [&str; 13] = [
     "llm_turn",
     "tools",
     "cloud_tools",
@@ -180,6 +188,7 @@ pub const STEP_KINDS: [&str; 12] = [
     "script_action",
     "search",
     "fetch",
+    "generate",
 ];
 
 /// Where a burst belongs: the agent's `task` (one unit of user intent, from
@@ -290,6 +299,10 @@ enum Mode {
     Social,
     Agent,
     WebSearch,
+    Chat,
+    Visual,
+    ImageGen,
+    VideoQuery,
 }
 
 /// Queued plan item; Think turns into an absolute `Until` when reached.
@@ -340,6 +353,10 @@ impl Agent {
             "social" => Mode::Social,
             "agent" => Mode::Agent,
             "websearch" => Mode::WebSearch,
+            "chat" => Mode::Chat,
+            "visual" => Mode::Visual,
+            "image_gen" => Mode::ImageGen,
+            "video_understanding" => Mode::VideoQuery,
             _ => Mode::Web,
         };
         let mail_at = Duration::from_secs_f64(rng.uni(P::MAIL_FIRST_SYNC_S));
@@ -537,6 +554,10 @@ impl Agent {
             Mode::Social => self.feed(),
             Mode::Agent => self.agent(now),
             Mode::WebSearch => self.websearch(now),
+            Mode::Chat => self.chat(now),
+            Mode::Visual => self.visual(now),
+            Mode::ImageGen => self.image_gen(now),
+            Mode::VideoQuery => self.video_query(now),
         }
     }
 
@@ -772,6 +793,121 @@ impl Agent {
         Step::Graph {
             nodes,
             parallel: MAX_PARALLEL,
+        }
+    }
+
+    /// A chat conversation (F2): each turn is a task — the prompt goes up
+    /// with the whole conversation so far (the context grows by every prompt
+    /// and reply), then the reply streams down; the user reads it and types
+    /// the next. Conversations of 1–20 turns, with pauses between.
+    fn chat(&mut self, now: Duration) -> Step {
+        if self.answered {
+            self.answered = false;
+            let pause = if self.turns_left == 0 {
+                P::CHAT_BETWEEN_S
+            } else {
+                P::CHAT_READ_TYPE_S
+            };
+            return Step::Until(now + self.rng.secs(pause));
+        }
+        if self.turns_left == 0 {
+            self.turns_left = self.rng.ln(P::CHAT_TURNS) as u32;
+            self.context = self.rng.ln(P::CHAT_CONTEXT_START_BYTES) as u64;
+        }
+        self.turns_left -= 1;
+        self.answered = true;
+        self.new_task();
+        self.context += self.rng.ln(P::CHAT_PROMPT_BYTES) as u64;
+        let ttft = self.rng.ln(P::CHAT_TTFT_S);
+        let tokens = self.rng.ln(P::CHAT_REPLY_TOKENS);
+        let reply = self.llm(CHAT_TURN, self.context, ttft, tokens);
+        self.context += tokens as u64 * CONTEXT_BYTES_PER_TOKEN;
+        Step::Burst {
+            fetches: vec![reply],
+            parallel: 1,
+            meta: self.meta("llm_turn"),
+        }
+    }
+
+    /// A visual assistant (F3): a camera session is a task; a frame goes up
+    /// every `visual.period_s` and a short answer streams back. A frame that
+    /// falls due while the last is still out goes at once, not caught up
+    /// (as video segments). Sessions of 30–180 s, pauses between.
+    fn visual(&mut self, now: Duration) -> Step {
+        let period = Duration::from_secs_f64(P::VISUAL_PERIOD_S);
+        if now >= self.video_end {
+            if self.video_end > Duration::ZERO {
+                self.video_end = Duration::ZERO;
+                return Step::Until(now + self.rng.secs(P::VISUAL_BETWEEN_S));
+            }
+            self.video_end = now + Duration::from_secs_f64(self.rng.uni(P::VISUAL_SESSION_S));
+            self.video_due = now;
+            self.new_task();
+        }
+        if now < self.video_due {
+            return Step::Until(self.video_due.min(self.video_end));
+        }
+        self.video_due = (self.video_due + period).max(now);
+        let frame = self.rng.ln(P::VISUAL_FRAME_BYTES) as u64;
+        let ttft = self.rng.ln(P::VISUAL_TTFT_S);
+        let tokens = self.rng.ln(P::VISUAL_ANSWER_TOKENS);
+        let query = self.llm(VISUAL_QUERY, frame, ttft, tokens);
+        Step::Burst {
+            fetches: vec![query],
+            parallel: 1,
+            meta: self.meta("llm_turn"),
+        }
+    }
+
+    /// Image generation (F4): a prompt up; after the first preview's time
+    /// the previews and the final image stream down over the rest of the
+    /// generation (one paced reply). Then the user looks at it.
+    fn image_gen(&mut self, now: Duration) -> Step {
+        if self.answered {
+            self.answered = false;
+            return Step::Until(now + self.rng.secs(P::IMAGE_VIEW_S));
+        }
+        self.answered = true;
+        self.new_task();
+        let prompt = self.bytes(P::IMAGE_PROMPT_BYTES);
+        let first = self.rng.ln(P::IMAGE_FIRST_PREVIEW_S);
+        let generate = self.rng.ln(P::IMAGE_GENERATE_S).max(first + 1.0);
+        let previews = self.rng.int(P::IMAGE_PREVIEWS);
+        let mut down = 0u64;
+        for _ in 0..previews {
+            down += self.bytes(P::IMAGE_PREVIEW_BYTES);
+        }
+        down += self.bytes(P::IMAGE_FINAL_BYTES);
+        let image = Fetch {
+            up: prompt,
+            delay_ms: (first * 1000.0) as u32,
+            rate_bps: ((down as f64 * 8.0 / (generate - first)) as u32).max(8_000),
+            ..Fetch::download(IMAGE_GEN, down)
+        };
+        Step::Burst {
+            fetches: vec![image],
+            parallel: 1,
+            meta: self.meta("generate"),
+        }
+    }
+
+    /// Video understanding (F4): a clip goes up with the question, then the
+    /// answer streams down after the model has watched it.
+    fn video_query(&mut self, now: Duration) -> Step {
+        if self.answered {
+            self.answered = false;
+            return Step::Until(now + self.rng.secs(P::VIDEOQ_BETWEEN_S));
+        }
+        self.answered = true;
+        self.new_task();
+        let clip = self.rng.ln(P::VIDEOQ_CLIP_BYTES) as u64;
+        let ttft = self.rng.ln(P::VIDEOQ_TTFT_S);
+        let tokens = self.rng.ln(P::VIDEOQ_ANSWER_TOKENS);
+        let query = self.llm(VIDEO_QUERY, clip, ttft, tokens);
+        Step::Burst {
+            fetches: vec![query],
+            parallel: 1,
+            meta: self.meta("llm_turn"),
         }
     }
 
@@ -1284,6 +1420,88 @@ mod tests {
         }
     }
 
+    /// The first `n` bursts of `profile`, with the simulated time they ran at
+    /// (transfers taking 0 s).
+    fn bursts(profile: &str, n: usize) -> Vec<(Duration, Fetch, StepMeta)> {
+        let mut a = Agent::new(profile, 3, 1.0, &[]);
+        let (mut now, mut out) = (Duration::ZERO, vec![]);
+        while out.len() < n {
+            match a.next_step(now) {
+                Step::Until(t) => now = t,
+                Step::Burst { fetches, meta, .. } => {
+                    out.extend(fetches.into_iter().map(|f| (now, f, meta)))
+                }
+                s => panic!("{profile}: {s:?}"),
+            }
+        }
+        out
+    }
+
+    /// Chat: each turn a task; the prompt carries the growing conversation
+    /// up, the reply streams in SSE events after the first-token time.
+    #[test]
+    fn chat_turns_grow_the_context() {
+        let b = bursts("chat", 40);
+        assert!(b
+            .iter()
+            .all(|(_, f, m)| f.activity == CHAT_TURN && m.kind == "llm_turn" && m.step == 1));
+        assert!(b
+            .iter()
+            .all(|(_, f, _)| f.chunk == SSE_EVENT && f.rate_bps > 0 && f.delay_ms >= 200));
+        // within a conversation the context only grows; a new one starts small
+        let ups: Vec<u64> = b.iter().map(|(_, f, _)| f.up).collect();
+        assert!(ups.windows(2).filter(|w| w[1] > w[0]).count() > ups.len() / 2);
+        assert!(ups.windows(2).any(|w| w[1] < w[0]), "a new conversation");
+    }
+
+    /// Visual: a session's frames go up `visual.period_s` apart (as a comb),
+    /// 50–500 kB each, each with a short answer; sessions are tasks.
+    #[test]
+    fn visual_frames_come_every_period() {
+        let b = bursts("visual", 60);
+        assert!(b
+            .iter()
+            .all(|(_, f, _)| f.activity == VISUAL_QUERY && (50_000..=500_000).contains(&f.up)));
+        let period = Duration::from_secs_f64(P::VISUAL_PERIOD_S);
+        let same_session: Vec<_> = b
+            .windows(2)
+            .filter(|w| w[0].2.task == w[1].2.task)
+            .collect();
+        assert!(same_session.len() > 30);
+        assert!(
+            same_session.iter().all(|w| w[1].0 - w[0].0 == period),
+            "a comb"
+        );
+        assert!(
+            b.windows(2).any(|w| w[1].2.task == w[0].2.task + 1),
+            "several sessions"
+        );
+    }
+
+    /// Image generation: a small prompt, the first preview after its time,
+    /// previews and image (0.5–3 MB + previews) paced over the generation.
+    #[test]
+    fn image_gen_streams_over_the_generation() {
+        for (_, f, m) in bursts("image_gen", 30) {
+            assert_eq!((f.activity, m.kind), (IMAGE_GEN, "generate"));
+            assert!(f.up <= 5_000 && f.delay_ms >= 500);
+            assert!(f.down >= 500_000 + 3 * 10_000);
+            let stream_s = f.down as f64 * 8.0 / f.rate_bps as f64;
+            assert!((0.9..=30.0).contains(&stream_s), "{stream_s} s");
+        }
+    }
+
+    /// Video understanding: a 5–50 MB clip up, a streamed answer after
+    /// 1–20 s.
+    #[test]
+    fn video_query_uploads_a_clip() {
+        for (_, f, _) in bursts("video_understanding", 30) {
+            assert_eq!(f.activity, VIDEO_QUERY);
+            assert!((5_000_000..=50_000_000).contains(&f.up));
+            assert!((1_000..=20_000).contains(&f.delay_ms) && f.rate_bps > 0);
+        }
+    }
+
     /// Cloud: no search or fetch traffic from the phone — the provider's
     /// result text comes down inside the call, which then resumes.
     #[test]
@@ -1309,7 +1527,19 @@ mod tests {
     /// the seed decides: the transfers are the same as without them.
     #[test]
     fn tasks_and_steps_are_reproducible() {
-        for p in ["web", "mail", "video", "social", "mixed", "agent"] {
+        for p in [
+            "web",
+            "mail",
+            "video",
+            "social",
+            "mixed",
+            "agent",
+            "websearch",
+            "chat",
+            "visual",
+            "image_gen",
+            "video_understanding",
+        ] {
             let m = metas(p, 5, 900);
             assert!(!m.is_empty(), "{p}");
             assert_eq!(m, metas(p, 5, 900), "{p}");

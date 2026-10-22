@@ -19,7 +19,7 @@ public final class Contract {
     public static final String MP_MONITOR_PACKAGE = "com.measurement.monitor";
 
     // contracts/app_traffic/parameters.yaml (app_params.py)
-    public static final String APP_PARAMS_VERSION = "c34e0af20e44";
+    public static final String APP_PARAMS_VERSION = "763fd6d16aff";
 
     /** enums.yaml commands */
     public static final class Commands {
@@ -278,6 +278,10 @@ public final class Contract {
         public static final String LLM_RESUME = "llm_resume";
         public static final String WEB_SEARCH = "web_search";
         public static final String VOICE = "voice";
+        public static final String CHAT_TURN = "chat_turn";
+        public static final String VISUAL_QUERY = "visual_query";
+        public static final String IMAGE_GEN = "image_gen";
+        public static final String VIDEO_QUERY = "video_query";
     }
 
     /** enums.yaml app_step_kinds */
@@ -296,6 +300,7 @@ public final class Contract {
         public static final String SCRIPT_ACTION = "script_action";
         public static final String SEARCH = "search";
         public static final String FETCH = "fetch";
+        public static final String GENERATE = "generate";
     }
 
     /** enums.yaml app_engines */
@@ -346,6 +351,10 @@ public final class Contract {
         public static final String MIXED = "mixed";
         public static final String AGENT = "agent";
         public static final String WEBSEARCH = "websearch";
+        public static final String CHAT = "chat";
+        public static final String VISUAL = "visual";
+        public static final String IMAGE_GEN = "image_gen";
+        public static final String VIDEO_UNDERSTANDING = "video_understanding";
         public static final String SCRIPT = "script";
     }
 

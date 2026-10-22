@@ -103,6 +103,10 @@ components:
       - mixed
       - agent
       - websearch
+      - chat
+      - visual
+      - image_gen
+      - video_understanding
       - script
     AppToolPlacement:
       type: string

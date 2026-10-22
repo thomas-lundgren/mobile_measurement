@@ -823,8 +823,12 @@ and how the apps themselves fare (page load time, video segment time).
   and web fetches in the cloud), `websearch` (an AI agent answering by web
   search, each task a graph: an LLM call plans the search, a search API call,
   2–6 page fetches in parallel, an LLM call that waits for all of them and
-  reads their text — sometimes a second round; the same placements) and
-  `script` (an
+  reads their text — sometimes a second round; the same placements), `chat`
+  (conversations: the growing context up, a streamed reply per turn),
+  `visual` (a camera frame up every 3.9 s with a short answer), `image_gen`
+  (a prompt, then previews and the image streamed over a 5–30 s generation),
+  `video_understanding` (a 5–50 MB clip up with a question, the answer
+  streamed) and `script` (an
   explicit timeline of actions, so an AI agent playing a user can write the
   plan). `workers` runs several users at once, `seed` makes their choices
   reproducible, `scale` shrinks every object to save data.

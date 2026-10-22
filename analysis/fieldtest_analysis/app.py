@@ -177,6 +177,12 @@ def impact(td, obj: pd.DataFrame) -> list[dict]:
 
 
 #: What a task is, by the kind of its first step (enums.yaml app_step_kinds).
+TASK_ACTIVITIES = {
+    "chat_turn": "chat turn",
+    "visual_query": "camera session",
+    "image_gen": "image",
+    "video_query": "video question",
+}
 TASK_KINDS = {
     "llm_turn": "agent task",
     "page_html": "page view",
@@ -216,6 +222,7 @@ def tasks(td) -> list[dict] | None:
     g = ev.groupby(key, sort=True)
     t = pd.DataFrame({
         "first_kind": g.apply(lambda x: x.sort_values("step")["step_kind"].iloc[0], include_groups=False),
+        "first_activity": g.apply(lambda x: x.sort_values("step")["activity"].iloc[0], include_groups=False),
         "steps": g["step"].max(),
         "objects": g.size(),
         "all_ok": g["ok"].all(),
@@ -224,7 +231,9 @@ def tasks(td) -> list[dict] | None:
     }).reset_index()
     last = t.groupby(["flow_id", "agent"])["task"].transform("max")
     t["finished"] = t["all_ok"] & (t["task"] < last)
-    t["kind"] = t["first_kind"].map(TASK_KINDS).fillna(t["first_kind"])
+    # an LLM turn's task is named by what it is for (agent, chat, ...)
+    by_activity = t["first_activity"].map(TASK_ACTIVITIES)
+    t["kind"] = by_activity.fillna(t["first_kind"].map(TASK_KINDS)).fillna(t["first_kind"])
     # open loop: a task that arrived with the backlog full never ran
     never = g.apply(lambda x: bool((x["outcome"] == "skipped").all() and x["start_mono_ns"].isna().all()), include_groups=False)
     t["dropped"] = never.values & bool(ev["due_mono_ns"].notna().any())

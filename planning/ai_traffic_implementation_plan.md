@@ -198,6 +198,12 @@ final answer, closed loop and open loop.
 
 ## Step 4 — F2 chat, F3 visual assistant, F4 content generation
 
+**Done 2026-10-22** as profiles `chat`, `visual`, `image_gen`,
+`video_understanding` (numbers in `contracts/app_traffic/parameters.yaml`;
+phases `app-chat`, `app-visual`, `app-image`, `app-videoq`). F3 runs its
+frames on the model's own period (as video segments) rather than through the
+open loop. Image previews and the final image are one paced reply.
+
 Each a model in `model.rs` with its parameters in the registry, its own
 activity names, a phase in `app_test.sh`, and a unit test of its shape.
 
