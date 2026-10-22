@@ -203,6 +203,7 @@ When you add or change such a value:
 | `schemas/core_stop_summary.schema.json` | core `FlowSummary` → Logger (`Wire.testResult`) | `ue::flow_summary_matches_the_contract`; Logger JVM tests |
 | logged value sets (`enums.yaml` log_nodes, packet_directions, packet_protocols, send_statuses, radio_network_types, app_step_kinds, app_outcomes, …) | core writers, Logger `Contract`, analysis `schema.py` / `findings.py` | `log_writer::logged_values_match_the_contract`; `app_traffic::model::logged_kinds_and_outcomes_match_the_contract`; `test_schema_contract.py` |
 | `internal/mp_probe.yaml` + `testvectors/mp_probe/` | `probe/` (Rust), Logger `MpProbe`, `analysis` `bench.py` | probe tests, Logger JVM tests, `test_bench.py` |
+| `app_traffic/parameters.yaml` (every number the app-traffic models use, with source and status) | core `app_traffic/params.rs` and the Logger's `APP_PARAMS_VERSION` (into header.json), **generated** by `contracts/codegen/app_params.py` | `app_params.py --check`; `java_contract.py --check`; the seeded output hash is unchanged when only provenance moves |
 
 In the Logger, wire values and the keys it reads come from the generated `Contract` (including `Contract.Fields.<Type>` for OpenAPI and schema-only types); every JSON body it sends is built in `Wire.java` — never inline a wire string elsewhere.
 

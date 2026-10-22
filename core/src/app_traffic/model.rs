@@ -69,22 +69,24 @@ impl Placement {
     }
 }
 
+// Every number below comes from `params` (generated from
+// contracts/app_traffic/parameters.yaml, with its source and status).
+use super::params::{self as P, IntRange, LogNormal, Uniform};
+
 /// Objects in flight at once per agent (a browser's per-host connection cap).
-pub const MAX_PARALLEL: usize = 6;
+pub const MAX_PARALLEL: usize = P::APP_MAX_PARALLEL;
 /// Video segment length: one chunk is due every SEGMENT.
-const SEGMENT: Duration = Duration::from_secs(4);
-/// LLM reply stream: bytes per output token (server-sent events carry ~3
-/// tokens of text in a ~140 B event) and per event.
-const SSE_BYTES_PER_TOKEN: f64 = 47.0;
-const SSE_EVENT: u32 = 140;
+const SEGMENT: Duration = Duration::from_millis((P::VIDEO_SEGMENT_S * 1000.0) as u64);
+/// LLM reply stream: bytes per output token and per event.
+const SSE_BYTES_PER_TOKEN: f64 = P::LLM_SSE_BYTES_PER_TOKEN;
+const SSE_EVENT: u32 = P::LLM_SSE_EVENT_BYTES;
 /// Bytes a token adds to the context the next call sends (JSON text).
-const CONTEXT_BYTES_PER_TOKEN: u64 = 4;
+const CONTEXT_BYTES_PER_TOKEN: u64 = P::LLM_CONTEXT_BYTES_PER_TOKEN;
 /// A tool result adds at most this much text to the context.
-const TOOL_RESULT_MAX: u64 = 25_000;
-/// The context is compacted to COMPACT_TO once it passes COMPACT_AT (~150k
-/// tokens), as coding agents do.
-const COMPACT_AT: u64 = 600_000;
-const COMPACT_TO: u64 = 60_000;
+const TOOL_RESULT_MAX: u64 = P::AGENT_TOOL_RESULT_MAX_BYTES;
+/// The context is compacted to COMPACT_TO once it passes COMPACT_AT.
+const COMPACT_AT: u64 = P::AGENT_COMPACT_AT_BYTES;
+const COMPACT_TO: u64 = P::AGENT_COMPACT_TO_BYTES;
 
 /// One action of a scripted timeline (`profile = "script"`).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -258,8 +260,25 @@ impl Rng {
         median * (sigma * z).exp()
     }
 
-    fn secs(&mut self, median: f64, sigma: f64, lo: f64, hi: f64) -> Duration {
-        Duration::from_secs_f64(self.lognormal(median, sigma).clamp(lo, hi))
+    /// A draw from a registry parameter.
+    fn ln(&mut self, p: LogNormal) -> f64 {
+        self.lognormal(p.median, p.sigma).clamp(p.min, p.max)
+    }
+
+    fn uni(&mut self, p: Uniform) -> f64 {
+        self.uniform(p.min, p.max)
+    }
+
+    fn int(&mut self, p: IntRange) -> u64 {
+        p.min + self.next() % (p.max - p.min + 1)
+    }
+
+    fn pick(&mut self, values: &[f64]) -> f64 {
+        values[(self.next() % values.len() as u64) as usize]
+    }
+
+    fn secs(&mut self, p: LogNormal) -> Duration {
+        Duration::from_secs_f64(self.ln(p))
     }
 }
 
@@ -323,7 +342,7 @@ impl Agent {
             "websearch" => Mode::WebSearch,
             _ => Mode::Web,
         };
-        let mail_at = Duration::from_secs_f64(rng.uniform(5.0, 60.0));
+        let mail_at = Duration::from_secs_f64(rng.uni(P::MAIL_FIRST_SYNC_S));
         Self {
             rng,
             scale: if scale > 0.0 { scale } else { 1.0 },
@@ -379,20 +398,12 @@ impl Agent {
         self
     }
 
-    fn bytes(&mut self, median: f64, sigma: f64, lo: f64, hi: f64) -> u64 {
-        (self.rng.lognormal(median, sigma).clamp(lo, hi) * self.scale).max(1.0) as u64
+    fn bytes(&mut self, p: LogNormal) -> u64 {
+        (self.rng.ln(p) * self.scale).max(1.0) as u64
     }
 
-    fn fetch(
-        &mut self,
-        activity: u8,
-        upload: bool,
-        median: f64,
-        sigma: f64,
-        lo: f64,
-        hi: f64,
-    ) -> Fetch {
-        let bytes = self.bytes(median, sigma, lo, hi);
+    fn fetch(&mut self, activity: u8, upload: bool, p: LogNormal) -> Fetch {
+        let bytes = self.bytes(p);
         if upload {
             Fetch::upload(activity, bytes)
         } else {
@@ -503,14 +514,14 @@ impl Agent {
         }
         if self.mixed && now >= self.mode_until {
             let r = self.rng.unit();
-            self.mode = if r < 0.45 {
+            self.mode = if r < P::MIXED_MODE[0] {
                 Mode::Web
-            } else if r < 0.80 {
+            } else if r < P::MIXED_MODE[1] {
                 Mode::Social
             } else {
                 Mode::Video
             };
-            self.mode_until = now + Duration::from_secs_f64(self.rng.uniform(120.0, 300.0));
+            self.mode_until = now + Duration::from_secs_f64(self.rng.uni(P::MIXED_MODE_S));
             self.video_end = Duration::ZERO;
         }
         match self.mode {
@@ -543,19 +554,21 @@ impl Agent {
         if self.turns_left == 0 {
             if self.context > 0 {
                 self.context = 0;
-                return Step::Until(now + self.rng.secs(45.0, 0.7, 5.0, 300.0));
+                return Step::Until(now + self.rng.secs(P::AGENT_READING_S));
             }
-            self.turns_left = self.rng.lognormal(6.0, 0.6).clamp(1.0, 30.0) as u32;
+            self.turns_left = self.rng.ln(P::AGENT_TURNS) as u32;
             self.new_task();
             // system prompt, tool definitions and the user's request
-            self.context = self.rng.lognormal(12e3, 0.4).clamp(4e3, 60e3) as u64;
+            self.context = self.rng.ln(P::AGENT_CONTEXT_START_BYTES) as u64;
             self.in_call = false;
         }
         self.turns_left -= 1;
-        let tokens = self.rng.lognormal(250.0, 0.9).clamp(20.0, 3000.0);
-        let tokens_per_s = self.rng.uniform(40.0, 90.0);
+        let tokens = self.rng.ln(P::AGENT_REPLY_TOKENS);
+        let tokens_per_s = self.rng.uni(P::LLM_TOKENS_PER_S);
         let stream = Fetch {
-            down: (((tokens * SSE_BYTES_PER_TOKEN + 1200.0) * self.scale) as u64).max(1),
+            down: (((tokens * SSE_BYTES_PER_TOKEN + P::LLM_REPLY_OVERHEAD_BYTES) * self.scale)
+                as u64)
+                .max(1),
             rate_bps: (tokens_per_s * SSE_BYTES_PER_TOKEN * 8.0) as u32,
             chunk: SSE_EVENT,
             ..Fetch::download(LLM_CALL, 0)
@@ -564,14 +577,14 @@ impl Agent {
             // the provider processes the tool results, then generates on
             Fetch {
                 activity: LLM_RESUME,
-                delay_ms: (self.rng.lognormal(0.5, 0.5).clamp(0.1, 5.0) * 1000.0) as u32,
+                delay_ms: (self.rng.ln(P::AGENT_RESUME_S) * 1000.0) as u32,
                 ..stream
             }
         } else {
             Fetch {
                 up: ((self.context as f64 * self.scale) as u64).max(1),
                 // time to first token
-                delay_ms: (self.rng.lognormal(0.9, 0.5).clamp(0.25, 10.0) * 1000.0) as u32,
+                delay_ms: (self.rng.ln(P::AGENT_TTFT_S) * 1000.0) as u32,
                 ..stream
             }
         };
@@ -580,16 +593,16 @@ impl Agent {
         let meta = self.meta("llm_turn");
         if self.turns_left > 0 {
             let r = self.rng.unit();
-            let n = if r < 0.6 {
+            let n = if r < P::AGENT_TOOLS_PER_TURN[0] {
                 1
-            } else if r < 0.85 {
+            } else if r < P::AGENT_TOOLS_PER_TURN[1] {
                 2
             } else {
-                3 + (self.rng.next() % 2) as usize
+                self.rng.int(P::AGENT_TOOLS_MANY) as usize
             };
             let tools: Vec<Fetch> = (0..n).map(|_| self.tool()).collect();
             for t in &tools {
-                self.context += t.down.min(TOOL_RESULT_MAX) + 300;
+                self.context += t.down.min(TOOL_RESULT_MAX) + P::AGENT_TOOL_RESULT_OVERHEAD_BYTES;
             }
             if self.context > COMPACT_AT {
                 self.context = COMPACT_TO;
@@ -603,7 +616,9 @@ impl Agent {
                         CLOUD_TOOL,
                         cloud
                             .iter()
-                            .map(|t| t.down.min(TOOL_RESULT_MAX) + 300)
+                            .map(|t| {
+                                t.down.min(TOOL_RESULT_MAX) + P::AGENT_TOOL_RESULT_OVERHEAD_BYTES
+                            })
                             .sum(),
                     )
                 };
@@ -629,7 +644,7 @@ impl Agent {
     /// `tokens` at 40–90 tokens/s in server-sent events, `up` bytes sent
     /// first (the context; 0 for a resumed reply).
     fn llm(&mut self, activity: u8, up: u64, ttft_s: f64, tokens: f64) -> Fetch {
-        let tokens_per_s = self.rng.uniform(40.0, 90.0);
+        let tokens_per_s = self.rng.uni(P::LLM_TOKENS_PER_S);
         Fetch {
             up: if up == 0 {
                 0
@@ -637,7 +652,9 @@ impl Agent {
                 ((up as f64 * self.scale) as u64).max(1)
             },
             delay_ms: (ttft_s * 1000.0) as u32,
-            down: (((tokens * SSE_BYTES_PER_TOKEN + 1200.0) * self.scale) as u64).max(1),
+            down: (((tokens * SSE_BYTES_PER_TOKEN + P::LLM_REPLY_OVERHEAD_BYTES) * self.scale)
+                as u64)
+                .max(1),
             rate_bps: (tokens_per_s * SSE_BYTES_PER_TOKEN * 8.0) as u32,
             chunk: SSE_EVENT,
             ..Fetch::download(activity, 0)
@@ -656,7 +673,7 @@ impl Agent {
     fn websearch(&mut self, now: Duration) -> Step {
         if self.answered {
             self.answered = false;
-            return Step::Until(now + self.rng.secs(15.0, 0.7, 5.0, 60.0));
+            return Step::Until(now + self.rng.secs(P::WEBSEARCH_READING_S));
         }
         self.answered = true;
         self.new_task();
@@ -665,36 +682,41 @@ impl Agent {
             nodes.push(GraphNode { fetch, meta, deps });
             nodes.len() - 1
         };
-        let mut context = self.rng.lognormal(8e3, 0.4).clamp(3e3, 30e3) as u64;
-        let ttft = self.rng.lognormal(0.9, 0.5).clamp(0.25, 10.0);
-        let tokens = self.rng.lognormal(120.0, 0.5).clamp(30.0, 600.0);
+        let mut context = self.rng.ln(P::WEBSEARCH_CONTEXT_START_BYTES) as u64;
+        let ttft = self.rng.ln(P::AGENT_TTFT_S);
+        let tokens = self.rng.ln(P::WEBSEARCH_PLAN_TOKENS);
         let plan = self.llm(LLM_CALL, context, ttft, tokens);
         context += tokens as u64 * CONTEXT_BYTES_PER_TOKEN;
         let m = self.meta("llm_turn");
         let mut last = add(&mut nodes, plan, m, vec![]);
-        let rounds = if self.rng.chance(0.3) { 2 } else { 1 };
+        let rounds = if self.rng.chance(P::WEBSEARCH_SECOND_ROUND_P) {
+            2
+        } else {
+            1
+        };
         for round in 0..rounds {
             let search = Fetch {
-                up: 600,
-                delay_ms: (self.rng.lognormal(0.6, 0.5).clamp(0.15, 4.0) * 1000.0) as u32,
-                ..Fetch::download(WEB_SEARCH, self.bytes(30e3, 0.5, 5e3, 200e3))
+                up: P::WEBSEARCH_SEARCH_UP_BYTES,
+                delay_ms: (self.rng.ln(P::WEBSEARCH_SEARCH_LATENCY_S) * 1000.0) as u32,
+                ..Fetch::download(WEB_SEARCH, self.bytes(P::WEBSEARCH_SEARCH_RESULT_BYTES))
             };
-            let n = 2 + (self.rng.next() % 5) as usize;
+            let n = self.rng.int(P::WEBSEARCH_PAGES) as usize;
             let pages: Vec<Fetch> = (0..n)
                 .map(|_| Fetch {
-                    up: 600,
-                    delay_ms: (self.rng.lognormal(0.25, 0.6).clamp(0.03, 3.0) * 1000.0) as u32,
-                    ..Fetch::download(WEB_FETCH, self.bytes(150e3, 1.0, 5e3, 3e6))
+                    up: P::TOOL_FETCH_UP_BYTES,
+                    delay_ms: (self.rng.ln(P::TOOL_FETCH_FIRST_BYTE_S) * 1000.0) as u32,
+                    ..Fetch::download(WEB_FETCH, self.bytes(P::TOOL_FETCH_PAGE_BYTES))
                 })
                 .collect();
-            let text = |f: &Fetch| f.down.min(TOOL_RESULT_MAX) + 300;
+            let text =
+                |f: &Fetch| f.down.min(TOOL_RESULT_MAX) + P::AGENT_TOOL_RESULT_OVERHEAD_BYTES;
             let found = text(&search) + pages.iter().map(text).sum::<u64>();
             let final_round = round + 1 == rounds;
-            let ttft = self.rng.lognormal(1.2, 0.5).clamp(0.3, 12.0);
+            let ttft = self.rng.ln(P::WEBSEARCH_READ_TTFT_S);
             let tokens = if final_round {
-                self.rng.lognormal(400.0, 0.6).clamp(50.0, 3000.0)
+                self.rng.ln(P::WEBSEARCH_ANSWER_TOKENS)
             } else {
-                self.rng.lognormal(100.0, 0.5).clamp(20.0, 600.0)
+                self.rng.ln(P::WEBSEARCH_INTERIM_TOKENS)
             };
             let slowest = pages.iter().map(|p| p.delay_ms).max().unwrap_or(0);
             match self.placement {
@@ -721,7 +743,7 @@ impl Agent {
                     let r = add(&mut nodes, result, m, vec![last]);
                     let resume = Fetch {
                         activity: LLM_RESUME,
-                        ..self.llm(LLM_CALL, 0, ttft * 0.5, tokens)
+                        ..self.llm(LLM_CALL, 0, ttft * P::WEBSEARCH_RESUME_TTFT_FACTOR, tokens)
                     };
                     let m = self.meta("llm_turn");
                     last = add(&mut nodes, resume, m, vec![r]);
@@ -756,17 +778,17 @@ impl Agent {
     /// One tool call: an MCP request (small JSON up, the tool's latency, a JSON
     /// result) or a web fetch (GET, the site's first-byte time, the page).
     fn tool(&mut self) -> Fetch {
-        if self.rng.chance(0.5) {
+        if self.rng.chance(P::TOOL_MCP_P) {
             Fetch {
-                up: self.bytes(1.2e3, 0.6, 200.0, 20e3),
-                delay_ms: (self.rng.lognormal(0.4, 0.8).clamp(0.05, 10.0) * 1000.0) as u32,
-                ..Fetch::download(MCP_CALL, self.bytes(4e3, 1.2, 200.0, 300e3))
+                up: self.bytes(P::TOOL_MCP_UP_BYTES),
+                delay_ms: (self.rng.ln(P::TOOL_MCP_LATENCY_S) * 1000.0) as u32,
+                ..Fetch::download(MCP_CALL, self.bytes(P::TOOL_MCP_RESULT_BYTES))
             }
         } else {
             Fetch {
-                up: 600,
-                delay_ms: (self.rng.lognormal(0.25, 0.6).clamp(0.03, 3.0) * 1000.0) as u32,
-                ..Fetch::download(WEB_FETCH, self.bytes(150e3, 1.0, 5e3, 3e6))
+                up: P::TOOL_FETCH_UP_BYTES,
+                delay_ms: (self.rng.ln(P::TOOL_FETCH_FIRST_BYTE_S) * 1000.0) as u32,
+                ..Fetch::download(WEB_FETCH, self.bytes(P::TOOL_FETCH_PAGE_BYTES))
             }
         }
     }
@@ -776,14 +798,14 @@ impl Agent {
     fn web_page(&mut self) -> Step {
         self.new_task();
         let meta = self.meta("page_html");
-        let html = self.fetch(WEB_PAGE, false, 50e3, 0.6, 5e3, 500e3);
-        let n = self.rng.lognormal(30.0, 0.5).clamp(5.0, 120.0) as usize;
+        let html = self.fetch(WEB_PAGE, false, P::WEB_HTML_BYTES);
+        let n = self.rng.ln(P::WEB_OBJECTS_PER_PAGE) as usize;
         let objects = (0..n)
-            .map(|_| self.fetch(WEB_OBJECT, false, 20e3, 1.2, 200.0, 3e6))
+            .map(|_| self.fetch(WEB_OBJECT, false, P::WEB_OBJECT_BYTES))
             .collect();
         let m = self.meta("page_objects");
         self.queue.push_back(Plan::Burst(objects, MAX_PARALLEL, m));
-        let read = self.rng.secs(12.0, 0.7, 2.0, 90.0);
+        let read = self.rng.secs(P::WEB_READ_S);
         self.queue.push_back(Plan::Think(read));
         Step::Burst {
             fetches: vec![html],
@@ -794,14 +816,14 @@ impl Agent {
 
     /// Mail sync: headers, sometimes an attachment, rarely a sent mail.
     fn mail(&mut self, now: Duration) -> Step {
-        let mut fetches = vec![self.fetch(MAIL_SYNC, false, 15e3, 0.8, 1e3, 200e3)];
-        if self.rng.chance(0.15) {
-            fetches.push(self.fetch(MAIL_ATTACHMENT, false, 300e3, 1.0, 10e3, 10e6));
+        let mut fetches = vec![self.fetch(MAIL_SYNC, false, P::MAIL_SYNC_BYTES)];
+        if self.rng.chance(P::MAIL_ATTACHMENT_P) {
+            fetches.push(self.fetch(MAIL_ATTACHMENT, false, P::MAIL_ATTACHMENT_BYTES));
         }
-        if self.rng.chance(0.05) {
-            fetches.push(self.fetch(MAIL_SEND, true, 150e3, 1.2, 2e3, 10e6));
+        if self.rng.chance(P::MAIL_SEND_P) {
+            fetches.push(self.fetch(MAIL_SEND, true, P::MAIL_SEND_BYTES));
         }
-        self.mail_at = now + Duration::from_secs_f64(self.rng.uniform(60.0, 180.0));
+        self.mail_at = now + Duration::from_secs_f64(self.rng.uni(P::MAIL_SYNC_INTERVAL_S));
         Step::Burst {
             fetches,
             parallel: 1,
@@ -815,18 +837,18 @@ impl Agent {
         if now >= self.video_end {
             if self.video_end > Duration::ZERO {
                 self.video_end = Duration::ZERO;
-                let pause = self.rng.secs(30.0, 0.6, 5.0, 120.0);
+                let pause = self.rng.secs(P::VIDEO_PAUSE_S);
                 return Step::Until(now + pause);
             }
-            let mbps = [1.5, 3.0, 5.0][(self.rng.next() % 3) as usize];
+            let mbps = self.rng.pick(&P::VIDEO_BITRATES_MBPS);
             self.video_bytes =
                 ((mbps * 1e6 / 8.0 * SEGMENT.as_secs_f64()) * self.scale).max(1.0) as u64;
-            self.video_end = now + Duration::from_secs_f64(self.rng.uniform(60.0, 300.0));
-            self.video_due = now + SEGMENT * 3;
+            self.video_end = now + Duration::from_secs_f64(self.rng.uni(P::VIDEO_SESSION_S));
+            self.video_due = now + SEGMENT * P::VIDEO_STARTUP_SEGMENTS;
             let f = Fetch::download(VIDEO_CHUNK, self.video_bytes);
             self.new_task();
             return Step::Burst {
-                fetches: vec![f; 3],
+                fetches: vec![f; P::VIDEO_STARTUP_SEGMENTS as usize],
                 parallel: 1,
                 meta: self.meta("video_start"),
             };
@@ -846,19 +868,19 @@ impl Agent {
 
     /// Feed scrolling: a few images, a pause, now and then a photo upload.
     fn feed(&mut self) -> Step {
-        let n = self.rng.uniform(3.0, 9.0) as usize;
+        let n = self.rng.uni(P::SOCIAL_IMAGES_PER_SCROLL) as usize;
         let mut fetches: Vec<Fetch> = (0..n)
-            .map(|_| self.fetch(FEED_IMAGE, false, 120e3, 0.8, 5e3, 2e6))
+            .map(|_| self.fetch(FEED_IMAGE, false, P::SOCIAL_IMAGE_BYTES))
             .collect();
-        if self.rng.chance(0.03) {
-            fetches.push(self.fetch(PHOTO_UPLOAD, true, 2.5e6, 0.4, 300e3, 12e6));
+        if self.rng.chance(P::SOCIAL_UPLOAD_P) {
+            fetches.push(self.fetch(PHOTO_UPLOAD, true, P::SOCIAL_UPLOAD_BYTES));
         }
-        let pause = self.rng.secs(4.0, 0.6, 1.0, 20.0);
+        let pause = self.rng.secs(P::SOCIAL_PAUSE_S);
         self.queue.push_back(Plan::Think(pause));
         self.new_task();
         Step::Burst {
             fetches,
-            parallel: 4,
+            parallel: P::SOCIAL_PARALLEL,
             meta: self.meta("feed"),
         }
     }

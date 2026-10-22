@@ -15,6 +15,7 @@
     "schema_version":   { "type": "integer", "minimum": 1, "description": "Log schema version (versions.yaml)." },
     "protocol_version": { "type": "integer", "minimum": 1 },
     "app_version":      { "type": "string", "description": "Per-build semver string of the logger app." },
+    "app_params_version": { "type": "string", "pattern": "^[0-9a-f]{12}$", "description": "The app-traffic model parameter set the phone ran with: a hash of contracts/app_traffic/parameters.yaml (core PARAMS_VERSION). Absent in headers written before 2026-10-22." },
 
     "session_id": { "type": "string", "description": "Groups tests recorded in one logging session." },
     "test_id":    { "type": "string", "pattern": "^tst_[0-9A-HJKMNP-TV-Z]{26}$" },

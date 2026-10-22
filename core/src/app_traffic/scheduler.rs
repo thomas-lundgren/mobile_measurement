@@ -27,10 +27,11 @@ use crate::timestamp::Timestamp;
 
 /// Idle connections are closed after this long, as browsers and apps do; the
 /// next burst then pays for a new TCP handshake (and slow start).
-const IDLE_CLOSE: Duration = Duration::from_secs(20);
+const IDLE_CLOSE: Duration =
+    Duration::from_millis((super::params::APP_IDLE_CLOSE_S * 1000.0) as u64);
 /// Open loop: the rate an object's bytes are planned to move at, for the
 /// offsets of the objects that depend on it.
-const NOMINAL_BPS: f64 = 20e6;
+const NOMINAL_BPS: f64 = super::params::APP_NOMINAL_BPS;
 
 /// One app_traffic flow on the UE.
 #[derive(Debug, Clone)]

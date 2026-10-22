@@ -371,6 +371,7 @@ def analyze(td) -> dict | None:
         return {
             "objects": 0, "mbytes_down": 0.0, "mbytes_up": 0.0, "span_s": None, "activities": [], "episodes": [],
             "impact": impact(td, busy), "tasks": tasks(td), "intent": intent(td), "bursts": burst_stats,
+            "params_version": (td.header or {}).get("app_params_version"),
         }  # fmt: skip
     ep = _episodes(obj)
     acts = []
@@ -402,4 +403,6 @@ def analyze(td) -> dict | None:
         "tasks": tasks(td),
         "intent": intent(td),
         "bursts": burst_stats,
+        # the model parameter set the phone ran with (contracts/app_traffic/parameters.yaml)
+        "params_version": (td.header or {}).get("app_params_version"),
     }

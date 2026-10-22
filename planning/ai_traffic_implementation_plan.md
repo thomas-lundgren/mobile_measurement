@@ -139,6 +139,13 @@ change, nothing on the per-packet path.
 
 ## Step 2 — Evidence registry for profile parameters
 
+**Done 2026-10-22** as `contracts/app_traffic/parameters.yaml`: generated into
+`core/src/app_traffic/params.rs` (no parity test needed: the code is
+generated), version in header.json `app_params_version`, shown on the page.
+All values start `unverified` except the browsers' 6 connections per host
+(`reported`) and three project choices; the plan's anchors are recorded as
+`observations`, not yet used.
+
 **Goal.** Every number the traffic models use has a recorded source and
 status, as plan §A / invariant 4 require; today they are engineering
 estimates in code.

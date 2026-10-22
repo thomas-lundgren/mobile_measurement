@@ -18,6 +18,9 @@ public final class Contract {
     public static final String MP_LOGGER_PACKAGE = "com.measurement.logger";
     public static final String MP_MONITOR_PACKAGE = "com.measurement.monitor";
 
+    // contracts/app_traffic/parameters.yaml (app_params.py)
+    public static final String APP_PARAMS_VERSION = "c34e0af20e44";
+
     /** enums.yaml commands */
     public static final class Commands {
         private Commands() {}
@@ -975,6 +978,7 @@ public final class Contract {
             public static final String SCHEMA_VERSION = "schema_version";
             public static final String PROTOCOL_VERSION = "protocol_version";
             public static final String APP_VERSION = "app_version";
+            public static final String APP_PARAMS_VERSION = "app_params_version";
             public static final String SESSION_ID = "session_id";
             public static final String TEST_ID = "test_id";
             public static final String TEST_START_UTC_NS = "test_start_utc_ns";

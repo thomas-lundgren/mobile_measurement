@@ -40,6 +40,10 @@ Rationale and full strategy: `planning/development_guide.md` §4 and §8;
   for the analysis column lists.
 - **App activities**: `packet::app_activities_match_the_contract` compares the
   wire table with `enums.yaml` `app_activities`.
+- **App-traffic parameters**: `app_traffic/parameters.yaml` (every model
+  number with its source and status) → `codegen/app_params.py` generates
+  `core/src/app_traffic/params.rs` and the version the Logger writes into
+  header.json (`--check` in CI).
 - **Wire packets**: `packets/layouts.yaml` → `codegen/packet_codec.py`
   generates the Rust codec (`core/src/packet/layouts.rs`, with a golden test
   per layout) and the specs' layout tables (`--check` in CI);

@@ -122,6 +122,7 @@ final class Wire {
                 .put("schema_version", Contract.SCHEMA_VERSION)
                 .put("protocol_version", Contract.PROTOCOL_VERSION)
                 .put("app_version", appVersion)
+                .put("app_params_version", Contract.APP_PARAMS_VERSION)
                 .put("session_id", payload.getString(Contract.Fields.RunTestPayload.SESSION_ID))
                 .put("test_id", payload.getString(Contract.Fields.RunTestPayload.TEST_ID))
                 .put("test_start_utc_ns", utcNs)

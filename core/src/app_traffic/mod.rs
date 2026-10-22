@@ -27,6 +27,7 @@
 mod executor;
 pub mod graph;
 mod model;
+pub mod params;
 mod scheduler;
 
 pub use executor::{Engine, Outcome};

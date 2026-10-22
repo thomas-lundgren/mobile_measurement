@@ -34,9 +34,10 @@ echo "==> contract examples + packet vectors"
 ./venv/bin/pip install -q jsonschema referencing pyyaml
 ./venv/bin/python ci/validate_contracts.py
 
-echo "==> generated code in sync with the contracts (Logger constants, packet codec)"
+echo "==> generated code in sync with the contracts (Logger constants, packet codec, app parameters)"
 ./venv/bin/python contracts/codegen/java_contract.py --check
 ./venv/bin/python contracts/codegen/packet_codec.py --check
+./venv/bin/python contracts/codegen/app_params.py --check
 
 echo "==> analysis: pytest"
 (

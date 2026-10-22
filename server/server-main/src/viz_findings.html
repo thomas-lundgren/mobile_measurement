@@ -199,6 +199,9 @@
         for at once, so a web_page episode's time is the page load time. <b>Impact</b> compares each realtime
         stream's extra delay (above its own minimum) and loss while any app object was in flight with the idle
         periods of the same test.</p>
+      <p class="intro"><b>Parameters</b>: the model parameter set the phone ran with (a hash of
+        <code>contracts/app_traffic/parameters.yaml</code>, where every number has its source and status; most are
+        still unverified engineering estimates). Results compare cleanly only within one set.</p>
       <div class="scroll"><table id="appTests"></table></div>
       <h2>Per activity</h2>
       <div class="scroll"><table id="appActs"></table></div>
@@ -393,9 +396,11 @@ function renderApp() {
   const ts = data.tests.filter((t) => t.app);
   const ms = (p) => (p ? `${num(p.p50)} / ${num(p.p90)}` : '<span class="muted">–</span>');
   const when = (t) => chartsLink(hm(t.start), t.start - 1, t.end + 1);
-  table($("appTests"), [["Time"], ["Test"], ["Objects", "num"], ["Down MB", "num"], ["Up MB", "num"],
+  table($("appTests"), [["Time"], ["Test"], ["Parameters"], ["Objects", "num"], ["Down MB", "num"], ["Up MB", "num"],
     ["Episodes: kind × n — time p50 / p90 ms"]],
-    ts.map((t) => [when(t), esc(t.plan || t.test_id), num(t.app.objects), num(t.app.mbytes_down, 1), num(t.app.mbytes_up, 1),
+    ts.map((t) => [when(t), esc(t.plan || t.test_id),
+      t.app.params_version ? `<code>${esc(t.app.params_version)}</code>` : '<span class="muted">–</span>',
+      num(t.app.objects), num(t.app.mbytes_down, 1), num(t.app.mbytes_up, 1),
       t.app.episodes.map((e) => `${esc(e.kind)} ×${e.n}: ${ms(e.ms)}${e.complete_share < 1 ? ` <span class="muted">(${pct(1 - e.complete_share)} unfinished)</span>` : ""}`).join("<br>")]),
     "No app_traffic tests this day.");
   const gap = (a) => (a.gap_ms ? `${num(a.gap_ms.p50)} / ${num(a.gap_ms.max)}${a.stalls_1s ? ` <span class="muted">(${a.stalls_1s} &gt; 1 s)</span>` : ""}` : '<span class="muted">–</span>');

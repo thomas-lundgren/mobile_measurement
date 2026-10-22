@@ -1,0 +1,119 @@
+# App-traffic model parameters — the single source of every number the
+# simulated users (core/src/app_traffic) draw from.
+#
+# Generated from this file by contracts/codegen/app_params.py (CI runs it
+# with --check): core/src/app_traffic/params.rs (one constant per entry, and
+# PARAMS_VERSION, a hash of this file). The Logger writes the version into
+# header.json (app_params_version), so every result names the parameter set
+# it ran with.
+#
+# Each entry: a distribution (`lognormal` median/sigma clamped to min..max;
+# `uniform` min..max; `int_range` min..max inclusive; `probability` p;
+# `cumulative` thresholds for a 3-way choice; `choice` values picked
+# uniformly; `fixed` value with a Rust `type`), a `unit`, the `source` of
+# the number and its `status`:
+#   unverified     an engineering estimate; replace with a measured or
+#                  published value when one is found
+#   reported       a published or commonly documented value, not yet checked
+#                  against our own measurements
+#   verified       checked against a source and our measurements
+#   project_choice a modelling decision, not a property of real traffic
+# Changing a value changes PARAMS_VERSION (results stay comparable only
+# within one version) and, for a seeded run, what the users ask for.
+
+defaults:
+  source: engineering estimate (2026-10)
+  status: unverified
+
+parameters:
+  # --- shared ---------------------------------------------------------------
+  - { id: app.max_parallel, fixed: 6, type: usize, unit: objects, status: reported, source: "browsers' default connections per host (Chromium, Firefox: 6)", doc: "Objects in flight at once per user." }
+  - { id: app.idle_close_s, fixed: 20.0, type: f64, unit: s, doc: "Idle pooled connections close after this long; the next burst pays for a new handshake." }
+  - { id: app.nominal_bps, fixed: 20000000.0, type: f64, unit: bit/s, status: project_choice, doc: "Open loop: the rate objects are planned to move at, for their dependants' due times." }
+
+  # --- web ------------------------------------------------------------------
+  - { id: web.html_bytes,       lognormal: { median: 50000.0, sigma: 0.6, min: 5000.0, max: 500000.0 }, unit: B }
+  - { id: web.objects_per_page, lognormal: { median: 30.0, sigma: 0.5, min: 5.0, max: 120.0 }, unit: objects }
+  - { id: web.object_bytes,     lognormal: { median: 20000.0, sigma: 1.2, min: 200.0, max: 3000000.0 }, unit: B }
+  - { id: web.read_s,           lognormal: { median: 12.0, sigma: 0.7, min: 2.0, max: 90.0 }, unit: s, doc: "Reading a page before the next." }
+
+  # --- mail -----------------------------------------------------------------
+  - { id: mail.first_sync_s,     uniform: { min: 5.0, max: 60.0 }, unit: s }
+  - { id: mail.sync_interval_s,  uniform: { min: 60.0, max: 180.0 }, unit: s }
+  - { id: mail.sync_bytes,       lognormal: { median: 15000.0, sigma: 0.8, min: 1000.0, max: 200000.0 }, unit: B }
+  - { id: mail.attachment_p,     probability: 0.15, unit: per sync }
+  - { id: mail.attachment_bytes, lognormal: { median: 300000.0, sigma: 1.0, min: 10000.0, max: 10000000.0 }, unit: B }
+  - { id: mail.send_p,           probability: 0.05, unit: per sync }
+  - { id: mail.send_bytes,       lognormal: { median: 150000.0, sigma: 1.2, min: 2000.0, max: 10000000.0 }, unit: B }
+
+  # --- video ----------------------------------------------------------------
+  - { id: video.segment_s,        fixed: 4.0, type: f64, unit: s, doc: "One segment is due every segment." }
+  - { id: video.startup_segments, fixed: 3, type: u32, unit: segments, doc: "Fetched back to back to fill the buffer." }
+  - { id: video.bitrates_mbps,    choice: [1.5, 3.0, 5.0], unit: Mbit/s }
+  - { id: video.session_s,        uniform: { min: 60.0, max: 300.0 }, unit: s }
+  - { id: video.pause_s,          lognormal: { median: 30.0, sigma: 0.6, min: 5.0, max: 120.0 }, unit: s }
+
+  # --- social feed ----------------------------------------------------------
+  - { id: social.images_per_scroll, uniform: { min: 3.0, max: 9.0 }, unit: images }
+  - { id: social.image_bytes,       lognormal: { median: 120000.0, sigma: 0.8, min: 5000.0, max: 2000000.0 }, unit: B }
+  - { id: social.parallel,          fixed: 4, type: usize, unit: objects }
+  - { id: social.upload_p,          probability: 0.03, unit: per scroll }
+  - { id: social.upload_bytes,      lognormal: { median: 2500000.0, sigma: 0.4, min: 300000.0, max: 12000000.0 }, unit: B }
+  - { id: social.pause_s,           lognormal: { median: 4.0, sigma: 0.6, min: 1.0, max: 20.0 }, unit: s }
+
+  # --- mixed ----------------------------------------------------------------
+  - { id: mixed.mode, cumulative: [0.45, 0.80], unit: "web | social | video", doc: "Next mode: web below 0.45, social below 0.80, else video." }
+  - { id: mixed.mode_s, uniform: { min: 120.0, max: 300.0 }, unit: s }
+
+  # --- LLM replies (agent, websearch) ----------------------------------------
+  - { id: llm.sse_bytes_per_token, fixed: 47.0, type: f64, unit: B/token, doc: "Server-sent events carry ~3 tokens of text in a ~140 B event." }
+  - { id: llm.sse_event_bytes,     fixed: 140, type: u32, unit: B, doc: "Reply stream write size. The AI traffic plan reports ~310 B text events (observations: llm.text_event_bytes)." }
+  - { id: llm.reply_overhead_bytes, fixed: 1200.0, type: f64, unit: B, doc: "Headers and framing of a reply stream." }
+  - { id: llm.tokens_per_s,        uniform: { min: 40.0, max: 90.0 }, unit: tokens/s }
+  - { id: llm.context_bytes_per_token, fixed: 4, type: u64, unit: B/token, doc: "What a reply token adds to the context the next call sends (JSON text)." }
+
+  # --- agent ----------------------------------------------------------------
+  - { id: agent.reading_s,           lognormal: { median: 45.0, sigma: 0.7, min: 5.0, max: 300.0 }, unit: s, doc: "Between tasks: reading the answer, typing the next request." }
+  - { id: agent.turns,               lognormal: { median: 6.0, sigma: 0.6, min: 1.0, max: 30.0 }, unit: LLM calls }
+  - { id: agent.context_start_bytes, lognormal: { median: 12000.0, sigma: 0.4, min: 4000.0, max: 60000.0 }, unit: B, doc: "System prompt, tool definitions and the request." }
+  - { id: agent.reply_tokens,        lognormal: { median: 250.0, sigma: 0.9, min: 20.0, max: 3000.0 }, unit: tokens }
+  - { id: agent.ttft_s,              lognormal: { median: 0.9, sigma: 0.5, min: 0.25, max: 10.0 }, unit: s, doc: "Time to first token." }
+  - { id: agent.resume_s,            lognormal: { median: 0.5, sigma: 0.5, min: 0.1, max: 5.0 }, unit: s, doc: "Cloud tools: the provider resuming its reply after the tool results." }
+  - { id: agent.tools_per_turn,      cumulative: [0.6, 0.85], unit: "1 | 2 | 3-4 tools", doc: "One tool below 0.6, two below 0.85, else three or four." }
+  - { id: agent.tools_many,          int_range: { min: 3, max: 4 }, unit: tools }
+  - { id: agent.tool_result_max_bytes, fixed: 25000, type: u64, unit: B, status: project_choice, doc: "A tool result adds at most this much to the context." }
+  - { id: agent.tool_result_overhead_bytes, fixed: 300, type: u64, unit: B, doc: "Framing a tool result adds to the context." }
+  - { id: agent.compact_at_bytes,    fixed: 600000, type: u64, unit: B, doc: "Context compacted past this (~150k tokens), as coding agents do." }
+  - { id: agent.compact_to_bytes,    fixed: 60000, type: u64, unit: B }
+
+  # --- tools ----------------------------------------------------------------
+  - { id: tool.mcp_p,              probability: 0.5, unit: per tool call, doc: "An MCP call, else a web fetch." }
+  - { id: tool.mcp_up_bytes,       lognormal: { median: 1200.0, sigma: 0.6, min: 200.0, max: 20000.0 }, unit: B }
+  - { id: tool.mcp_latency_s,      lognormal: { median: 0.4, sigma: 0.8, min: 0.05, max: 10.0 }, unit: s }
+  - { id: tool.mcp_result_bytes,   lognormal: { median: 4000.0, sigma: 1.2, min: 200.0, max: 300000.0 }, unit: B }
+  - { id: tool.fetch_up_bytes,     fixed: 600, type: u64, unit: B, doc: "A GET with headers." }
+  - { id: tool.fetch_first_byte_s, lognormal: { median: 0.25, sigma: 0.6, min: 0.03, max: 3.0 }, unit: s }
+  - { id: tool.fetch_page_bytes,   lognormal: { median: 150000.0, sigma: 1.0, min: 5000.0, max: 3000000.0 }, unit: B }
+
+  # --- websearch ------------------------------------------------------------
+  - { id: websearch.reading_s,           lognormal: { median: 15.0, sigma: 0.7, min: 5.0, max: 60.0 }, unit: s }
+  - { id: websearch.context_start_bytes, lognormal: { median: 8000.0, sigma: 0.4, min: 3000.0, max: 30000.0 }, unit: B }
+  - { id: websearch.plan_tokens,         lognormal: { median: 120.0, sigma: 0.5, min: 30.0, max: 600.0 }, unit: tokens }
+  - { id: websearch.second_round_p,      probability: 0.3, unit: per task }
+  - { id: websearch.search_up_bytes,     fixed: 600, type: u64, unit: B }
+  - { id: websearch.search_latency_s,    lognormal: { median: 0.6, sigma: 0.5, min: 0.15, max: 4.0 }, unit: s }
+  - { id: websearch.search_result_bytes, lognormal: { median: 30000.0, sigma: 0.5, min: 5000.0, max: 200000.0 }, unit: B }
+  - { id: websearch.pages,               int_range: { min: 2, max: 6 }, unit: pages }
+  - { id: websearch.read_ttft_s,         lognormal: { median: 1.2, sigma: 0.5, min: 0.3, max: 12.0 }, unit: s, doc: "Time to first token of the call that reads the pages." }
+  - { id: websearch.answer_tokens,       lognormal: { median: 400.0, sigma: 0.6, min: 50.0, max: 3000.0 }, unit: tokens }
+  - { id: websearch.interim_tokens,      lognormal: { median: 100.0, sigma: 0.5, min: 20.0, max: 600.0 }, unit: tokens, doc: "A round that leads to another search." }
+  - { id: websearch.resume_ttft_factor,  fixed: 0.5, type: f64, unit: "×", doc: "Cloud placement: the resumed reply's first-token time against a new call's." }
+
+# Reported values not used by a model yet: anchors for calibration and for
+# the families still to come (planning/ai_traffic_implementation_plan.md
+# step 4). Trace each to its primary source before using it.
+observations:
+  - { id: llm.text_event_bytes,  value: 310, unit: B, status: reported, source: "planning/mobile_ai_traffic_generator_development_plan.md §11 (primary source to trace)", doc: "Downlink text event size of LLM streaming." }
+  - { id: tcp.ack_bytes,         value: 54, unit: B, status: reported, source: "planning/mobile_ai_traffic_generator_development_plan.md §11 (primary source to trace)", doc: "TCP ACKs beside a streamed reply." }
+  - { id: visual.period_s,       value: 3.9, unit: s, status: reported, source: "planning/mobile_ai_traffic_generator_development_plan.md §11 (primary source to trace)", doc: "Frame upload period of a visual assistant (F3)." }
+  - { id: agent.ul_dl_ratio,     value: "15-30", unit: "UL:DL", status: reported, source: "planning/mobile_ai_traffic_generator_development_plan.md §11 (primary source to trace)", doc: "F1 agentic: uplink bytes per downlink byte." }

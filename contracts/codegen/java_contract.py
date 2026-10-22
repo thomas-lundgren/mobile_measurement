@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate the Logger's wire constants (``Contract.java``) from contracts/.
 
-Sources: versions/versions.yaml, enums/enums.yaml, the string enums, object
+Sources: versions/versions.yaml, the app-traffic parameter set's version
+(app_traffic/parameters.yaml via app_params.py), enums/enums.yaml, the string enums, object
 property names and REST paths of openapi/openapi.yaml, the row keys of the parquet tables the Logger
 hands to the Rust core as JSON (gps, clock, radio), and
 internal/mp_probe.yaml. The output is committed; ``--check`` exits 1 when it
@@ -81,6 +82,13 @@ def generate() -> str:
         for k, v in (versions.get(section) or {}).items():
             t, val = java_value(v)
             lines.append(f"    public static final {t} {k.upper()} = {val};")
+    lines.append("")
+    # the app-traffic parameter set, written into header.json
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from app_params import params_version
+
+    lines.append("    // contracts/app_traffic/parameters.yaml (app_params.py)")
+    lines.append(f'    public static final String APP_PARAMS_VERSION = "{params_version()}";')
     lines.append("")
 
     # enums.yaml lists

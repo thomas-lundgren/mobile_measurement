@@ -38,6 +38,7 @@ public class WireTest {
             assertTrue(Contracts.same(h.get("test_plan"), payload.get("test_plan")));
             assertTrue(Contracts.same(h.get("flow_bindings"), payload.get("flow_bindings")));
             assertEquals(Contract.SCHEMA_VERSION, h.getInt("schema_version"));
+            assertEquals(Contract.APP_PARAMS_VERSION, h.getString("app_params_version"));
         }
     }
 
