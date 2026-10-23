@@ -51,6 +51,15 @@ public final class LoggerService extends Service {
     private JSONObject loggingConfig; // latest server-pushed config (SET_LOGGING_CONFIG)
     private ReachabilityChecker reach;
     private android.net.ConnectivityManager.NetworkCallback networkWatch;
+    private volatile StatusReporter statusReporter;
+
+    /** Command long poll: the server holds each poll up to this long, so an
+     *  idle Logger asks about once per POLL_WAIT_S yet a test starts at once. */
+    static final int POLL_WAIT_S = 90;
+    /** Idle status cadence; a network or serving-cell change is sent at once. */
+    private static final long STATUS_IDLE_MS = 100_000;
+    /** How often the network and serving cell are looked at (locally). */
+    private static final long STATUS_CHECK_MS = 15_000;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -143,6 +152,10 @@ public final class LoggerService extends Service {
                     ServerClient.dropConnections();
                     if (uploads != null) {
                         uploads.networkChanged();
+                    }
+                    StatusReporter st = statusReporter;
+                    if (st != null) {
+                        st.poke();
                     }
                 }
                 current = network;
@@ -291,29 +304,107 @@ public final class LoggerService extends Service {
         }
     }
 
-    /** Poll/status cadence. Any request exception propagates to the reconnect
+    /** Command long poll; status goes out from its own thread
+     *  ({@link StatusReporter}). Any poll exception propagates to the reconnect
      *  loop (which re-authenticates after backoff). Returns only when stopping. */
     private void pollLoop(ServerClient client, String session, String deviceId) throws Exception {
-        long lastStatus = 0;
-        while (running) {
-            JSONObject cmd = client.pollCommand(session, deviceId);
-            String command = cmd != null ? cmd.optString(Contract.Fields.DeviceCommand.COMMAND) : "";
-            if (Contract.Commands.RUN_TEST.equals(command)) {
-                runTest(client, session, deviceId, cmd);
-            } else if (Contract.Commands.SET_LOGGING_CONFIG.equals(command)) {
-                applyLoggingConfig(client, session, deviceId, cmd);
-            } else {
-                Thread.sleep(2000);
+        StatusReporter status = new StatusReporter(client, session, deviceId);
+        statusReporter = status;
+        status.start();
+        try {
+            while (running) {
+                long asked = System.currentTimeMillis();
+                JSONObject cmd = client.pollCommand(session, deviceId, POLL_WAIT_S);
+                String command = cmd != null ? cmd.optString(Contract.Fields.DeviceCommand.COMMAND) : "";
+                if (Contract.Commands.RUN_TEST.equals(command)) {
+                    runTest(client, session, deviceId, cmd);
+                } else if (Contract.Commands.SET_LOGGING_CONFIG.equals(command)) {
+                    applyLoggingConfig(client, session, deviceId, cmd);
+                } else if (System.currentTimeMillis() - asked < 2000) {
+                    Thread.sleep(2000);  // a server without long polling answers at once
+                }
             }
-            if (System.currentTimeMillis() - lastStatus > 5000) {
-                postStatus(client, session, deviceId, null);
-                lastStatus = System.currentTimeMillis();
-                ReachabilityChecker r = reach;
-                if (r != null) {
-                    r.flush(client, session, deviceId);  // reports from networks the server could not be reached on
+        } finally {
+            status.stop();
+            statusReporter = null;
+        }
+    }
+
+    /** Status to the server when the Logger state, the network or the serving cell changes
+     *  (looked at every STATUS_CHECK_MS, and at once on a network change) and
+     *  otherwise every STATUS_IDLE_MS: the server sees each cell and the moment
+     *  the phone leaves Wi-Fi (the commute trigger), without a report every
+     *  few seconds. */
+    private final class StatusReporter {
+        private final Thread thread;
+        private final Object wake = new Object();
+        private volatile boolean stopped;
+
+        StatusReporter(ServerClient client, String session, String deviceId) {
+            thread = new Thread(() -> loop(client, session, deviceId), "mp-status");
+        }
+
+        void start() {
+            thread.start();
+        }
+
+        void stop() {
+            stopped = true;
+            thread.interrupt();
+        }
+
+        void poke() {
+            synchronized (wake) {
+                wake.notifyAll();
+            }
+        }
+
+        private void loop(ServerClient client, String session, String deviceId) {
+            String last = null;
+            long lastPost = 0;
+            while (running && !stopped) {
+                String place = place();
+                long now = System.currentTimeMillis();
+                if (!place.equals(last) || now - lastPost >= STATUS_IDLE_MS) {
+                    postStatus(client, session, deviceId, null);
+                    ReachabilityChecker r = reach;
+                    if (r != null) {
+                        r.flush(client, session, deviceId);  // reports from networks the server could not be reached on
+                    }
+                    last = place;
+                    lastPost = now;
+                }
+                try {
+                    synchronized (wake) {
+                        wake.wait(STATUS_CHECK_MS);
+                    }
+                } catch (InterruptedException e) {
+                    return;
                 }
             }
         }
+    }
+
+    /** The Logger state, the default network's transport and the serving
+     *  cell, as a change key. */
+    private String place() {
+        String transport = "-";
+        try {
+            android.net.ConnectivityManager cm =
+                    (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            android.net.NetworkCapabilities caps = cm.getNetworkCapabilities(cm.getActiveNetwork());
+            if (caps != null) {
+                transport = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+                        ? Contract.NetworkTransport.WIFI
+                        : caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)
+                        ? Contract.NetworkTransport.CELLULAR : "other";
+            }
+        } catch (RuntimeException ignored) {
+        }
+        JSONObject cell = RadioSampler.serving(this);
+        String key = STATE + " " + transport;
+        return cell == null ? key
+                : key + " " + cell.optString(Contract.RadioRow.PCI) + "/" + cell.optString(Contract.RadioRow.NCI);
     }
 
     /** Apply a server-pushed logging config: adopt its version and ack. The
@@ -574,6 +665,10 @@ public final class LoggerService extends Service {
         STATE = s;
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         nm.notify(1, notification(s));
+        StatusReporter st = statusReporter;
+        if (st != null) {
+            st.poke();  // the scripts wait for IDLE after a test
+        }
     }
 
     private Notification notification(String text) {

@@ -147,6 +147,17 @@ def generate() -> str:
             if isinstance(op, dict) and op.get("operationId"):
                 lines.append(f"        /** {method.upper()} */")
                 lines.append(f'        public static final String {const_name(op["operationId"])} = "{path}";')
+    query = sorted({
+        p["name"]
+        for ops in openapi["paths"].values()
+        for op in ops.values()
+        if isinstance(op, dict)
+        for p in op.get("parameters", [])
+        if p.get("in") == "query"
+    })
+    lines += ["", "        /** Query parameter names. */", "        public static final class Query {", "            private Query() {}", ""]
+    lines += [f'            public static final String {const_name(q)} = "{q}";' for q in query]
+    lines += ["        }"]
     lines += [
         "",
         "        /** The template with each {param} replaced by the next argument. */",

@@ -34,6 +34,9 @@ DATA = os.path.expanduser("~/mp-data")
 DEVICE = "dev_01M588ENHCVDGS8DZ9B5JCN7EP"
 WINDOWS = {"am": ("06:30", "09:30"), "pm": ("15:00", "19:00")}  # Mon–Fri
 SAMPLE_S = 15
+# A status counts while younger than this: the Logger reports every 100 s when
+# idle and at once when its state, network or serving cell changes.
+FRESH_S = 300
 LEFT_HOME_MIN = 15
 MOVING_CELLS, MOVING_MIN = 3, 5
 AWAY_MIN = 60
@@ -104,7 +107,7 @@ def main():
         state, age, cell = status()
         net = network()
         t = time.time()
-        if age is not None and age < 30 and net:
+        if age is not None and age < FRESH_S and net:
             with open(samples_path, "a") as f:
                 f.write(f"{int(t)} {net} {cell or '-'}\n")
             if cell != last_cell:
@@ -118,7 +121,7 @@ def main():
                 if len(p) == 3 and t - int(p[0]) < AWAY_MIN * 60:
                     samples.append((int(p[0]), p[1], p[2]))
 
-        fresh = age is not None and age < 30
+        fresh = age is not None and age < FRESH_S
         reason = None
         if fresh and state == "IDLE" and net == "remote":
             if win == "am" and any(n == "local" and t - s < LEFT_HOME_MIN * 60 for s, n, _ in samples):

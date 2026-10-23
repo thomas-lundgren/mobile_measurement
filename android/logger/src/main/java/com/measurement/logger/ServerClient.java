@@ -39,6 +39,13 @@ public final class ServerClient {
             .writeTimeout(60, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build();
+    /** Command long polls: the server holds each up to {@code wait_s}. */
+    private static final OkHttpClient pollHttp = http.newBuilder()
+            .callTimeout(LoggerService.POLL_WAIT_S + 30L, TimeUnit.SECONDS)
+            .readTimeout(LoggerService.POLL_WAIT_S + 30L, TimeUnit.SECONDS)
+            .build();
+    /** The long poll in flight, cancelled when the network changes. */
+    private static volatile okhttp3.Call poll;
 
     public ServerClient(String base) {
         this.base = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
@@ -46,9 +53,15 @@ public final class ServerClient {
 
     /** The default network changed (e.g. back on Wi-Fi): close the pooled
      *  connections so the next request goes out over the new network. The
-     *  2 s command poll would otherwise keep the old (mobile) connection alive
-     *  for good, and the server would keep holding uploads as "not home". */
+     *  command polls would otherwise keep the old (mobile) connection alive
+     *  for good, and the server would keep holding uploads as "not home". The
+     *  long poll in flight is cancelled too: it would otherwise sit on the dead
+     *  network until its timeout, holding back a command meanwhile. */
     static void dropConnections() {
+        okhttp3.Call c = poll;
+        if (c != null) {
+            c.cancel();
+        }
         http.connectionPool().evictAll();
     }
 
@@ -72,19 +85,27 @@ public final class ServerClient {
 
     // --- command queue + status ---
 
-    /** Oldest pending command, or null on 204. */
+    /** Oldest pending command, or null on 204 — the server holds the request
+     *  up to {@code waitS} seconds for one to arrive (long poll). */
     @Nullable
-    public JSONObject pollCommand(String session, String deviceId) throws Exception {
+    public JSONObject pollCommand(String session, String deviceId, int waitS) throws Exception {
         Request req = new Request.Builder()
-                .url(base + Contract.Api.path(Contract.Api.POLL_COMMAND, deviceId))
+                .url(okhttp3.HttpUrl.get(base + Contract.Api.path(Contract.Api.POLL_COMMAND, deviceId))
+                        .newBuilder()
+                        .addQueryParameter(Contract.Api.Query.WAIT_S, Integer.toString(waitS))
+                        .build())
                 .header("Authorization", "Bearer " + session)
                 .get()
                 .build();
-        try (Response r = http.newCall(req).execute()) {
+        okhttp3.Call call = pollHttp.newCall(req);
+        poll = call;
+        try (Response r = call.execute()) {
             if (r.code() == 204) {
                 return null;
             }
             return new JSONObject(bodyString(r));
+        } finally {
+            poll = null;
         }
     }
 

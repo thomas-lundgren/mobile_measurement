@@ -16,7 +16,9 @@ if [[ $(date +%s) -ge $(date -d "$STOP_AT" +%s) ]]; then
     exit 0
 fi
 
-# Phone must be IDLE and have reported recently. Prints the reason if not.
+# Phone must be IDLE and have reported recently (the Logger reports every
+# 100 s when idle, at once on a state, network or cell change). Prints the
+# reason if not.
 phone_ready() {
     local state age
     read -r state age < <(python3 - "$DATA/mp.db" "$DEVICE" <<'EOF'
@@ -26,7 +28,7 @@ r = c.execute("select logger_state, received_at from device_status where device_
 print(r[0], round(time.time() - r[1] / 1e9)) if r else print("UNKNOWN", -1)
 EOF
 )
-    if [[ "$state" != "IDLE" || "$age" -lt 0 || "$age" -gt 120 ]]; then
+    if [[ "$state" != "IDLE" || "$age" -lt 0 || "$age" -gt 300 ]]; then
         echo "phone state=$state last_report=${age}s ago"
         return 1
     fi

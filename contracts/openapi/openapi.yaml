@@ -136,6 +136,18 @@ paths:
         required: true
         schema:
           type: string
+      - name: wait_s
+        in: query
+        description: |-
+          Long poll: hold the request up to this many seconds (capped at 120)
+          until a command is queued, instead of answering 204 at once. A test
+          then starts as soon as it is queued while an idle device asks about
+          once per `wait_s`.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: ''

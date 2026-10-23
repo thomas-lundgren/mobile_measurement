@@ -2,7 +2,7 @@
 //! command poll/ack, status, reachability reports. Identity is always the token's device; a path
 //! `{device_id}` that disagrees is rejected.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -94,19 +94,46 @@ pub async fn register(
     Ok(Json(resolve_effective_config(&cap, version as u32)))
 }
 
+/// Longest a command poll is held open (`wait_s` is capped to this).
+pub const MAX_POLL_WAIT_S: u32 = 120;
+/// How often a held poll looks for a new command.
+const POLL_RECHECK: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Query of the command poll.
+#[derive(Debug, Default, serde::Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct PollParams {
+    /// Long poll: hold the request up to this many seconds (capped at 120)
+    /// until a command is queued, instead of answering 204 at once. A test
+    /// then starts as soon as it is queued while an idle device asks about
+    /// once per `wait_s`.
+    pub wait_s: Option<u32>,
+}
+
 #[utoipa::path(
     get, path = "/api/v1/devices/{device_id}/command", tag = "device",
-    params(("device_id" = String, Path)),
+    params(("device_id" = String, Path), PollParams),
     responses((status = 200, body = DeviceCommand), (status = 204), (status = 401))
 )]
 pub async fn poll_command(
     State(st): State<AppState>,
     headers: HeaderMap,
     Path(device_id): Path<String>,
+    Query(params): Query<PollParams>,
 ) -> Result<Response, AppError> {
     let device_id = authed_for(&st, &headers, Some(&device_id)).await?;
 
-    match commands::next_pending(&st.pool, &device_id).await? {
+    let wait =
+        std::time::Duration::from_secs(params.wait_s.unwrap_or(0).min(MAX_POLL_WAIT_S).into());
+    let deadline = tokio::time::Instant::now() + wait;
+    let next = loop {
+        let next = commands::next_pending(&st.pool, &device_id).await?;
+        if next.is_some() || tokio::time::Instant::now() + POLL_RECHECK > deadline {
+            break next;
+        }
+        tokio::time::sleep(POLL_RECHECK).await;
+    };
+    match next {
         None => Ok(StatusCode::NO_CONTENT.into_response()),
         Some((command_id, wire, payload_json)) => {
             let command: Command = serde_json::from_value(serde_json::Value::String(wire))

@@ -491,8 +491,12 @@ Response: `200 OK` with the `logging_config` object.
 #### Poll Commands
 
 ```http
-GET /api/v1/devices/{device_id}/command
+GET /api/v1/devices/{device_id}/command?wait_s=90
 ```
+
+Long poll (Oct 2026): with `wait_s` the server holds the request up to that
+many seconds (capped at 120) and answers as soon as a command is queued;
+without it, `204` at once.
 
 #### Device Status
 
@@ -969,7 +973,13 @@ logger-app
 
 ### Command Polling
 
-The Logger polls for commands.
+The Logger long-polls for commands (`wait_s=90`): a test starts as soon as it
+is queued, while an idle Logger makes about one request per 90 s. Status goes
+out when the Logger state, the default network or the serving cell changes
+(looked at every 15 s locally, and at once on a network or state change) and
+otherwise every 100 s — the server still sees every cell and the moment the
+phone leaves home Wi-Fi (commute trigger), at a few MB of idle traffic per day
+instead of ~30 MB (2 s polls, 5 s status).
 
 Example:
 

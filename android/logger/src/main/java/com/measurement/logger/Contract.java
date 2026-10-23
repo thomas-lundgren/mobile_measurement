@@ -1093,6 +1093,13 @@ public final class Contract {
         /** GET */
         public static final String SERVER_TIME = "/api/v1/time";
 
+        /** Query parameter names. */
+        public static final class Query {
+            private Query() {}
+
+            public static final String WAIT_S = "wait_s";
+        }
+
         /** The template with each {param} replaced by the next argument. */
         public static String path(String template, Object... args) {
             StringBuilder sb = new StringBuilder();

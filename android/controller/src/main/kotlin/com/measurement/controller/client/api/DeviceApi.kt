@@ -125,6 +125,7 @@ class DeviceApi(basePath: kotlin.String = defaultBasePath, client: Call.Factory 
      * 
      * 
      * @param deviceId 
+     * @param waitS Long poll: hold the request up to this many seconds (capped at 120) until a command is queued, instead of answering 204 at once. A test then starts as soon as it is queued while an idle device asks about once per &#x60;wait_s&#x60;. (optional)
      * @return DeviceCommand
      * @throws IllegalStateException If the request is not correctly configured
      * @throws IOException Rethrows the OkHttp execute method exception
@@ -134,8 +135,8 @@ class DeviceApi(basePath: kotlin.String = defaultBasePath, client: Call.Factory 
      */
     @Suppress("UNCHECKED_CAST")
     @Throws(IllegalStateException::class, IOException::class, UnsupportedOperationException::class, ClientException::class, ServerException::class)
-    fun pollCommand(deviceId: kotlin.String) : DeviceCommand {
-        val localVarResponse = pollCommandWithHttpInfo(deviceId = deviceId)
+    fun pollCommand(deviceId: kotlin.String, waitS: kotlin.Int? = null) : DeviceCommand {
+        val localVarResponse = pollCommandWithHttpInfo(deviceId = deviceId, waitS = waitS)
 
         return when (localVarResponse.responseType) {
             ResponseType.Success -> (localVarResponse as Success<*>).data as DeviceCommand
@@ -156,14 +157,15 @@ class DeviceApi(basePath: kotlin.String = defaultBasePath, client: Call.Factory 
      * 
      * 
      * @param deviceId 
+     * @param waitS Long poll: hold the request up to this many seconds (capped at 120) until a command is queued, instead of answering 204 at once. A test then starts as soon as it is queued while an idle device asks about once per &#x60;wait_s&#x60;. (optional)
      * @return ApiResponse<DeviceCommand?>
      * @throws IllegalStateException If the request is not correctly configured
      * @throws IOException Rethrows the OkHttp execute method exception
      */
     @Suppress("UNCHECKED_CAST")
     @Throws(IllegalStateException::class, IOException::class)
-    fun pollCommandWithHttpInfo(deviceId: kotlin.String) : ApiResponse<DeviceCommand?> {
-        val localVariableConfig = pollCommandRequestConfig(deviceId = deviceId)
+    fun pollCommandWithHttpInfo(deviceId: kotlin.String, waitS: kotlin.Int?) : ApiResponse<DeviceCommand?> {
+        val localVariableConfig = pollCommandRequestConfig(deviceId = deviceId, waitS = waitS)
 
         return request<Unit, DeviceCommand>(
             localVariableConfig
@@ -174,11 +176,17 @@ class DeviceApi(basePath: kotlin.String = defaultBasePath, client: Call.Factory 
      * To obtain the request config of the operation pollCommand
      *
      * @param deviceId 
+     * @param waitS Long poll: hold the request up to this many seconds (capped at 120) until a command is queued, instead of answering 204 at once. A test then starts as soon as it is queued while an idle device asks about once per &#x60;wait_s&#x60;. (optional)
      * @return RequestConfig
      */
-    fun pollCommandRequestConfig(deviceId: kotlin.String) : RequestConfig<Unit> {
+    fun pollCommandRequestConfig(deviceId: kotlin.String, waitS: kotlin.Int?) : RequestConfig<Unit> {
         val localVariableBody = null
-        val localVariableQuery: MultiValueMap = mutableMapOf()
+        val localVariableQuery: MultiValueMap = mutableMapOf<kotlin.String, kotlin.collections.List<kotlin.String>>()
+            .apply {
+                if (waitS != null) {
+                    put("wait_s", listOf(waitS.toString()))
+                }
+            }
         val localVariableHeaders: MutableMap<String, String> = mutableMapOf()
         localVariableHeaders["Accept"] = "application/json"
 

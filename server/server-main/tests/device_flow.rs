@@ -353,3 +353,46 @@ async fn reachability_report_is_stored_and_listed_for_operators() {
     assert_eq!(got["network"]["wifi_ssid"], "Office-Guest");
     assert_eq!(got["checks"][1]["seen_as"], "34.79.46.191:33444");
 }
+
+#[tokio::test]
+async fn long_poll_answers_when_a_command_is_queued() {
+    let st = state().await;
+    let (device_id, session) = enrolled_session(&st).await;
+    let path = format!("/api/v1/devices/{device_id}/command?wait_s=10");
+
+    // nothing queued: held for the wait, then 204
+    let t = std::time::Instant::now();
+    let (s, _) = send(
+        &st,
+        "GET",
+        &format!("/api/v1/devices/{device_id}/command?wait_s=1"),
+        Some(&session),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    assert!(
+        t.elapsed() >= std::time::Duration::from_millis(500),
+        "{:?}",
+        t.elapsed()
+    );
+
+    // queued while held: answered at once, not at the end of the wait
+    let pool = st.pool.clone();
+    let id = device_id.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+        commands::enqueue(&pool, &id, Command::RequestStatus, None)
+            .await
+            .unwrap();
+    });
+    let t = std::time::Instant::now();
+    let (s, body) = send(&st, "GET", &path, Some(&session), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["command"], "REQUEST_STATUS");
+    assert!(
+        t.elapsed() < std::time::Duration::from_secs(3),
+        "{:?}",
+        t.elapsed()
+    );
+}
