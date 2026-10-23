@@ -3,6 +3,22 @@
 A distributed measurement platform for real-world mobile-network (4G/5G)
 experiments.
 
+![What a real phone feels on a live 5G network — and why](docs/slides/01_cover.png)
+
+![Head-of-line blocking, caught in the uplink](docs/slides/02_hol.png)
+
+![Every sample on the map, every cell on the timeline](docs/slides/03_map.png)
+
+![Hidden interface frequencies](docs/slides/04_freq.png)
+
+![AI agents, chat and video Q&A — generated and measured](docs/slides/05_agents.png)
+
+![One engine on both ends, one source for every contract](docs/slides/06_build.png)
+
+<sub>Screenshots from the live system (a Pixel 9 Pro and a home server, October 2026). The
+phone screens are shown in a drawn Pixel-style frame; server addresses, IDs and the map
+location are masked or trimmed.</sub>
+
 ## Purpose
 
 Characterise how a live mobile network actually behaves *in the field*. An
