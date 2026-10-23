@@ -46,6 +46,24 @@ its impact on the realtime streams). Rebuilt every 5 minutes by
 - The Logger writes `header.json` (exact plan, bindings, versions) at test
   start; analysis reads the plan from it, the server DB only for older tests.
 
+**App-traffic layering and AI families (Oct 21–22):** steps A–E3 of
+`planning/app_workload_layering.md` done. E3: test-control captures headers
+of the bulk and app ports per test (`server/capture.pcap.gz`, tcpdump with
+`CAP_NET_RAW`); findings table "TCP on the wire". First field runs of chat,
+visual, image generation and video understanding (walk, Oct 22).
+Calibration: almost every app-traffic parameter is still an `unverified`
+estimate; `fieldtest_analysis.tls_trace` turns a headers-only capture of a
+real app's TLS traffic into request/reply evidence (request bytes, first
+byte, reply record sizes and gaps, UL:DL) to verify them, files in
+`~/mp-data/evidence/`.
+
+**Idle traffic (Oct 23):** command long poll (`wait_s=90`) and status on
+change or every 100 s: an idle Logger uses ~2 MB/day (was ~30 MB/day).
+
+**Known field issue:** from the home Wi-Fi only port 41000 reaches the
+server through the router's hairpin (41001+ dropped, Oct 22); app tests at
+home fail, mobile data is fine.
+
 **Next:** over-the-air Logger updates and versioned logs
 (`planning/ota_and_versioning_plan.md`, parked); the user's AI-traffic plan
 (`planning/mobile_ai_traffic_generator_development_plan.md`).
