@@ -31,8 +31,8 @@ DSCP transparency, and handover behaviour does this network deliver, at this
 place, at this time — and how does that correlate with GPS and radio
 metrics?**
 
-> Status: end-to-end MVP across all planned phases, verified on a physical
-> Pixel 9 Pro over USB and LAN. See [`ROADMAP.md`](ROADMAP.md) for the phase
+> Status: running live — a home server and a Pixel 9 Pro measuring on walks,
+> bike rides, drives and commutes (automatic commute trigger). See [`ROADMAP.md`](ROADMAP.md) for the phase
 > plan and [`STATUS.md`](STATUS.md) for point-in-time progress.
 
 ## Architecture
@@ -48,8 +48,10 @@ Controller (Android, Kotlin)  ──▶  server-main  ──▶  test-control  �
 
 - **Linux server** (Rust): `server-main` (REST, registry, command queue,
   SQLite, uploads), `test-control` (scheduler, port allocation, generator
-  coordination), `data-generator(s)` (UDP probe, realtime UDP, bulk TCP,
-  DSCP probe echo).
+  coordination, per-test packet capture), `data-generator(s)` (the server
+  side of every flow: probe and DSCP-probe echo, realtime UDP, bulk TCP,
+  and the app-traffic server for request/response objects and paced UDP
+  bursts).
 - **Android Logger** — autonomous measurement client; foreground service
   drives the shared Rust core via JNI, samples GPS/radio, uploads sealed
   logs. Talks only to `server-main`.
@@ -65,13 +67,46 @@ Controller (Android, Kotlin)  ──▶  server-main  ──▶  test-control  �
 | Flow            | Direction(s)              | Measures                                                         |
 |-----------------|---------------------------|------------------------------------------------------------------|
 | `probe`         | bidirectional echo        | RTT, jitter, packet loss; cheap heartbeat                        |
-| `realtime_udp`  | `FromServer` / `ToServer` | one-way delay, inter-arrival jitter, loss at fixed PPS           |
-| `bulk_tcp`      | `FromServer` / `ToServer` | sustained throughput (UL or DL) with per-chunk arrival logging   |
+| `realtime_udp`  | `FromServer` / `ToServer` | one-way delay, inter-arrival jitter, loss at fixed PPS (1 ms streams; socket buffer settable) |
+| `bulk_tcp`      | `FromServer` / `ToServer` | sustained throughput (UL or DL) with per-chunk arrival logging; optional rate cap and byte target (head-of-line tests) |
+| `app_traffic`   | both                      | simulated users and AI agents: per-task and per-object timing, completion, and their impact on the realtime streams |
 | `gateway_ping`  | local (UE → first hop)    | first-hop latency to the auto-discovered gateway (rmnet / wlan)  |
 | `dscp_probe`    | bidirectional, marked     | DSCP transparency UL and DL independently (which bits survive)   |
 
 Both endpoints log every flow into per-packet Parquet with embedded sender
 timestamps, so OWD and jitter can be reconstructed offline.
+
+### Application traffic (`app_traffic`)
+
+Simulated users built in layers: a **workload model** decides what to move
+and when (no sockets), a **scheduler** runs it open- or closed-loop with
+dependencies, and shared **traffic engines** move the bytes. Every planned
+object is logged (`app_events.parquet`) next to what the network did with it.
+
+| Profile | What a user does |
+|---------|------------------|
+| `web` | page views: HTML, then 5–120 objects over 6 connections, then reading |
+| `mail` | periodic syncs, sometimes an attachment or a sent mail |
+| `video` | 4 s segments at 1.5 / 3 / 5 Mbit/s, sessions of 1–5 min |
+| `social` | feed images in bursts with short pauses, now and then a photo upload |
+| `mixed` | switches between web, social and video every 2–5 min, mail in the background |
+| `agent` | an AI agent: LLM calls with streamed replies, tool and MCP calls, web fetches, a growing context |
+| `websearch` | an agent answering by web search: a task graph of searches, fetches and LLM calls |
+| `chat` | LLM conversations: prompts up, token streams down |
+| `visual` | a camera assistant: a frame up every 3.9 s, short streamed answers down |
+| `image_gen` | a prompt up, previews and a 0.5–3 MB image streamed down over 5–30 s |
+| `video_understanding` | a 5–50 MB clip up with a question, a streamed answer down |
+| `script` | a scripted timeline (e.g. written by an AI playing a user) |
+
+Options per flow: `workers` (concurrent users), `seed` (repeatable runs),
+`scale` (shrink object sizes to save data, timing unchanged), `placement` for
+agents (tools on the `device`, in the `cloud`, or `hybrid`), `loop` (`closed`,
+or `open` with tasks arriving every `task_interval_s`), `engines` per activity
+(`exchange` on pooled connections, `bulk` on a connection of its own, or
+`udp_burst` paced datagrams) and `dscp` marking per activity. Every number
+the models draw from lives in one registry
+([`contracts/app_traffic/parameters.yaml`](contracts/app_traffic/parameters.yaml))
+with its source and status; its version is written into each test's header.
 
 ### Derived metrics (`analysis/`)
 
@@ -79,6 +114,12 @@ timestamps, so OWD and jitter can be reconstructed offline.
 - **One-way delay** with explicit clock-uncertainty bounds (`realtime_udp`)
 - **Packet loss** and sequence-gap analysis (any UDP flow)
 - **Throughput** p50/p95 (`bulk_tcp`)
+- **App tasks** — finished/started, task time, per-object wait, think time vs
+  first byte, open-loop drops, and the extra delay apps cause on realtime
+  streams (`app_traffic`)
+- **Delivery timing** — kernel receive times, stalls (link pauses vs
+  congestion), arrival-time spectra ("hidden interface frequencies"),
+  uplink saturation and modem back pressure
 - **DSCP transparency matrix** (preserved / remarked / stripped, UL and DL)
 - **Handover / coverage-gap / band-change events** — derived post-hoc from
   `radio.parquet` (PCI/NCI/band transitions), not logged live
@@ -90,6 +131,11 @@ timestamps, so OWD and jitter can be reconstructed offline.
   neighbor cells, LTE fallback (`radio.parquet`)
 - **Clock-sync samples** — mono ↔ utc ↔ gps offsets, the OWD uncertainty
   input (`clock.parquet`)
+- **Modem view** — `mp-probe`, an adb-started collector on the phone: modem
+  queue (qdisc) stats, UDP counters and radio-log events (`probe.jsonl.gz`)
+- **Wire view (server)** — headers-only packet capture of each test's bulk
+  and app ports (`server/capture.pcap.gz`): segment and ACK sizes,
+  retransmissions, server-side RTT, DSCP that arrived
 
 ### Modes
 
@@ -107,6 +153,11 @@ timestamps, so OWD and jitter can be reconstructed offline.
 - Resumable upload with per-file SHA-256 manifests
 - Forward-compatible logs — additive-only, unknown fields tolerated
 - Operator REST client generated from the OpenAPI contract
+- Low idle cost — command long poll and status on change: ~2 MB/day per
+  idle phone
+- Calibration tooling — `fieldtest_analysis.tls_trace` turns a headers-only
+  capture of a real app's TLS traffic into request/reply evidence for the
+  model parameters
 
 ## Design philosophy: one source
 
